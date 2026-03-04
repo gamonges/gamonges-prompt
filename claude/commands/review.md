@@ -37,7 +37,7 @@ Rules:
 
 ## Subagent Output Template
 
-Each subagent MUST write its review to `./tmp/{agent-name}-review.md` using this structure:
+Each subagent MUST write its review to `./tmp/review/{agent-name}-review.md` using this structure:
 
 ```markdown
 # {Agent Name} Review — PR #{number}
@@ -189,7 +189,7 @@ full_diff=$(git diff "${base_branch}...HEAD")
 
 1. **Collect Agent Outputs**
    - Wait for all subagents to complete
-   - Read each `./tmp/{agent}-review.md` for custom agents
+   - Read each `./tmp/review/{agent}-review.md` for custom agents
    - For the built-in **code-reviewer**, capture its Task response directly (it does not write to a file)
 
 2. **Deduplicate Findings**
@@ -207,7 +207,13 @@ full_diff=$(git diff "${base_branch}...HEAD")
 
 ### Phase 6: Generate Unified Report
 
-Write `./tmp/review.md` using the following template:
+Create the output directory and write the unified report:
+
+```bash
+mkdir -p ./tmp/review
+```
+
+Write `./tmp/review/unified.md` using the following template:
 
 ```markdown
 # コードレビューレポート
@@ -295,4 +301,4 @@ Provide summary to user:
 
 - Number of Critical / Minor / Info findings
 - Top priority items to fix next
-- List of output files (`./tmp/review.md` and individual `./tmp/*-review.md`)
+- List of output files (`./tmp/review/unified.md` and individual `./tmp/review/*-review.md`)
