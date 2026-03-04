@@ -15,6 +15,8 @@ user-invocable: false
 
 `~/.local/share/claude/memories/`
 
+> **WARNING**: `.claude/projects/.../memory/` (auto memory) は別の仕組み。このスキルでは必ず上記パスを使用すること。
+
 ## 保存すべき内容
 
 - 調査で得た知見
