@@ -76,6 +76,31 @@ init_claude_dir() {
     fi
 }
 
+# Scripts のインストール
+install_scripts() {
+    log_info "Scripts をインストールしています..."
+    local scripts_dir="${SCRIPT_DIR}/claude/scripts"
+    local target_dir="${CLAUDE_DIR}/scripts"
+    mkdir -p "$target_dir"
+
+    local count=0
+    for script in "$scripts_dir"/*.sh; do
+        [ -f "$script" ] || continue
+        local name=$(basename "$script")
+        local target_link="${target_dir}/${name}"
+
+        if [[ -L "$target_link" ]]; then
+            rm "$target_link"
+        fi
+
+        ln -s "$script" "$target_link"
+        chmod +x "$script"
+        log_success "  ✓ ${name}"
+        ((count++))
+    done
+    log_info "Scripts: ${count} 件インストール完了"
+}
+
 # Skills のインストール
 install_skills() {
     log_info "Skills をインストールしています..."
@@ -271,6 +296,8 @@ main() {
         install)
             check_source_dirs
             init_claude_dir
+            install_scripts
+            echo ""
             install_skills
             echo ""
             install_subagents
