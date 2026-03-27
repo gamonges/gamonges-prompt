@@ -84,7 +84,7 @@ install_scripts() {
     mkdir -p "$target_dir"
 
     local count=0
-    for script in "$scripts_dir"/*.sh; do
+    for script in "$scripts_dir"/*.sh "$scripts_dir"/*.py; do
         [ -f "$script" ] || continue
         local name=$(basename "$script")
         local target_link="${target_dir}/${name}"
@@ -165,7 +165,7 @@ install_subagents() {
 
 # アンインストール
 uninstall() {
-    log_info "インストールされた Skills と SubAgents を削除しています..."
+    log_info "インストールされた Scripts, Skills, SubAgents を削除しています..."
 
     # Skills の削除
     local skills_count=0
@@ -207,17 +207,68 @@ uninstall() {
         fi
     done < <(find "$REPO_SUBAGENTS_DIR" -name "*.md" -type f -print0)
 
-    log_info "削除完了 - Skills: ${skills_count} 件, SubAgents: ${subagents_count} 件"
+    # Scripts の削除
+    local scripts_dir="${SCRIPT_DIR}/claude/scripts"
+    local scripts_target_dir="${CLAUDE_DIR}/scripts"
+    local scripts_count=0
+    for script in "$scripts_dir"/*.sh "$scripts_dir"/*.py; do
+        [ -f "$script" ] || continue
+        local name=$(basename "$script")
+        local target_link="${scripts_target_dir}/${name}"
+
+        if [[ -L "$target_link" ]]; then
+            local link_target=$(readlink "$target_link")
+            if [[ "$link_target" == "$script" ]]; then
+                rm "$target_link"
+                log_success "  ✓ 削除: ${name}"
+                ((scripts_count++))
+            fi
+        fi
+    done
+
+    log_info "削除完了 - Scripts: ${scripts_count} 件, Skills: ${skills_count} 件, SubAgents: ${subagents_count} 件"
 }
 
 # 状態表示
 show_status() {
     echo ""
     echo "=========================================="
-    echo "  Claude Skills & SubAgents 状態"
+    echo "  Claude Scripts, Skills & SubAgents 状態"
     echo "=========================================="
     echo ""
 
+    local scripts_dir="${SCRIPT_DIR}/claude/scripts"
+    local scripts_target_dir="${CLAUDE_DIR}/scripts"
+    echo -e "${BLUE}[Scripts]${NC} (${scripts_target_dir})"
+    if [[ -d "$scripts_target_dir" ]]; then
+        local has_scripts=false
+        for script in "$scripts_dir"/*.sh "$scripts_dir"/*.py; do
+            [ -f "$script" ] || continue
+            local name=$(basename "$script")
+            local target_link="${scripts_target_dir}/${name}"
+
+            if [[ -L "$target_link" ]]; then
+                local link_target=$(readlink "$target_link")
+                if [[ "$link_target" == "$script" ]]; then
+                    echo -e "  ${GREEN}✓${NC} ${name} (リンク済み)"
+                    has_scripts=true
+                else
+                    echo -e "  ${YELLOW}!${NC} ${name} (別のリンク先)"
+                fi
+            elif [[ -f "$target_link" ]]; then
+                echo -e "  ${YELLOW}!${NC} ${name} (実ファイルが存在)"
+            else
+                echo -e "  ${RED}✗${NC} ${name} (未インストール)"
+            fi
+        done
+        if [[ "$has_scripts" == false ]]; then
+            echo "  (インストールされた Scripts はありません)"
+        fi
+    else
+        echo "  (ディレクトリが存在しません)"
+    fi
+
+    echo ""
     echo -e "${BLUE}[Skills]${NC} (${CLAUDE_SKILLS_DIR})"
     if [[ -d "$CLAUDE_SKILLS_DIR" ]]; then
         local has_skills=false
