@@ -158,10 +158,13 @@ description: 任意のエージェントモデル向け実装コマンド（/imp
 ##### エージェント選択マトリクス
 | 変更内容 | 起動エージェント |
 |---------|---------------|
-| ドメイン層（entity/command/repository/value） | backend-developer |
+| ドメイン層（entity/command/repository/value） | backend-developer（+ 新規 entity/aggregate 設計時は ddd-expert を追加） |
 | Prisma スキーマ / マイグレーション / SQL | database-administrator + sql-pro |
 | API 層（controller/dto/usecase） | backend-developer + api-designer |
-| フロントエンド UI コンポーネント | frontend-developer + ui-designer |
+| フロントエンド UI コンポーネント | frontend-developer + ui-designer（+ アーキテクチャ変更時は react-architect を追加） |
+| デザインシステム（トークン定義、テーマ設定、コンポーネント基盤） | design-system-architect + ui-designer |
+
+**「+ ... を追加」の判定基準**: plan.md のステップ記述に「設計」「アーキテクチャ」「新パターン」等のキーワードが含まれるか、または新規ファイル作成を伴う構造的変更か。
 
 ##### 差分規模によるスケーリング
 - **Small**（ステップの変更ファイル < 3）: メインエージェントが直接実装。専門エージェント不要
