@@ -4,7 +4,7 @@
 # Claude Skills & SubAgents セットアップスクリプト
 # =============================================================================
 #
-# このスクリプトは、リポジトリ内の Skills と SubAgents を
+# このスクリプトは、リポジトリ内の Skills, Commands, SubAgents を
 # ~/.claude/ 配下にシンボリックリンクとして配置します。
 # これにより、すべてのプロジェクトで共通して使用できるようになります。
 #
@@ -28,6 +28,7 @@ NC='\033[0m' # No Color
 # パス定義
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_SKILLS_DIR="${SCRIPT_DIR}/claude/skills"
+REPO_COMMANDS_DIR="${SCRIPT_DIR}/claude/commands"
 REPO_SUBAGENTS_DIR="${SCRIPT_DIR}/claude/subagents"
 CLAUDE_DIR="${HOME}/.claude"
 CLAUDE_SKILLS_DIR="${CLAUDE_DIR}/skills"
@@ -129,6 +130,43 @@ install_skills() {
     log_info "Skills: ${count} 件インストール完了"
 }
 
+# Commands のインストール（Skills として配置）
+# claude/commands/<name>.md → ~/.claude/skills/<name>/SKILL.md
+install_commands() {
+    log_info "Commands をインストールしています..."
+
+    local count=0
+    for cmd_file in "$REPO_COMMANDS_DIR"/*.md; do
+        [ -f "$cmd_file" ] || continue
+        local cmd_name=$(basename "$cmd_file" .md)
+        local target_dir="${CLAUDE_SKILLS_DIR}/${cmd_name}"
+
+        # 既存のリンクまたはディレクトリを処理
+        if [[ -L "$target_dir" ]]; then
+            log_warning "既存のシンボリックリンクを更新: ${cmd_name}"
+            rm "$target_dir"
+        fi
+
+        if [[ -d "$target_dir" ]]; then
+            # このスクリプトが作成したディレクトリか確認（SKILL.md がシンボリックリンク）
+            if [[ -L "${target_dir}/SKILL.md" ]]; then
+                rm "${target_dir}/SKILL.md"
+                rmdir "$target_dir" 2>/dev/null || true
+            else
+                log_warning "既存のディレクトリをバックアップ: ${cmd_name}"
+                mv "$target_dir" "${target_dir}.backup.$(date +%Y%m%d%H%M%S)"
+            fi
+        fi
+
+        mkdir -p "$target_dir"
+        ln -s "$cmd_file" "${target_dir}/SKILL.md"
+        log_success "  ✓ ${cmd_name}"
+        ((count++))
+    done
+
+    log_info "Commands: ${count} 件インストール完了"
+}
+
 # SubAgents のインストール
 install_subagents() {
     log_info "SubAgents をインストールしています..."
@@ -165,7 +203,25 @@ install_subagents() {
 
 # アンインストール
 uninstall() {
-    log_info "インストールされた Scripts, Skills, SubAgents を削除しています..."
+    log_info "インストールされた Scripts, Skills, Commands, SubAgents を削除しています..."
+
+    # Commands の削除
+    local commands_count=0
+    for cmd_file in "$REPO_COMMANDS_DIR"/*.md; do
+        [ -f "$cmd_file" ] || continue
+        local cmd_name=$(basename "$cmd_file" .md)
+        local target_dir="${CLAUDE_SKILLS_DIR}/${cmd_name}"
+
+        if [[ -d "$target_dir" && -L "${target_dir}/SKILL.md" ]]; then
+            local link_target=$(readlink "${target_dir}/SKILL.md")
+            if [[ "$link_target" == "$cmd_file" ]]; then
+                rm "${target_dir}/SKILL.md"
+                rmdir "$target_dir" 2>/dev/null || true
+                log_success "  ✓ 削除: ${cmd_name}"
+                ((commands_count++))
+            fi
+        fi
+    done
 
     # Skills の削除
     local skills_count=0
@@ -226,7 +282,7 @@ uninstall() {
         fi
     done
 
-    log_info "削除完了 - Scripts: ${scripts_count} 件, Skills: ${skills_count} 件, SubAgents: ${subagents_count} 件"
+    log_info "削除完了 - Scripts: ${scripts_count} 件, Skills: ${skills_count} 件, Commands: ${commands_count} 件, SubAgents: ${subagents_count} 件"
 }
 
 # 状態表示
@@ -300,6 +356,35 @@ show_status() {
     fi
 
     echo ""
+    echo -e "${BLUE}[Commands]${NC} (${CLAUDE_SKILLS_DIR}/<name>/SKILL.md)"
+    if [[ -d "$REPO_COMMANDS_DIR" ]]; then
+        local has_commands=false
+        for cmd_file in "$REPO_COMMANDS_DIR"/*.md; do
+            [ -f "$cmd_file" ] || continue
+            local cmd_name=$(basename "$cmd_file" .md)
+            local target_dir="${CLAUDE_SKILLS_DIR}/${cmd_name}"
+            local target_link="${target_dir}/SKILL.md"
+
+            if [[ -d "$target_dir" && -L "$target_link" ]]; then
+                local link_target=$(readlink "$target_link")
+                if [[ "$link_target" == "$cmd_file" ]]; then
+                    echo -e "  ${GREEN}✓${NC} ${cmd_name} (リンク済み)"
+                    has_commands=true
+                else
+                    echo -e "  ${YELLOW}!${NC} ${cmd_name} (別のリンク先)"
+                fi
+            elif [[ -d "$target_dir" ]]; then
+                echo -e "  ${YELLOW}!${NC} ${cmd_name} (実ディレクトリが存在)"
+            else
+                echo -e "  ${RED}✗${NC} ${cmd_name} (未インストール)"
+            fi
+        done
+        if [[ "$has_commands" == false ]]; then
+            echo "  (インストールされた Commands はありません)"
+        fi
+    fi
+
+    echo ""
     echo -e "${BLUE}[SubAgents]${NC} (${CLAUDE_SUBAGENTS_DIR})"
     if [[ -d "$CLAUDE_SUBAGENTS_DIR" ]]; then
         local has_subagents=false
@@ -350,6 +435,8 @@ main() {
             install_scripts
             echo ""
             install_skills
+            echo ""
+            install_commands
             echo ""
             install_subagents
             echo ""
