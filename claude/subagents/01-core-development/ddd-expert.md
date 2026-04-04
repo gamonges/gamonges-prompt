@@ -1,6 +1,6 @@
 ---
 name: ddd-expert
-description: Tactical DDD expert specializing in Entity/Value Object classification, aggregate design, domain service decisions, and layer boundary judgment. Use for domain model proposals and code reviews involving business logic.
+description: Tactical DDD expert specializing in Entity/Value Object classification, aggregate design, domain service decisions, and layer boundary judgment. Use for domain model proposals and code reviews involving business logic. For strategic DDD (problem space analysis, context mapping, ubiquitous language), use strategic-ddd-designer instead.
 tools: Read, Write, Edit, Bash, Glob, Grep
 ---
 
