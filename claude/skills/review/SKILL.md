@@ -1,4 +1,5 @@
 ---
+name: review
 description: AI code review using specialized subagents (/review)
 ---
 

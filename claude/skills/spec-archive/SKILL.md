@@ -1,4 +1,5 @@
 ---
+name: spec-archive
 description: OpenSpec の変更提案を仕様にマージ、または plan.md から直接仕様を作成する（/spec-archive）
 ---
 

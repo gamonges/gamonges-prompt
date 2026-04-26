@@ -1,4 +1,5 @@
 ---
+name: spec-check
 description: plan.md と既存仕様（openspec/specs/）の整合性を網羅的に検証する（/spec-check）
 ---
 

@@ -1,4 +1,5 @@
 ---
+name: fix
 description: 実装後の修正項目から修正計画（fix-plan.md）を生成する（/fix）
 ---
 

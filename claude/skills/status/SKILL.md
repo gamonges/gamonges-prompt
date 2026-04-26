@@ -1,4 +1,5 @@
 ---
+name: status
 description: ワークフローの現在地・進捗を一覧表示する（/status）
 ---
 

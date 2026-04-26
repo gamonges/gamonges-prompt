@@ -4,7 +4,7 @@
 # Claude Skills & SubAgents セットアップスクリプト
 # =============================================================================
 #
-# このスクリプトは、リポジトリ内の Skills, Commands, SubAgents を
+# このスクリプトは、リポジトリ内の Skills, SubAgents を
 # ~/.claude/ 配下にシンボリックリンクとして配置します。
 # これにより、すべてのプロジェクトで共通して使用できるようになります。
 #
@@ -13,6 +13,10 @@
 #   ./setup.sh install  # インストール
 #   ./setup.sh uninstall # アンインストール
 #   ./setup.sh status   # 現在の状態を表示
+#   ./setup.sh migrate  # 旧形式 (commands→skill 化されたディレクトリ) を撤去して新形式へ移行
+#
+# 注: 過去に commands/ から疑似的に skill 化していた構造は廃止されました。
+#     旧バージョンで install したユーザーは migrate サブコマンドで一括移行できます。
 #
 # =============================================================================
 
@@ -130,41 +134,31 @@ install_skills() {
     log_info "Skills: ${count} 件インストール完了"
 }
 
-# Commands のインストール（Skills として配置）
-# claude/commands/<name>.md → ~/.claude/skills/<name>/SKILL.md
-install_commands() {
-    log_info "Commands をインストールしています..."
+# Migrate: 旧形式 (commands→skill 化されたディレクトリ) を撤去
+# 過去の install_commands で作られた dead symlink + ディレクトリを安全に削除する
+migrate() {
+    log_info "旧形式 (commands→skill 化されたディレクトリ) を撤去しています..."
 
     local count=0
-    for cmd_file in "$REPO_COMMANDS_DIR"/*.md; do
-        [ -f "$cmd_file" ] || continue
-        local cmd_name=$(basename "$cmd_file" .md)
-        local target_dir="${CLAUDE_SKILLS_DIR}/${cmd_name}"
+    for cmd_dir in "$CLAUDE_SKILLS_DIR"/*/; do
+        [ -d "$cmd_dir" ] || continue
+        local skill_link="${cmd_dir}SKILL.md"
 
-        # 既存のリンクまたはディレクトリを処理
-        if [[ -L "$target_dir" ]]; then
-            log_warning "既存のシンボリックリンクを更新: ${cmd_name}"
-            rm "$target_dir"
-        fi
-
-        if [[ -d "$target_dir" ]]; then
-            # このスクリプトが作成したディレクトリか確認（SKILL.md がシンボリックリンク）
-            if [[ -L "${target_dir}/SKILL.md" ]]; then
-                rm "${target_dir}/SKILL.md"
-                rmdir "$target_dir" 2>/dev/null || true
-            else
-                log_warning "既存のディレクトリをバックアップ: ${cmd_name}"
-                mv "$target_dir" "${target_dir}.backup.$(date +%Y%m%d%H%M%S)"
+        # SKILL.md が claude/commands/*.md への symlink になっているディレクトリのみ対象
+        if [[ -L "$skill_link" ]]; then
+            local link_target=$(readlink "$skill_link")
+            if [[ "$link_target" == */claude/commands/*.md ]]; then
+                rm "$skill_link"
+                rmdir "$cmd_dir" 2>/dev/null || true
+                log_success "  ✓ 撤去: $(basename "$cmd_dir")"
+                ((count++))
             fi
         fi
-
-        mkdir -p "$target_dir"
-        ln -s "$cmd_file" "${target_dir}/SKILL.md"
-        log_success "  ✓ ${cmd_name}"
-        ((count++))
     done
 
-    log_info "Commands: ${count} 件インストール完了"
+    log_info "旧形式の撤去: ${count} 件"
+    echo ""
+    install_skills
 }
 
 # SubAgents のインストール
@@ -289,7 +283,7 @@ uninstall() {
 show_status() {
     echo ""
     echo "=========================================="
-    echo "  Claude Scripts, Skills & SubAgents 状態"
+    echo "  Claude Scripts, Skills, SubAgents 状態"
     echo "=========================================="
     echo ""
 
@@ -356,35 +350,6 @@ show_status() {
     fi
 
     echo ""
-    echo -e "${BLUE}[Commands]${NC} (${CLAUDE_SKILLS_DIR}/<name>/SKILL.md)"
-    if [[ -d "$REPO_COMMANDS_DIR" ]]; then
-        local has_commands=false
-        for cmd_file in "$REPO_COMMANDS_DIR"/*.md; do
-            [ -f "$cmd_file" ] || continue
-            local cmd_name=$(basename "$cmd_file" .md)
-            local target_dir="${CLAUDE_SKILLS_DIR}/${cmd_name}"
-            local target_link="${target_dir}/SKILL.md"
-
-            if [[ -d "$target_dir" && -L "$target_link" ]]; then
-                local link_target=$(readlink "$target_link")
-                if [[ "$link_target" == "$cmd_file" ]]; then
-                    echo -e "  ${GREEN}✓${NC} ${cmd_name} (リンク済み)"
-                    has_commands=true
-                else
-                    echo -e "  ${YELLOW}!${NC} ${cmd_name} (別のリンク先)"
-                fi
-            elif [[ -d "$target_dir" ]]; then
-                echo -e "  ${YELLOW}!${NC} ${cmd_name} (実ディレクトリが存在)"
-            else
-                echo -e "  ${RED}✗${NC} ${cmd_name} (未インストール)"
-            fi
-        done
-        if [[ "$has_commands" == false ]]; then
-            echo "  (インストールされた Commands はありません)"
-        fi
-    fi
-
-    echo ""
     echo -e "${BLUE}[SubAgents]${NC} (${CLAUDE_SUBAGENTS_DIR})"
     if [[ -d "$CLAUDE_SUBAGENTS_DIR" ]]; then
         local has_subagents=false
@@ -436,8 +401,6 @@ main() {
             echo ""
             install_skills
             echo ""
-            install_commands
-            echo ""
             install_subagents
             echo ""
             log_success "セットアップが完了しました！"
@@ -450,8 +413,13 @@ main() {
         status)
             show_status
             ;;
+        migrate)
+            check_source_dirs
+            init_claude_dir
+            migrate
+            ;;
         *)
-            echo "使用方法: $0 {install|uninstall|status}"
+            echo "使用方法: $0 {install|uninstall|status|migrate}"
             exit 1
             ;;
     esac

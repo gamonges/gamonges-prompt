@@ -1,4 +1,5 @@
 ---
+name: design
 description: 要件・コンテキストから実装計画（plan.md）を新規作成する（/design）
 ---
 

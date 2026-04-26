@@ -1,4 +1,5 @@
 ---
+name: spec-propose
 description: 実装完了後の plan.md から OpenSpec 変更提案を作成する（/spec-propose）
 ---
 

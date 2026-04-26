@@ -1,4 +1,5 @@
 ---
+name: implement
 description: 任意のエージェントモデル向け実装コマンド（/implement <planファイルパス>）
 ---
 

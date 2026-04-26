@@ -1,4 +1,5 @@
 ---
+name: recall
 description: "保存した記憶を読み込む"
 ---
 

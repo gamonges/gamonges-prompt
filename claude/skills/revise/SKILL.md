@@ -1,4 +1,5 @@
 ---
+name: revise
 description: ユーザーのフィードバックに基づいて実装計画を修正する（/revise）
 ---
 

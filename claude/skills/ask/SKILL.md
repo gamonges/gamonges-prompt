@@ -1,4 +1,5 @@
 ---
+name: ask
 description: コードベースや技術的な質問に調査して回答する（/ask）
 ---
 

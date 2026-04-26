@@ -1,4 +1,5 @@
 ---
+name: review-plan
 description: 実装計画をスタッフエンジニアの視点でレビューする（/review-plan）
 ---
 

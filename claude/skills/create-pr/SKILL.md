@@ -1,4 +1,5 @@
 ---
+name: create-pr
 description: Create a Pull Request to develop branch from current branch (/create-pr)
 ---
 

@@ -1,4 +1,5 @@
 ---
+name: state-machine
 description: Add a state machine diagram to a plan file to clarify requirements
 argument-hint: [path to plan file (auto-search if omitted)]
 allowed-tools: Read, Write, Edit, Glob, Grep, AskUserQuestion

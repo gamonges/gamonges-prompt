@@ -1,4 +1,5 @@
 ---
+name: retrospective
 description: Daily Pull Request retrospective and learning extraction (/retrospective [date])
 ---
 
