@@ -84,6 +84,24 @@ commit_log=$(git log --oneline "${base_branch}...HEAD")
 diff_lines=$(git diff --stat "${base_branch}...HEAD" | tail -1)
 ```
 
+### Phase 1.6: Collect CI Status
+
+PR の CI チェック結果を取得し、失敗があれば `tmp/review/_ci-failures.md` に記録する。後続の Phase 4 で unified.md の先頭セクションとして提示する。
+
+```bash
+mkdir -p tmp/review
+ci_checks=$(gh pr checks "$pr_number" --json name,state,bucket,link 2>/dev/null || echo "[]")
+failed_checks=$(echo "$ci_checks" | jq -c '.[] | select(.bucket == "fail")')
+```
+
+`failed_checks` が空でない場合のみ以下を実行:
+
+1. 各 job の `link` フィールドから run ID を抽出（URL パターン `/runs/<id>/` の `<id>` 部分）
+2. `gh run view <run-id> --log-failed | tail -n 30` で末尾 30 行を取得
+3. job 名 / bucket / link / log の末尾 30 行をまとめて `tmp/review/_ci-failures.md` に保存
+
+`gh pr checks` 実行不可（gh 未認証等）または空配列の場合は `_ci-failures.md` を作成しないだけで処理は続行する（CI 失敗未検出として扱う）。
+
 ### Phase 1.5: Detect Project Type
 
 Detect the project type to determine which agents and rules to use.
@@ -275,6 +293,22 @@ Write `./tmp/review/unified.md`:
 **レビュー日**: {date}
 **変更ファイル数**: {count}ファイル | **差分規模**: {small/medium/large}
 **プロジェクトタイプ**: {frontend/backend/unknown}
+
+---
+
+## ❌ CI Failures（最優先）
+
+> Phase 1.6 で `tmp/review/_ci-failures.md` が生成されている場合のみ表示する。CI 失敗が無い場合は本セクション全体を省略する。
+
+| Check | Bucket | Link |
+|-------|--------|------|
+| {check name} | fail | {link} |
+
+### {check name} の失敗詳細
+
+```
+{tail -n 30 of failed log}
+```
 
 ---
 

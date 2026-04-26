@@ -282,21 +282,9 @@ plan モードで実行し、`.cursor/plan.md` または指定された plan フ
 既存の plan ファイルが存在する場合は、修正ステップを既存の計画に追記する形式で更新する。
 存在しない場合は、上記の Claude Code と同じフォーマットで新規作成する。
 
-### フェーズ 6: コミット
+### フェーズ 6: 完了報告
 
-```bash
-# Claude Code の場合
-git add ./tmp/fix-plan.md
-git commit -m "docs: 修正計画を作成"
-
-# Cursor の場合
-git add .cursor/plan.md  # または該当する plan ファイル
-git commit -m "docs: 修正計画を作成"
-```
-
-コミットに失敗した場合はユーザーに報告し、手動での対応を依頼する。
-
-### フェーズ 7: 完了報告
+`./tmp/fix-plan.md` の差分はコミットしない（`tmp/` 配下はリポジトリ管理対象外）。Cursor 環境の `.cursor/plan.md` 等についてもユーザー判断に委ねる。
 
 以下の内容をユーザーに報告する:
 
