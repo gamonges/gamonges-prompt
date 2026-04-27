@@ -114,6 +114,8 @@ install_skills() {
     for skill_dir in "$REPO_SKILLS_DIR"/*/; do
         if [[ -d "$skill_dir" ]]; then
             local skill_name=$(basename "$skill_dir")
+            # _ プレフィックスは雛形 / プライベート用としてスキップ
+            [[ "$skill_name" == _* ]] && continue
             local target_link="${CLAUDE_SKILLS_DIR}/${skill_name}"
 
             # 既存のリンクまたはディレクトリを処理

@@ -5,8 +5,7 @@ description: Create a Pull Request to develop branch from current branch (/creat
 
 指定されたブランチ（または現在のブランチ）から develop ブランチ向けのプルリクエストを作成します。
 
-**IMPORTANT**: Always respond in Japanese
-
+**規約**: CLAUDE.md の Skills 共通規約に従う
 ## Notion Page ID によるリファレンス付与
 
 ユーザーがコマンド実行時にNotionのページID（例: `DC-6050`, `DC-1234 DC-5678`）を一緒に入力した場合、PR本文の**先頭**に `ref` 行を自動付与します。
@@ -62,7 +61,23 @@ if [ -n "$existing_pr" ] && [ "$existing_pr" != "null" ]; then
     echo "Error: PR already exists (#$existing_pr)"
     exit 1
 fi
+
+# Working tree の透明性確認（PR には含まれないが、gh pr create が警告を出すため事前に説明）
+staged_count=$(git status --porcelain | grep -c -E '^[AMD]' || true)
+untracked_count=$(git status --porcelain | grep -c -E '^\?\?' || true)
+modified_count=$(git status --porcelain | grep -c -E '^ [AMD]' || true)
 ```
+
+ユーザー向けに以下を表示する（数値が 0 でない場合のみ）:
+
+```
+ℹ️ working tree status (PR 本体には含まれません):
+- ステージ済み変更: ${staged_count} 件
+- 未追跡ファイル: ${untracked_count} 件
+- 未ステージ変更: ${modified_count} 件
+```
+
+`gh pr create` 実行時の "Warning: N uncommitted changes" がこれらの合計と一致することを事前に説明し、ユーザーの不安を解消する。
 
 ### Phase 2: Generate PR Title
 

@@ -7,8 +7,7 @@ description: 実装完了後の plan.md から OpenSpec 変更提案を作成す
 新規仕様の追加（ADDED）だけでなく、既存仕様の更新（MODIFIED/REMOVED/RENAMED）にも対応する。
 
 **重要**: 変更対象は `openspec/changes/` ディレクトリのみに限定する。ソースコード・`tmp/` の変更は禁止。
-**IMPORTANT**: Always respond in Japanese.
-
+**規約**: CLAUDE.md の Skills 共通規約に従う
 ## パラメーター
 
 `$ARGUMENTS` で change-name を指定できる。省略時は plan.md のタイトルから kebab-case で推定する。

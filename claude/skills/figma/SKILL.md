@@ -1,6 +1,6 @@
 ---
 name: implementing-figma-design
-description: Figmaデザインをピクセルパーフェクトなコードに変換する。Figmaファイルからの実装時、「デザインを実装して」「コードを生成して」「コンポーネントを作って」「Figmaデザインを構築して」といったリクエスト時、FigmaのURLが提供された時、またはFigmaの仕様に合わせたコンポーネント作成を依頼された時に使用。Figma MCPサーバーへの接続が必要。
+description: Figmaデザインをピクセルパーフェクトなコードに変換する（要 Figma MCP 接続）。「デザインを実装」「コードを生成」「コンポーネントを作って」等の依頼時、Figma URL が提供された時に使用。
 ---
 
 # Figma デザインの実装

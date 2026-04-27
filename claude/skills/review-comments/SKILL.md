@@ -7,8 +7,7 @@ description: PRレビューコメントの妥当性チェック・返信・resol
 
 PR 上の未解決レビューコメント（Gemini、Greptile、人間レビュアー等）を取得し、各コメントに対して「対応済み」「却下（理由付き）」「要対応」を判定した上で、**返信メッセージの投稿と resolve を実行する**。
 
-**IMPORTANT**: Always respond in Japanese.
-
+**規約**: CLAUDE.md の Skills 共通規約に従う
 ## パラメーター
 
 `<PR URL or number>` — 対象の PR を指定する。省略時は現在のブランチの PR を自動検出する。

@@ -1,6 +1,6 @@
 ---
 name: worktree-cleanup
-description: マージ済みPRのworktreeを一括削除するスキル。「worktreeを掃除したい」「worktree消したい」「マージ済みworktreeを削除」「worktree cleanup」「worktreeの整理」などのキーワードで呼び出す。claude -w で作ったworktreeが溜まってきたときや、定期的なブランチ整理をしたいときにも使う。
+description: マージ済み PR の worktree を一括削除する。「worktree を掃除」「worktree cleanup」「マージ済み worktree を削除」等のキーワードで呼び出す。`claude -w` で作った worktree が溜まったときの定期整理に使用。
 ---
 
 # Worktree Cleanup Skill

@@ -6,8 +6,7 @@ description: AI code review using specialized subagents (/review)
 Perform comprehensive code review using specialized AI agents working in parallel.
 
 **IMPORTANT**: Never modify source files — only output review files.
-**IMPORTANT**: Always respond in Japanese.
-
+**規約**: CLAUDE.md の Skills 共通規約に従う
 ## Execution Conditions
 
 - Pull Request exists for the current branch (draft or opened), OR the user appended a PR link or number after the command.
@@ -167,6 +166,44 @@ The main agent analyzes the PR holistically before launching subagents. This ana
    - **テナント分離**: organizationId フィルタの適用漏れリスク
    - **トランザクション境界**: startTx の粒度、ネストトランザクションの有無
 
+### Phase 2.5: Snapshot Shared Context
+
+並列起動するサブエージェントに同じ context を inline で配信すると重複コストが大きい（agent 数 × 数百トークン）。共有コンテキストをスナップショットとして保存し、サブエージェントには **「これらを読め」** とパス参照のみを渡す方式に切り替える。
+
+```bash
+mkdir -p tmp/review
+
+# PR 差分とコミット履歴のスナップショット
+echo "$full_diff" > tmp/review/_pr-diff.snapshot
+echo "$commit_log" > tmp/review/_commits.snapshot
+
+# Phase 2 の分析結果（修正の目的 / アプローチ / 設計判断 / 影響範囲 / 人間レビュー観点）
+cat > tmp/review/_overview.md <<'EOF'
+# PR Overview
+
+## 修正の目的
+...
+
+## アプローチ
+...
+
+## 設計・アーキテクチャ判断
+...
+
+## 影響範囲
+...
+
+## 人間レビュー観点
+...
+EOF
+```
+
+Phase 3 で各サブエージェントには以下のみを渡す:
+- PR メタデータ（番号、ベースブランチ、変更ファイル数）
+- スナップショットファイルのパス（`tmp/review/_pr-diff.snapshot`, `tmp/review/_overview.md`）
+- 観点別チェックリスト（agent 固有）
+- 出力テンプレート
+
 ### Phase 3: Select & Execute Agents
 
 #### 1. Determine diff scale
@@ -201,71 +238,25 @@ The main agent analyzes the PR holistically before launching subagents. This ana
 
 Small scale の場合、最も関連性の高い2エージェントのみ起動する。
 
-#### Backend-reviewer additional instructions (backend project only)
+#### Backend / Database checklist (backend project only)
 
-backend-reviewer に以下のチェックリストをインライン指示として渡す。
-これらは CI では検出困難な設計レベルの問題である。
-`architecture.mdc` と `coding-rule.mdc` は全文ではなく要約を渡すこと。
-
-##### 必須チェック（全 diff サイズで適用）
-
-**クロステナントセキュリティ**:
-- テーブルアクセス時の organizationId フィルタ漏れ
-- organizationId が Infrastructure 層で ApiContext から付与されているか
-- JOIN/サブクエリの結合先にもフィルタが適用されているか
-
-**エラーハンドリング設計**:
-- 例外 throw 禁止、neverthrow の Result 型使用
-- ErrorWithDisplayMessages 拡張クラスの 6 言語対応（en, ja, id, vn, th, zhCN）
-- Command の of() ファクトリで入力値を検証し Result 型で返しているか
-
-**Prisma / DB 制約**:
-- 新規コードで OrThrow 系関数不使用（findFirstOrThrow, findUniqueOrThrow 等）
-- DTO Optional 項目が null（undefined ではなく）
-- any 型不使用
-
-##### 推奨チェック（Medium / Large diff で追加適用）
-
-**アーキテクチャ整合性**:
-- Domain → Infrastructure 依存がないか
-- 別モジュールの内部実装を直接参照していないか（Adapter 経由か）
-- Command → Query の依存がないか
-- DTO/VO にビジネスロジックが混入していないか
-
-**CQRS パターン検証**:
-- Command Handler が 1 責務か
-- Handler が tx: PrismaTx を引数で受け取っているか
-- ビジネスルールが Entity に委譲され、Handler はオーケストレーションのみか
-
-**Prisma / DB 制約（追加）**:
-- 新規 View テーブル追加なし、View リレーションなし
-- 新規テーブルの日付カラムに @db.Date
-- exhaustive check で全エラーケースを処理
-
-**Temporal データ整合性**（該当する場合のみ）:
-- whereBi/whereUni フィルタの適用
-- include 内での Temporal フィルタ適用
-- setReadCursor / resetReadCursor の try/finally ペア
-
-#### Database-reviewer additional instructions (backend project only)
-
-**Prisma 固有チェック**:
-- View テーブル新規追加・リレーション禁止（Prisma 6.13.0 以降非対応）
-- Kysely の使用回避（メンテナンス性・可読性の観点）
-- マイグレーションの安全性（既存データへの影響、ダウンタイム有無）
-- 新規クエリに対応するインデックス設計
-- JSON 型定義の整合性（prismaJson.d.ts との一致）
+backend-reviewer / database-reviewer 起動時に渡すチェックリスト（必須 + 推奨 + Prisma 固有）は **`./reference/backend-checklist.md`** を参照。inline 指示として渡せる形式で記載されている。
 
 #### 3. Launch all selected subagents in parallel
 
-Provide each subagent with:
-- PR number, title, base branch
-- Phase 2 の PR 概要分析（目的・アプローチ・設計判断）
-- Full diff and changed file list
+各サブエージェントには **スナップショット参照のみ** を渡す（Phase 2.5 で生成済み）:
+
+- PR メタデータ（number, title, base branch、変更ファイル数のみ）
+- **スナップショットパス**:
+  - `tmp/review/_pr-diff.snapshot` を読んで full diff を把握する旨
+  - `tmp/review/_commits.snapshot` を読んでコミット履歴を把握する旨
+  - `tmp/review/_overview.md` を読んで Phase 2 の分析結果（目的・アプローチ・設計判断・影響範囲・人間レビュー観点）を把握する旨
 - Subagent Output Template
-- Relevant `.cursor/rules/` content
+- Relevant `.cursor/rules/` content（agent ごとに異なるため inline は維持）
 - **CI exclusion rule**: 「CI で検出される問題（型エラー、lint 違反、テスト失敗）は指摘対象外」
 - (backend project) Backend/Database checklist from above
+
+> **NOTE**: full diff、commit log、PR overview を prompt に inline すると agent 数 × 数百トークンの重複コストになるため、必ずスナップショット参照に統一する。
 
 Confirm every selected subagent has started. Re-launch any that failed.
 
@@ -280,164 +271,16 @@ Confirm every selected subagent has started. Re-launch any that failed.
 
 #### 2. Generate unified report
 
-```bash
-mkdir -p ./tmp/review
-```
+`mkdir -p ./tmp/review` してから、**`./reference/unified-report-template.md`** に記載されたテンプレートに従って `./tmp/review/unified.md` を生成する。
 
-Write `./tmp/review/unified.md`:
+テンプレートには以下のセクションが含まれる（順序固定）:
+- ヘッダ（PR 番号 / ブランチ / レビュー日 / 差分規模 / プロジェクトタイプ）
+- ❌ CI Failures（Phase 1.6 で `_ci-failures.md` が生成された場合のみ）
+- CI 前提確認 / 変更サマリ / 👀 人間レビュー観点
+- ❌ Critical Issues / ⚠️ Minor Issues / ℹ️ Info / ✅ Good Points
+- 📊 サマリー + 優先対応（Critical がある場合のみ）
 
-```markdown
-# コードレビューレポート
-
-**PR #{number}**: {title}
-**ブランチ**: `{head}` → `{base}`
-**レビュー日**: {date}
-**変更ファイル数**: {count}ファイル | **差分規模**: {small/medium/large}
-**プロジェクトタイプ**: {frontend/backend/unknown}
-
----
-
-## ❌ CI Failures（最優先）
-
-> Phase 1.6 で `tmp/review/_ci-failures.md` が生成されている場合のみ表示する。CI 失敗が無い場合は本セクション全体を省略する。
-
-| Check | Bucket | Link |
-|-------|--------|------|
-| {check name} | fail | {link} |
-
-### {check name} の失敗詳細
-
-```
-{tail -n 30 of failed log}
-```
-
----
-
-## CI 前提確認
-
-> 以下は CI で自動検出されるため、本レビューではチェック対象外:
-> - 型エラー（typecheck）
-> - コーディング規約違反（lint）
-> - テスト失敗（test）
->
-> 本レビューは CI では検出困難な設計・アーキテクチャ・セキュリティ観点に集中する。
-
----
-
-## 変更サマリ
-
-### 修正の目的
-
-{この PR が解決する課題・要件（1-3文）}
-
-### アプローチ
-
-- {主要な変更1}
-- {主要な変更2}
-- ...
-
-### 設計・アーキテクチャ判断
-
-{該当しない場合は「特になし」}
-
-### 影響範囲
-
-{変更が影響するモジュール・機能。リグレッションリスクがあれば記載}
-
----
-
-## 👀 人間レビュー観点（Human Review Points）
-
-> AI だけでは判断しきれない、人間の確認が必要なポイント。
-> 該当なしのカテゴリは省略。各項目に判断材料となる具体的コンテキストを記載。
-
-### 設計判断
-
-- **H-1. {タイトル}** — `src/path/to/file.tsx:L42`
-  {なぜこのアプローチが選ばれたか。代替案があれば記載}
-
-### 仕様整合性
-
-- **H-2. {タイトル}** — `src/path/to/file.tsx:L100`
-  {仕様要件との整合が必要な箇所}
-
-### アーキテクチャ統一性
-
-- **H-3. {タイトル}** — `src/path/to/file.tsx (ComponentName)`
-  {既存パターンとの一貫性}
-
-### 命名・責務
-
-- **H-4. {タイトル}** — `src/path/to/file.tsx:L20`
-  {命名の適切さ、責務の分離}
-
-### その他
-
-- **H-5. {タイトル}** — `src/path/to/file.tsx:L80`
-  {パフォーマンス、セキュリティ、拡張性}
-
----
-
-## ❌ Critical Issues（修正必須）
-
-### C-1. {問題タイトル}
-**エージェント**: {指摘元} | **確信度**: High | **カテゴリ**: {tag}
-**ファイル**: `src/full/path/to/file.tsx:L42-50`
-
-{詳細説明}
-
-```tsx
-// ❌ 現状
-<problematic code>
-
-// ✅ 修正案
-<fixed code>
-```
-
----
-
-## ⚠️ Minor Issues（改善提案）
-
-### M-1. {問題タイトル}
-**エージェント**: {指摘元} | **確信度**: {level} | **カテゴリ**: {tag}
-**ファイル**: `src/full/path/to/file.tsx:L15`
-
-{詳細説明}
-
----
-
-## ℹ️ Info & Questions（確認事項）
-
-### I-1. {タイトル}
-**ファイル**: `src/full/path/to/file.tsx:L100`
-
-{詳細説明}
-
----
-
-## ✅ Good Points（良い実装）
-
-1. **{タイトル}** — {説明} [{エージェント名}]
-
----
-
-## 📊 サマリー
-
-| 区分 | 件数 |
-|------|------|
-| ❌ Critical | X件 |
-| ⚠️ Minor | Y件 |
-| ℹ️ Info | Z件 |
-| ✅ Good | W件 |
-
-### 優先対応（Critical がある場合のみ表示）
-
-1. **C-1** `src/path/file.tsx:L42` — {概要}
-
----
-
-*レビュー by {参加エージェント名一覧}（並列実行）*
-```
+各 Issue は **エージェント名 / 確信度 / カテゴリ / ファイルパス + 行番号 / 詳細 / 修正案コード** を含むこと。
 
 #### 3. Console output
 

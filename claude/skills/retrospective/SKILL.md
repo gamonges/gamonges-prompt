@@ -5,8 +5,7 @@ description: Daily Pull Request retrospective and learning extraction (/retrospe
 
 指定された日（または今日）に作成したプルリクエストを振り返り、学びと知見をまとめます。
 
-**IMPORTANT**: Always respond in Japanese
-
+**規約**: CLAUDE.md の Skills 共通規約に従う
 ## 概要
 
 このコマンドは、あなたが作成したプルリクエストを振り返り、以下の観点で分析します：
