@@ -1,13 +1,14 @@
 ---
-description: 戦略的DDD設計書（strategic-ddd.md）をレビューするスキル。専門サブエージェントを並列活用し、ドメインモデルの妥当性、イベント/コマンドの整合性、ユビキタス言語の品質、コンテキスト境界の適切性を評価する。`/strategic-ddd` の後工程として、`/design` に進む前に概念設計の品質を確認する。
+name: review-strategic-ddd
+description: 戦略的DDD設計書（strategic-ddd.md）をサブエージェント並列でレビューする。ドメインモデル / イベント / 集約 / ユビキタス言語 / コンテキスト境界の妥当性を評価。`/strategic-ddd` の後、`/design` の前工程で使用。
+user-invocable: false
 ---
 
 `/strategic-ddd` で作成した概念設計書をレビューし、`/design`（戦術設計・実装計画）に進む前に概念設計の品質を体系的に評価する。
 
 **入力**: `./tmp/strategic-ddd.md`
 **出力**: `./tmp/strategic-ddd-review.md`
-**IMPORTANT**: Always respond in Japanese.
-
+**規約**: CLAUDE.md の Skills 共通規約に従う
 ## ワークフロー上の位置付け
 
 | 前工程 | 本コマンド | 後工程 |
