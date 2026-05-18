@@ -78,6 +78,10 @@
           {
             "type": "command",
             "command": "~/.claude/scripts/sync-claude-to-worktree.sh"
+          },
+          {
+            "type": "command",
+            "command": "/Users/gamouhiroto/.claude/scripts/hook-detect-correction.sh"
           }
         ]
       }
@@ -104,6 +108,15 @@
             "command": "/Users/gamouhiroto/.claude/scripts/hook-confirm-destructive-git.sh"
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/gamouhiroto/.claude/scripts/hook-lint-skill-frontmatter.sh"
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -113,6 +126,15 @@
           {
             "type": "command",
             "command": "/Users/gamouhiroto/.local/share/mise/installs/node/23.7.0/bin/ccm hook PostToolUse"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/gamouhiroto/.claude/scripts/hook-prompt-retrospective.sh"
           }
         ]
       }
@@ -135,6 +157,16 @@
           {
             "type": "command",
             "command": "/Users/gamouhiroto/.local/share/mise/installs/node/23.7.0/bin/ccm hook Stop"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/gamouhiroto/.claude/scripts/hook-inject-recent-lessons.sh"
           }
         ]
       }

@@ -158,6 +158,12 @@ install_skills() {
             fi
 
             ln -s "$skill_dir" "$target_link"
+
+            # skill 内 scripts/*.sh に実行権限を付与（symlink 経由でも実行可能にする）
+            if [[ -d "${skill_dir}scripts" ]]; then
+                find "${skill_dir}scripts" -name '*.sh' -type f -exec chmod +x {} +
+            fi
+
             log_success "  ✓ ${skill_name}"
             ((count++))
         fi
