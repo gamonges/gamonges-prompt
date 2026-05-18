@@ -1,0 +1,15 @@
+# AI agent scratchpad (本リポジトリでは tmp/ をコミット対象外)
+tmp/
+
+# settings.json migration backups
+settings.json.pre-migrate.*
+*.bak.*
+
+# Local override (機微情報を含む可能性があるため tracked にしない)
+.claude/settings.local.json
+claude/settings.local.json
+
+# OS / editor
+.DS_Store
+*.swp
+*~

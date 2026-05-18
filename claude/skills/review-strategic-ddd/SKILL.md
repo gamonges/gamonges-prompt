@@ -1,7 +1,6 @@
 ---
 name: review-strategic-ddd
 description: 戦略的DDD設計書（strategic-ddd.md）をサブエージェント並列でレビューする。ドメインモデル / イベント / 集約 / ユビキタス言語 / コンテキスト境界の妥当性を評価。`/strategic-ddd` の後、`/design` の前工程で使用。
-user-invocable: false
 ---
 
 `/strategic-ddd` で作成した概念設計書をレビューし、`/design`（戦術設計・実装計画）に進む前に概念設計の品質を体系的に評価する。

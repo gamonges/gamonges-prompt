@@ -1,6 +1,6 @@
 ---
 name: retrospective
-description: Daily Pull Request retrospective and learning extraction (/retrospective [date])
+description: 指定日の Pull Request 群を振り返り学びを抽出する。日次レビュー、週次サマリ、振り返り目的で `/retrospective [date]` 呼び出しで使用。
 ---
 
 指定された日（または今日）に作成したプルリクエストを振り返り、学びと知見をまとめます。

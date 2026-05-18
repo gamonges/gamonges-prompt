@@ -10,7 +10,7 @@ Claude Code で使用する Skills、SubAgents のコレクション。すべて
 ## セットアップ
 
 ```bash
-./setup.sh install    # Skills・SubAgents を ~/.claude/ にシンボリックリンク
+./setup.sh install    # Skills・SubAgents・settings.json を ~/.claude/ にシンボリックリンク
 ./setup.sh status     # インストール状態の確認
 ./setup.sh uninstall  # シンボリックリンクの削除
 ./setup.sh migrate    # 旧形式 (commands→skill 化されたディレクトリ) を撤去して新形式へ移行
@@ -20,6 +20,34 @@ Claude Code で使用する Skills、SubAgents のコレクション。すべて
 
 シンボリックリンクにより、リポジトリ内のファイル更新が即座に反映される。
 構造的検証は `./claude/scripts/verify-skills.sh` で機械的に実行可能。
+
+### settings.json のリポジトリ管理
+
+`~/.claude/settings.json` は repo 内 `claude/settings.json` への symlink として管理する。Git 履歴で変更追跡 + `git restore` でロールバック可能。`./setup.sh install` が冪等に symlink を再構築する。
+
+### env-var indirection パターン（機微情報の正規取り扱い）
+
+本リポジトリは **PUBLIC** リポジトリ。`claude/settings.json` にリテラルな API キー / トークン / シークレットを書くことは**禁止**。
+
+**ルール**:
+
+- 機微情報は `~/.zshrc` で `CLAUDE_CODE_{用途}_{種別}` 形式の環境変数として `export`
+- 子プロセスへの注入が必要なら `OTEL_EXPORTER_OTLP_HEADERS` 等の最終形変数も `~/.zshrc` で `export`（Claude Code は settings.json `env` 内の `${VAR}` 展開を**非サポート**）
+- `claude/settings.json` には機微情報を含めない
+
+**例**:
+
+```bash
+# ~/.zshrc
+export CLAUDE_CODE_TELEMETRY_DD_API_KEY=<datadog-api-key>
+export OTEL_EXPORTER_OTLP_HEADERS="DD-API-KEY=$CLAUDE_CODE_TELEMETRY_DD_API_KEY"
+```
+
+新規 commit 時は `git diff --cached claude/settings.json | grep -iE '[a-f0-9]{32}|key=[a-zA-Z0-9]{20,}' | grep -v '\${'` が 0 件であることを確認する。
+
+### portability 課題（F-7 で対応予定）
+
+`claude/settings.json` には個人固有絶対パス（mise の Node 絶対パス、`statusLine.command` の絶対パス等）が含まれる。別端末への展開は F-7 解決まで非対応。
 
 ## リポジトリ構成
 

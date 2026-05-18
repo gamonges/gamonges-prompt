@@ -81,6 +81,36 @@ init_claude_dir() {
     fi
 }
 
+# Settings のインストール (~/.claude/settings.json を repo 内 claude/settings.json への symlink にする)
+install_settings() {
+    log_info "Settings をインストールしています..."
+    local source_file="${SCRIPT_DIR}/claude/settings.json"
+    local target_link="${CLAUDE_DIR}/settings.json"
+
+    if [[ ! -f "$source_file" ]]; then
+        log_warning "  ! ソースファイルが存在しません: $source_file"
+        return
+    fi
+
+    if [[ -L "$target_link" ]]; then
+        local current_target=$(readlink "$target_link")
+        if [[ "$current_target" == "$source_file" ]]; then
+            log_success "  ✓ settings.json (既にリンク済み)"
+            return
+        fi
+        rm "$target_link"
+    elif [[ -f "$target_link" ]]; then
+        local backup_path="${target_link}.pre-install.$(date +%Y%m%d%H%M%S)"
+        mv "$target_link" "$backup_path"
+        log_warning "  ! 既存ファイルをバックアップ: $backup_path"
+    fi
+
+    # atomic 置換
+    ln -s "$source_file" "${target_link}.new"
+    mv -f "${target_link}.new" "$target_link"
+    log_success "  ✓ settings.json → $source_file"
+}
+
 # Scripts のインストール
 install_scripts() {
     log_info "Scripts をインストールしています..."
@@ -278,7 +308,20 @@ uninstall() {
         fi
     done
 
-    log_info "削除完了 - Scripts: ${scripts_count} 件, Skills: ${skills_count} 件, Commands: ${commands_count} 件, SubAgents: ${subagents_count} 件"
+    # Settings の削除
+    local settings_source="${SCRIPT_DIR}/claude/settings.json"
+    local settings_target="${CLAUDE_DIR}/settings.json"
+    local settings_count=0
+    if [[ -L "$settings_target" ]]; then
+        local link_target=$(readlink "$settings_target")
+        if [[ "$link_target" == "$settings_source" ]]; then
+            rm "$settings_target"
+            log_success "  ✓ 削除: settings.json (バックアップ ${settings_target}.pre-migrate.* は残置)"
+            ((settings_count++))
+        fi
+    fi
+
+    log_info "削除完了 - Scripts: ${scripts_count} 件, Skills: ${skills_count} 件, Commands: ${commands_count} 件, SubAgents: ${subagents_count} 件, Settings: ${settings_count} 件"
 }
 
 # 状態表示
@@ -289,6 +332,23 @@ show_status() {
     echo "=========================================="
     echo ""
 
+    local settings_source="${SCRIPT_DIR}/claude/settings.json"
+    local settings_target="${CLAUDE_DIR}/settings.json"
+    echo -e "${BLUE}[Settings]${NC} (${settings_target})"
+    if [[ -L "$settings_target" ]]; then
+        local link_target=$(readlink "$settings_target")
+        if [[ "$link_target" == "$settings_source" ]]; then
+            echo -e "  ${GREEN}✓${NC} settings.json (リンク済み)"
+        else
+            echo -e "  ${YELLOW}!${NC} settings.json (別のリンク先: $link_target)"
+        fi
+    elif [[ -f "$settings_target" ]]; then
+        echo -e "  ${YELLOW}!${NC} settings.json (実ファイルが存在)"
+    else
+        echo -e "  ${RED}✗${NC} settings.json (未インストール)"
+    fi
+
+    echo ""
     local scripts_dir="${SCRIPT_DIR}/claude/scripts"
     local scripts_target_dir="${CLAUDE_DIR}/scripts"
     echo -e "${BLUE}[Scripts]${NC} (${scripts_target_dir})"
@@ -404,6 +464,8 @@ main() {
             install_skills
             echo ""
             install_subagents
+            echo ""
+            install_settings
             echo ""
             log_success "セットアップが完了しました！"
             echo ""

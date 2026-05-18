@@ -1,6 +1,6 @@
 ---
 name: spec-propose
-description: 実装完了後の plan.md から OpenSpec 変更提案を作成する（/spec-propose）
+description: 実装完了後の plan.md から OpenSpec 変更提案を作成する。`/implement` 完了後の仕様提案作成、既存仕様の修正提案、`/spec-propose` 呼び出しで使用。
 ---
 
 実装完了後に plan.md の要点を `openspec/changes/{change-name}/` に変更提案として作成する。

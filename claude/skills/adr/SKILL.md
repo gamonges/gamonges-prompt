@@ -1,6 +1,6 @@
 ---
 name: adr
-description: "Generate Architecture Decision Record (ADR)"
+description: "Architecture Decision Record (ADR) を生成する。技術判断・設計決定の理由を記録したい時、過去判断の根拠を文書化したい時、`/adr` 呼び出しで使用。"
 ---
 # Generate Architecture Decision Record (ADR)
 

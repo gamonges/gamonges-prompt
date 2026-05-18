@@ -1,6 +1,6 @@
 ---
 name: fix
-description: 実装後の修正項目から修正計画（fix-plan.md）を生成する（/fix）
+description: 実装後の修正項目から修正計画 fix-plan.md を生成する。`/review` レビュー指摘の整理、PR レビューコメントの取り込み、`/fix [PR-URL]` 呼び出しで使用。
 ---
 
 実装後のレビューで発見した問題や修正項目をもとに、修正実装計画を生成する。

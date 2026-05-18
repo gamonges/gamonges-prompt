@@ -1,6 +1,6 @@
 ---
 name: review
-description: AI code review using specialized subagents (/review)
+description: PR / 変更差分を専門サブエージェント並列でレビューする。実装完了後の品質確認、`/implement` の後、PR 作成前、`/review` 呼び出しで使用。
 ---
 
 Perform comprehensive code review using specialized AI agents working in parallel.
