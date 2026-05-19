@@ -14,6 +14,11 @@
 set -euo pipefail
 
 INPUT=$(cat)
+# malformed JSON は silent miss を生むため非ゼロ終了して可観測化
+if ! echo "$INPUT" | jq -e . >/dev/null 2>&1; then
+  echo "$(basename "$0"): malformed input JSON" >&2
+  exit 2
+fi
 TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // ""')
 FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // ""')
 
@@ -40,34 +45,59 @@ case "$TOOL_NAME" in
       # 既存ファイルが無い場合は素通し（Edit は通常存在前提）
       exit 0
     fi
-    # Python で安全に文字列置換（特殊文字エスケープを気にしない）
-    CONTENT=$(python3 - <<PY
-import sys
-with open("$FILE_PATH", "r") as f:
-    content = f.read()
-old = $(echo "$OLD" | jq -Rs .)
-new = $(echo "$NEW" | jq -Rs .)
-print(content.replace(old, new, 1), end="")
+    # quote 付き heredoc + 環境変数渡しで bash 変数展開を抑止 (injection 経路を遮断)
+    # 失敗時は permissionDecision: ask で明示的にユーザーへ通知（silent abort を防ぐ）
+    if ! CONTENT=$(FILE_PATH="$FILE_PATH" OLD="$OLD" NEW="$NEW" python3 - <<'PY' 2>/tmp/skill-lint-err
+import os, sys
+try:
+    with open(os.environ["FILE_PATH"], encoding="utf-8", errors="replace") as f:
+        content = f.read()
+    content = content.replace(os.environ["OLD"], os.environ["NEW"], 1)
+    sys.stdout.write(content)
+except Exception as e:
+    sys.stderr.write(f"lint-prep-failed: {e}\n")
+    sys.exit(2)
 PY
-)
+    ); then
+      jq -n --arg err "$(cat /tmp/skill-lint-err 2>/dev/null)" '{
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "ask",
+          permissionDecisionReason: ("SKILL.md lint の前処理に失敗しました: " + $err + " — 内容を目視確認して承認してください。")
+        }
+      }'
+      exit 0
+    fi
     ;;
   MultiEdit)
     if [[ ! -f "$FILE_PATH" ]]; then
       exit 0
     fi
     EDITS_JSON=$(echo "$INPUT" | jq -c '.tool_input.edits // []')
-    CONTENT=$(python3 - <<PY
-import json
-with open("$FILE_PATH", "r") as f:
-    content = f.read()
-edits = json.loads('''$EDITS_JSON''')
-for e in edits:
-    old = e.get("old_string", "")
-    new = e.get("new_string", "")
-    content = content.replace(old, new, 1)
-print(content, end="")
+    # quote 付き heredoc + 環境変数渡しで bash 変数展開を抑止
+    if ! CONTENT=$(FILE_PATH="$FILE_PATH" EDITS_JSON="$EDITS_JSON" python3 - <<'PY' 2>/tmp/skill-lint-err
+import json, os, sys
+try:
+    with open(os.environ["FILE_PATH"], encoding="utf-8", errors="replace") as f:
+        content = f.read()
+    edits = json.loads(os.environ["EDITS_JSON"])
+    for e in edits:
+        content = content.replace(e.get("old_string", ""), e.get("new_string", ""), 1)
+    sys.stdout.write(content)
+except Exception as e:
+    sys.stderr.write(f"lint-prep-failed: {e}\n")
+    sys.exit(2)
 PY
-)
+    ); then
+      jq -n --arg err "$(cat /tmp/skill-lint-err 2>/dev/null)" '{
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "ask",
+          permissionDecisionReason: ("SKILL.md lint の前処理に失敗しました: " + $err + " — 内容を目視確認して承認してください。")
+        }
+      }'
+      exit 0
+    fi
     ;;
   *)
     exit 0
@@ -134,6 +164,11 @@ if ! echo "$DESC_VALUE" | grep -qiE "$TRIGGER_REGEX"; then
       permissionDecisionReason: "SKILL.md description にトリガー語 (時に / する時 / 使用 / 呼び出 / キーワード / トリガー / when / trigger / use this / use when) が含まれていません。Claude の skill 自動選択精度に影響します。承認して保存しますか?"
     }
   }'
+  # opt-in trace: CLAUDE_CODE_HOOK_TRACE 環境変数が定義されている時のみログ出力
+  if [[ -n "${CLAUDE_CODE_HOOK_TRACE:-}" ]]; then
+    mkdir -p ~/.claude/logs
+    echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $(basename "$0") matched=true decision=ask reason=trigger-missing" >> ~/.claude/logs/hook-trace.log
+  fi
   exit 0
 fi
 

@@ -33,7 +33,9 @@ fi
 # created:$TARGET_DATE で対象日に作成された PR
 QUERY="author:@me created:$TARGET_DATE"
 
-result=$(gh api -X GET "search/issues" \
+# stderr 退避でエラー詳細を保持 (認証失効/レート制限/jq 構文エラー等を伝搬)
+gh_err=$(mktemp)
+if ! result=$(gh api -X GET "search/issues" \
   -f q="$QUERY type:pr" \
   --jq '{
     total_count: .total_count,
@@ -47,10 +49,13 @@ result=$(gh api -X GET "search/issues" \
       html_url,
       labels: [.labels[].name]
     }]
-  }' 2>/dev/null) || {
+  }' 2>"$gh_err"); then
     echo "ERROR: gh API 呼出に失敗しました" >&2
+    echo "  詳細: $(cat "$gh_err")" >&2
+    rm -f "$gh_err"
     exit 1
-  }
+fi
+rm -f "$gh_err"
 
 # 結果を整形して出力
 echo "$result" | jq --arg date "$TARGET_DATE" '. + {target_date: $date}'

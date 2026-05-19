@@ -92,17 +92,23 @@ install_settings() {
         return
     fi
 
-    if [[ -L "$target_link" ]]; then
-        local current_target=$(readlink "$target_link")
-        if [[ "$current_target" == "$source_file" ]]; then
+    # ディレクトリ異常検知: 過去の install ミスで実ディレクトリ化していたら明示エラー
+    if [[ -d "$target_link" && ! -L "$target_link" ]]; then
+        log_error "  ✗ $target_link が実ディレクトリです。手動で確認してください"
+        return 1
+    fi
+
+    # 既存 symlink で同一先なら skip、それ以外 (実ファイル含む) は退避してから atomic 置換
+    if [[ -L "$target_link" ]] || [[ -e "$target_link" ]]; then
+        local current_target=$(readlink "$target_link" 2>/dev/null || true)
+        if [[ -L "$target_link" && "$current_target" == "$source_file" ]]; then
             log_success "  ✓ settings.json (既にリンク済み)"
             return
         fi
-        rm "$target_link"
-    elif [[ -f "$target_link" ]]; then
-        local backup_path="${target_link}.pre-install.$(date +%Y%m%d%H%M%S)"
+        # PID 付与で同一秒内の install 衝突回避 (macOS BSD date は %N 非対応のため PID を採用)
+        local backup_path="${target_link}.pre-install.$(date +%Y%m%d%H%M%S)-$$"
         mv "$target_link" "$backup_path"
-        log_warning "  ! 既存ファイルをバックアップ: $backup_path"
+        log_warning "  ! 既存をバックアップ: $backup_path"
     fi
 
     # atomic 置換
@@ -160,8 +166,11 @@ install_skills() {
             ln -s "$skill_dir" "$target_link"
 
             # skill 内 scripts/*.sh に実行権限を付与（symlink 経由でも実行可能にする）
+            # find 自体の exit code は -exec の最終結果を反映しないため、失敗を明示検知
             if [[ -d "${skill_dir}scripts" ]]; then
-                find "${skill_dir}scripts" -name '*.sh' -type f -exec chmod +x {} +
+                if ! find "${skill_dir}scripts" -name '*.sh' -type f -exec chmod +x {} + 2>&1; then
+                    log_warning "  ! ${skill_name}/scripts への chmod に失敗"
+                fi
             fi
 
             log_success "  ✓ ${skill_name}"
@@ -322,7 +331,7 @@ uninstall() {
         local link_target=$(readlink "$settings_target")
         if [[ "$link_target" == "$settings_source" ]]; then
             rm "$settings_target"
-            log_success "  ✓ 削除: settings.json (バックアップ ${settings_target}.pre-migrate.* は残置)"
+            log_success "  ✓ 削除: settings.json (バックアップ ${settings_target}.pre-install.* は残置)"
             ((settings_count++))
         fi
     fi

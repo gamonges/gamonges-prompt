@@ -3,7 +3,7 @@
 # 自己改善ループの振り返り（tmp/lessons.md 末尾追記）を促す
 # 公式: https://code.claude.com/docs/en/hooks
 #
-# 対象 tool: Bash 系（matcher 無しで全 tool 受信し、script 内で tool_input.command 判定）
+# 対象 tool: Bash 限定 (settings.json の matcher: "Bash" で限定)
 # 既存 /retrospective skill (日次粒度) と異なり、本 hook は **タスク単位** の振り返りを促す
 #
 # NOTE: 機微情報を扱う場合は CLAUDE.md:L28-L46 の env-var indirection を参照
@@ -11,9 +11,15 @@
 set -euo pipefail
 
 INPUT=$(cat)
-COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // ""')
+# malformed JSON は silent miss を生むため非ゼロ終了して可観測化
+if ! echo "$INPUT" | jq -e . >/dev/null 2>&1; then
+  echo "$(basename "$0"): malformed input JSON" >&2
+  exit 2
+fi
+COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
 
-if [[ -z "$COMMAND" ]]; then
+# matcher: "Bash" 限定 → command は通常存在する。null/空 の場合のみ素通し
+if [[ -z "$COMMAND" || "$COMMAND" == "null" ]]; then
   exit 0
 fi
 
@@ -25,7 +31,7 @@ TRIGGER_PATTERNS=(
   '^[[:space:]]*mv[[:space:]].*tmp/plan\.md[[:space:]]+openspec'
   '^[[:space:]]*git[[:space:]]+mv[[:space:]].*tmp/plan\.md[[:space:]]+openspec'
   '^[[:space:]]*cp[[:space:]].*openspec/changes/.*specs/'
-  '^[[:space:]]*mv[[:space:]].*openspec/changes/.*archive/'
+  '^[[:space:]]*mv[[:space:]].*openspec/changes/[^[:space:]]+[[:space:]]+openspec/changes/archive/'
 )
 
 matched=""
@@ -42,11 +48,19 @@ if [[ -z "$matched" ]]; then
 fi
 
 # JSON エスケープ用に matched を安全化（jq に渡して context を構築）
+# `'` は jq の Unicode escape で `'` (U+0027) を表現。bash 側でシングルクォート文字列が
+# 途中で閉じる問題を回避する (I-3 対応)
 jq -n --arg trigger "$matched" '{
   hookSpecificOutput: {
     hookEventName: "PostToolUse",
-    additionalContext: ("📝 [自己改善ループ] タスクの区切りを検知 (\($trigger))。次の応答前に:\n1. 本タスクの失敗 / 学び を 1-3 件抽出\n2. 既存 tmp/lessons.md と重複しないか確認\n3. 重複なければ末尾追記 (append-only)\n4. 教訓が無ければ '記録なし' と明示")
+    additionalContext: ("📝 [自己改善ループ] タスクの区切りを検知 (\($trigger))。次の応答前に:\n1. 本タスクの失敗 / 学び を 1-3 件抽出\n2. 既存 tmp/lessons.md と重複しないか確認\n3. 重複なければ末尾追記 (append-only)\n4. 教訓が無ければ '\''記録なし'\'' と明示")
   }
 }'
+
+# opt-in trace: CLAUDE_CODE_HOOK_TRACE 環境変数が定義されている時のみログ出力
+if [[ -n "${CLAUDE_CODE_HOOK_TRACE:-}" ]]; then
+  mkdir -p ~/.claude/logs
+  echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $(basename "$0") matched=true trigger=$matched" >> ~/.claude/logs/hook-trace.log
+fi
 
 exit 0

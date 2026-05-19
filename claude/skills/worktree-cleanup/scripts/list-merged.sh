@@ -20,8 +20,15 @@ if ! gh auth status >/dev/null 2>&1; then
 fi
 
 # マージ済 PR の head branch を取得（最新 50 件）
-merged_branches=$(gh pr list --state merged --limit 50 --json number,headRefName 2>/dev/null \
-  | jq -r '.[] | "\(.number)\t\(.headRefName)"')
+# stderr 退避でエラー詳細を保持 (silent 化を防ぐ)
+gh_err=$(mktemp)
+if ! merged_json=$(gh pr list --state merged --limit 50 --json number,headRefName 2>"$gh_err"); then
+  echo "ERROR: gh pr list 失敗: $(cat "$gh_err")" >&2
+  rm -f "$gh_err"
+  exit 1
+fi
+rm -f "$gh_err"
+merged_branches=$(echo "$merged_json" | jq -r '.[] | "\(.number)\t\(.headRefName)"')
 
 if [[ -z "$merged_branches" ]]; then
   echo "マージ済 PR は見つかりませんでした"
@@ -29,8 +36,9 @@ if [[ -z "$merged_branches" ]]; then
 fi
 
 # worktree 一覧を取得（path と branch のペア）
+# awk のデフォルト FS では path にスペースが含まれると truncate されるため、substr で行頭から取得
 worktrees=$(git worktree list --porcelain 2>/dev/null \
-  | awk '/^worktree / {path=$2} /^branch / {gsub("refs/heads/","",$2); print path"\t"$2}')
+  | awk '/^worktree / { path = substr($0, 10) } /^branch / { gsub("refs/heads/","",$2); print path"\t"$2 }')
 
 if [[ -z "$worktrees" ]]; then
   echo "worktree は登録されていません"

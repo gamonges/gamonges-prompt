@@ -8,6 +8,11 @@
 set -euo pipefail
 
 INPUT=$(cat)
+# malformed JSON は silent miss を生むため非ゼロ終了して可観測化
+if ! echo "$INPUT" | jq -e . >/dev/null 2>&1; then
+  echo "$(basename "$0"): malformed input JSON" >&2
+  exit 2
+fi
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // ""')
 
 if [[ -z "$COMMAND" ]]; then
@@ -28,9 +33,9 @@ elif echo "$COMMAND" | grep -qE 'git[[:space:]]+reset[[:space:]].*--hard'; then
   match=1
 elif echo "$COMMAND" | grep -qE 'git[[:space:]]+worktree[[:space:]]+remove[[:space:]].*--force'; then
   match=1
-elif echo "$COMMAND" | grep -qE 'git[[:space:]]+clean[[:space:]].*-f'; then
+elif echo "$COMMAND" | grep -qE 'git[[:space:]]+clean[[:space:]].*(-f([dqxX]+)?([[:space:]]|$)|--force)'; then
   match=1
-elif echo "$COMMAND" | grep -qE 'git[[:space:]]+checkout[[:space:]].*--force'; then
+elif echo "$COMMAND" | grep -qE 'git[[:space:]]+checkout[[:space:]].*(-f([[:space:]]|$)|--force)'; then
   match=1
 elif echo "$COMMAND" | grep -qE 'git[[:space:]]+branch[[:space:]].*-D([[:space:]]|$)'; then
   match=1
@@ -46,6 +51,11 @@ if [[ $match -eq 1 ]]; then
   }
 }
 EOF
+  # opt-in trace: CLAUDE_CODE_HOOK_TRACE 環境変数が定義されている時のみログ出力
+  if [[ -n "${CLAUDE_CODE_HOOK_TRACE:-}" ]]; then
+    mkdir -p ~/.claude/logs
+    echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $(basename "$0") matched=true decision=ask" >> ~/.claude/logs/hook-trace.log
+  fi
 fi
 
 exit 0
