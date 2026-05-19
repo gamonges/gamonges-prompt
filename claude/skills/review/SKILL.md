@@ -1,12 +1,20 @@
 ---
 name: review
-description: AI code review using specialized subagents (/review)
+description: PR / 変更差分を専門サブエージェント並列でレビューする。実装完了後の品質確認、`/implement` の後、PR 作成前、`/review` 呼び出しで使用。
 ---
 
 Perform comprehensive code review using specialized AI agents working in parallel.
 
 **IMPORTANT**: Never modify source files — only output review files.
 **規約**: CLAUDE.md の Skills 共通規約に従う
+
+## 補助ドキュメントへの参照
+
+| 補助ドキュメント | 読むタイミング |
+|------------------|----------------|
+| `./reference/edge-case-reverification.md` | Critical Issue が出た時 / 境界値・並行処理・テナント分離・トランザクション境界を含む変更の時 / 既存テストカバレッジが低い領域を変更した時 |
+
+「念のため全部読む」は禁止。表のトリガー条件に該当する場合のみ読み込む。
 ## Execution Conditions
 
 - Pull Request exists for the current branch (draft or opened), OR the user appended a PR link or number after the command.
@@ -290,3 +298,22 @@ Provide the following to the user:
 2. **👀 人間レビュー観点** — 最重要項目を最大5件（ファイルパス + 確認理由）
 3. **指摘サマリ** — Critical / Minor / Info 件数、優先対応項目
 4. **出力ファイル** — `./tmp/review/unified.md` and `./tmp/review/*-review.md`
+
+### Phase 5 (任意): Edge Case 再検証（subagent 並列）
+
+Phase 4 の集約結果が以下のいずれかに該当する場合、追加の subagent 並列レビューで edge case を再検証する:
+
+- **Critical Issue が 1 件以上検出された**
+- 変更が **境界値処理 / エラーハンドリング / 非同期処理 / 並行処理** を含む
+- 変更が **テナント分離 / 認可 / トランザクション境界** を含む
+- 既存テストカバレッジが低い領域（テストなしファイルの変更）
+
+詳細手順とカテゴリ別 subagent 指示テンプレートは `./reference/edge-case-reverification.md` を参照。
+
+実行時の注意:
+
+- **同じ turn で複数 Agent 呼出を発行する**（並列実行）。直列で 1 つずつ呼んではいけない
+- カテゴリは 2-4 個に絞る（全部やると冗長）。変更内容に応じて選択
+- 結果は `tmp/review/_edge-{category}-review.md` に出力し、Phase 4 の unified.md に統合する
+
+該当しない場合（純粋な UI スタイル変更 / ドキュメントのみ / リネームのみ）は本 Phase をスキップしてよい。

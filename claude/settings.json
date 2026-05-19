@@ -1,0 +1,211 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cat:*)",
+      "Bash(emmylua_check)",
+      "Bash(find:*)",
+      "Bash(gh pr view)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git log:*)",
+      "Bash(git status:*)",
+      "Bash(grep:*)",
+      "Bash(ls:*)",
+      "Bash(mkdir:*)",
+      "Bash(rg:*)",
+      "Read(~/.config/git/message)",
+      "Read(**/.env.sample)",
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "WebFetch(domain:gist.github.com)",
+      "WebFetch(domain:github.com)",
+      "Write(/private/tmp)",
+      "Write(**/.env.sample)",
+      "mcp__context7",
+      "mcp__serena"
+    ],
+    "deny": [
+      "Bash(chmod 777:*)",
+      "Bash(do)",
+      "Bash(for)",
+      "Bash(gh repo delete:*)",
+      "Bash(mongod:*)",
+      "Bash(mysql:*)",
+      "Bash(nc:*)",
+      "Bash(psql:*)",
+      "Bash(push:*)",
+      "Bash(pushf:*)",
+      "Bash(sudo:*)",
+      "Bash(wget:*)",
+      "Read(**/*.env*)",
+      "Read(**/*aws*)",
+      "Read(**/*key)",
+      "Read(**/*token*)",
+      "Read(**/*secrets*)",
+      "Read(**/*production*)",
+      "Read(id_ed25519)",
+      "Read(id_rsa)",
+      "Write(**/*.env*)",
+      "Write(**/*aws*)",
+      "Write(**/*key)",
+      "Write(**/*production*)",
+      "Write(**/*secrets*)",
+      "Write(**/*token*)",
+      "Write(id_ed25519)",
+      "Write(id_rsa)",
+      "mcp__supabase__execute_sql"
+    ],
+    "ask": [
+      "Bash(curl:*)",
+      "Bash(git checkout:*)",
+      "Bash(git config:*)",
+      "Bash(git push:*)",
+      "Bash(git rebase:*)",
+      "Bash(git reset:*)",
+      "Bash(git rm:*)",
+      "Bash(git switch:*)"
+    ],
+    "defaultMode": "bypassPermissions"
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/gamouhiroto/.local/share/mise/installs/node/23.7.0/bin/ccm hook UserPromptSubmit"
+          },
+          {
+            "type": "command",
+            "command": "~/.claude/scripts/sync-claude-to-worktree.sh"
+          },
+          {
+            "type": "command",
+            "command": "/Users/gamouhiroto/.claude/scripts/hook-detect-correction.sh"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/gamouhiroto/.local/share/mise/installs/node/23.7.0/bin/ccm hook PreToolUse"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/gamouhiroto/.claude/scripts/hook-block-tmp-commit.sh"
+          },
+          {
+            "type": "command",
+            "command": "/Users/gamouhiroto/.claude/scripts/hook-confirm-destructive-git.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/gamouhiroto/.claude/scripts/hook-lint-skill-frontmatter.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/gamouhiroto/.local/share/mise/installs/node/23.7.0/bin/ccm hook PostToolUse"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/gamouhiroto/.claude/scripts/hook-prompt-retrospective.sh"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/gamouhiroto/.local/share/mise/installs/node/23.7.0/bin/ccm hook Notification"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/gamouhiroto/.local/share/mise/installs/node/23.7.0/bin/ccm hook Stop"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/gamouhiroto/.claude/scripts/hook-inject-recent-lessons.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/scripts/statusline.py"
+  },
+  "enabledPlugins": {
+    "code-review@claude-plugins-official": true,
+    "commit-commands@claude-plugins-official": true,
+    "context7@claude-plugins-official": true,
+    "explanatory-output-style@claude-plugins-official": true,
+    "feature-dev@claude-plugins-official": true,
+    "figma@claude-plugins-official": true,
+    "frontend-design@claude-plugins-official": true,
+    "github@claude-plugins-official": true,
+    "learning-output-style@claude-plugins-official": true,
+    "Notion@claude-plugins-official": true,
+    "playwright@claude-plugins-official": true,
+    "pr-review-toolkit@claude-plugins-official": true,
+    "serena@claude-plugins-official": true,
+    "typescript-lsp@claude-plugins-official": true,
+    "superpowers@claude-plugins-official": true,
+    "slack@claude-plugins-official": true
+  },
+  "language": "日本語",
+  "effortLevel": "xhigh",
+  "skipDangerousModePermissionPrompt": true,
+  "theme": "dark-daltonized",
+  "autoCompactEnabled": false,
+  "agentPushNotifEnabled": true,
+  "env": {
+    "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+    "OTEL_METRICS_EXPORTER": "otlp",
+    "OTEL_LOGS_EXPORTER": "otlp",
+    "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "https://otlp.ap1.datadoghq.com",
+    "OTEL_METRICS_INCLUDE_SESSION_ID": "false"
+  }
+}

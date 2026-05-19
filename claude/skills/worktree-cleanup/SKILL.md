@@ -7,6 +7,20 @@ description: マージ済み PR の worktree を一括削除する。「worktree
 
 `claude -w` で作成したworktreeを、PRマージ後にまとめて削除するためのスキル。
 
+## 同梱 scripts
+
+| script | 用途 |
+|--------|------|
+| `./scripts/list-merged.sh` | マージ済 PR と対応 worktree を 1 コマンドで列挙する。Step 1-3 の手順を最小実装で取得したい時に使う |
+
+実行例:
+
+```bash
+./scripts/list-merged.sh
+```
+
+`gh` 認証が必須。詳細な判定（未コミット変更チェック等）は本 SKILL の手順を参照。
+
 ## 概要フロー
 
 1. **前処理** — リモート同期と無効参照の掃除

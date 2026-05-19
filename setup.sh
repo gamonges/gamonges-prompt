@@ -81,6 +81,42 @@ init_claude_dir() {
     fi
 }
 
+# Settings のインストール (~/.claude/settings.json を repo 内 claude/settings.json への symlink にする)
+install_settings() {
+    log_info "Settings をインストールしています..."
+    local source_file="${SCRIPT_DIR}/claude/settings.json"
+    local target_link="${CLAUDE_DIR}/settings.json"
+
+    if [[ ! -f "$source_file" ]]; then
+        log_warning "  ! ソースファイルが存在しません: $source_file"
+        return
+    fi
+
+    # ディレクトリ異常検知: 過去の install ミスで実ディレクトリ化していたら明示エラー
+    if [[ -d "$target_link" && ! -L "$target_link" ]]; then
+        log_error "  ✗ $target_link が実ディレクトリです。手動で確認してください"
+        return 1
+    fi
+
+    # 既存 symlink で同一先なら skip、それ以外 (実ファイル含む) は退避してから atomic 置換
+    if [[ -L "$target_link" ]] || [[ -e "$target_link" ]]; then
+        local current_target=$(readlink "$target_link" 2>/dev/null || true)
+        if [[ -L "$target_link" && "$current_target" == "$source_file" ]]; then
+            log_success "  ✓ settings.json (既にリンク済み)"
+            return
+        fi
+        # PID 付与で同一秒内の install 衝突回避 (macOS BSD date は %N 非対応のため PID を採用)
+        local backup_path="${target_link}.pre-install.$(date +%Y%m%d%H%M%S)-$$"
+        mv "$target_link" "$backup_path"
+        log_warning "  ! 既存をバックアップ: $backup_path"
+    fi
+
+    # atomic 置換
+    ln -s "$source_file" "${target_link}.new"
+    mv -f "${target_link}.new" "$target_link"
+    log_success "  ✓ settings.json → $source_file"
+}
+
 # Scripts のインストール
 install_scripts() {
     log_info "Scripts をインストールしています..."
@@ -128,6 +164,15 @@ install_skills() {
             fi
 
             ln -s "$skill_dir" "$target_link"
+
+            # skill 内 scripts/*.sh に実行権限を付与（symlink 経由でも実行可能にする）
+            # find 自体の exit code は -exec の最終結果を反映しないため、失敗を明示検知
+            if [[ -d "${skill_dir}scripts" ]]; then
+                if ! find "${skill_dir}scripts" -name '*.sh' -type f -exec chmod +x {} + 2>&1; then
+                    log_warning "  ! ${skill_name}/scripts への chmod に失敗"
+                fi
+            fi
+
             log_success "  ✓ ${skill_name}"
             ((count++))
         fi
@@ -278,7 +323,20 @@ uninstall() {
         fi
     done
 
-    log_info "削除完了 - Scripts: ${scripts_count} 件, Skills: ${skills_count} 件, Commands: ${commands_count} 件, SubAgents: ${subagents_count} 件"
+    # Settings の削除
+    local settings_source="${SCRIPT_DIR}/claude/settings.json"
+    local settings_target="${CLAUDE_DIR}/settings.json"
+    local settings_count=0
+    if [[ -L "$settings_target" ]]; then
+        local link_target=$(readlink "$settings_target")
+        if [[ "$link_target" == "$settings_source" ]]; then
+            rm "$settings_target"
+            log_success "  ✓ 削除: settings.json (バックアップ ${settings_target}.pre-install.* は残置)"
+            ((settings_count++))
+        fi
+    fi
+
+    log_info "削除完了 - Scripts: ${scripts_count} 件, Skills: ${skills_count} 件, Commands: ${commands_count} 件, SubAgents: ${subagents_count} 件, Settings: ${settings_count} 件"
 }
 
 # 状態表示
@@ -289,6 +347,23 @@ show_status() {
     echo "=========================================="
     echo ""
 
+    local settings_source="${SCRIPT_DIR}/claude/settings.json"
+    local settings_target="${CLAUDE_DIR}/settings.json"
+    echo -e "${BLUE}[Settings]${NC} (${settings_target})"
+    if [[ -L "$settings_target" ]]; then
+        local link_target=$(readlink "$settings_target")
+        if [[ "$link_target" == "$settings_source" ]]; then
+            echo -e "  ${GREEN}✓${NC} settings.json (リンク済み)"
+        else
+            echo -e "  ${YELLOW}!${NC} settings.json (別のリンク先: $link_target)"
+        fi
+    elif [[ -f "$settings_target" ]]; then
+        echo -e "  ${YELLOW}!${NC} settings.json (実ファイルが存在)"
+    else
+        echo -e "  ${RED}✗${NC} settings.json (未インストール)"
+    fi
+
+    echo ""
     local scripts_dir="${SCRIPT_DIR}/claude/scripts"
     local scripts_target_dir="${CLAUDE_DIR}/scripts"
     echo -e "${BLUE}[Scripts]${NC} (${scripts_target_dir})"
@@ -404,6 +479,8 @@ main() {
             install_skills
             echo ""
             install_subagents
+            echo ""
+            install_settings
             echo ""
             log_success "セットアップが完了しました！"
             echo ""

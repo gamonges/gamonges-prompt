@@ -1,6 +1,6 @@
 ---
 name: create-pr
-description: Create a Pull Request to develop branch from current branch (/create-pr)
+description: 現在のブランチから develop ブランチへ Pull Request を作成する。実装完了後の PR 化、レビュー依頼の準備、`/create-pr` 呼び出しで使用。
 ---
 
 指定されたブランチ（または現在のブランチ）から develop ブランチ向けのプルリクエストを作成します。
