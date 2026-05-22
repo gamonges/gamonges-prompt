@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CSS-only タブ実装サンプル (html-view example)</title>
+<style>
+:root {
+  --bg: #f6f8fa;
+  --card-bg: #ffffff;
+  --border: #d0d7de;
+  --text: #1f2328;
+  --muted: #656d76;
+  --accent: #0969da;
+  --tab-inactive: #f6f8fa;
+  --tab-active: #ffffff;
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+               "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 24px;
+  line-height: 1.6;
+  font-size: 15px;
+}
+h1 { font-size: 1.5em; margin-bottom: 8px; }
+p.intro { color: var(--muted); margin-bottom: 24px; }
+
+/*
+  CSS-only タブ実装パターン
+  ─────────────────────────
+  1. radio input をタブ数分だけ用意し、すべて同じ name で 1 つだけ選択可能に
+  2. label を radio の sibling として配置し、見た目をタブにする
+  3. 各タブ content (`<section class="tab-content">`) を radio:checked の
+     sibling として配置し、:checked ~ .tab-content[data-tab=N] で表示制御
+  4. JS 不要、印刷時も :checked が反映される
+*/
+.tabs {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.tabs input[type="radio"] { display: none; }
+
+.tab-labels {
+  display: flex;
+  background: var(--tab-inactive);
+  border-bottom: 1px solid var(--border);
+}
+.tab-labels label {
+  flex: 1;
+  padding: 12px 16px;
+  text-align: center;
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--muted);
+  border-right: 1px solid var(--border);
+  transition: background 0.15s, color 0.15s;
+}
+.tab-labels label:last-child { border-right: none; }
+.tab-labels label:hover { background: #eaeef2; }
+
+.tabs > input#tab-1:checked ~ .tab-labels label[for="tab-1"],
+.tabs > input#tab-2:checked ~ .tab-labels label[for="tab-2"],
+.tabs > input#tab-3:checked ~ .tab-labels label[for="tab-3"] {
+  background: var(--tab-active);
+  color: var(--accent);
+  border-bottom: 2px solid var(--accent);
+  margin-bottom: -1px;
+}
+
+.tab-content { display: none; padding: 20px; }
+.tabs > input#tab-1:checked ~ .tab-content[data-tab="1"],
+.tabs > input#tab-2:checked ~ .tab-content[data-tab="2"],
+.tabs > input#tab-3:checked ~ .tab-content[data-tab="3"] { display: block; }
+
+@media (max-width: 700px) {
+  .tab-labels { flex-direction: column; }
+  .tab-labels label { border-right: none; border-bottom: 1px solid var(--border); }
+}
+@media print {
+  .tab-labels { display: none; }
+  .tab-content { display: block !important; border-top: 1px solid var(--border); }
+  .tab-content::before { content: attr(data-tab-title); font-weight: 700; display: block; margin-bottom: 8px; }
+}
+</style>
+</head>
+<body>
+<h1>CSS-only タブ実装サンプル</h1>
+<p class="intro">
+  JS を使わずに <code>input[type=radio]:checked ~ .tab-content</code> の sibling selector
+  でタブ切替を実現するパターン。`<a href="#anchor">` のページ内リンクで深掘りも可能。
+</p>
+
+<div class="tabs">
+  <input type="radio" name="tab-group" id="tab-1" checked>
+  <input type="radio" name="tab-group" id="tab-2">
+  <input type="radio" name="tab-group" id="tab-3">
+
+  <div class="tab-labels">
+    <label for="tab-1">Frontend</label>
+    <label for="tab-2">Backend</label>
+    <label for="tab-3">Infra</label>
+  </div>
+
+  <section class="tab-content" data-tab="1" data-tab-title="Frontend">
+    <h2>Frontend</h2>
+    <p>React コンポーネント、状態管理、API クライアントの実装。</p>
+    <ul>
+      <li><code>src/components/Dashboard.tsx</code> — KPI ウィジェット親</li>
+      <li><code>src/hooks/useKpi.ts</code> — データ取得 + キャッシュ</li>
+    </ul>
+  </section>
+
+  <section class="tab-content" data-tab="2" data-tab-title="Backend">
+    <h2>Backend</h2>
+    <p>API エンドポイント、ビジネスロジック、永続化層。</p>
+    <ul>
+      <li><code>api/routes/kpi.ts</code> — GET /api/kpi</li>
+      <li><code>api/services/aggregator.ts</code> — 集計ロジック</li>
+    </ul>
+  </section>
+
+  <section class="tab-content" data-tab="3" data-tab-title="Infra">
+    <h2>Infra</h2>
+    <p>CloudFormation / IAM / モニタリング。</p>
+    <ul>
+      <li><code>infra/cfn/kpi-api.yaml</code> — Lambda + API Gateway</li>
+      <li><code>infra/monitor/kpi-alarm.yaml</code> — CloudWatch アラーム</li>
+    </ul>
+  </section>
+</div>
+</body>
+</html>

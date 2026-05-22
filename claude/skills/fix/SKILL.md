@@ -107,3 +107,17 @@ Cursor 環境の場合は `.cursor/plan.md` または指定された plan ファ
 - 入力ソース（fixes.md / review.md / PR コメント / ギャップ分析）の取込み結果
 - 最優先で対応すべきステップ（P1 Critical の一覧）
 - 次のステップ案内（`/implement ./tmp/fix-plan.md` または `/revise`）
+
+#### HTML view 化 (オプション)
+
+完了報告に続けて、以下をユーザーに尋ねる:
+
+> **HTML 化しますか?** (人間レビュア向けのデザイン HTML を生成)
+
+ユーザーが Yes と回答した場合、**Claude は自動実行せず**、次のコマンドを案内する:
+
+```
+/html-view ./tmp/fix-plan.md
+```
+
+ユーザーが明示的に slash command を入力することで HTML 生成 + ブラウザ自動起動が完了する。

@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>PR #49 修正計画 (Round 2) — Google Drive Distributed Map</title>
+<style>
+  :root {
+    --bg: #f6f8fa;
+    --card-bg: #ffffff;
+    --border: #d0d7de;
+    --text: #1f2328;
+    --muted: #656d76;
+    --problem-bg: #fff5f5;
+    --problem-border: #ff8888;
+    --problem-text: #a40e26;
+    --fix-bg: #f0fff4;
+    --fix-border: #4ac26b;
+    --fix-text: #1a7f37;
+    --code-bg: #f0f3f6;
+    --p1: #d1242f;
+    --p2: #bf8700;
+    --p3: #0969da;
+    --p4: #6e7781;
+    --done: #1a7f37;
+    --pending: #9a6700;
+    --rejected: #6e7781;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    margin: 0;
+    padding: 24px;
+    line-height: 1.6;
+  }
+  .container { max-width: 1100px; margin: 0 auto; }
+  header { margin-bottom: 32px; }
+  h1 {
+    font-size: 28px;
+    margin: 0 0 8px;
+    border-bottom: 3px solid var(--p1);
+    padding-bottom: 12px;
+  }
+  .meta {
+    color: var(--muted);
+    font-size: 14px;
+    margin-bottom: 8px;
+  }
+  .meta a { color: var(--p3); text-decoration: none; }
+  .meta a:hover { text-decoration: underline; }
+
+  h2 {
+    font-size: 22px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 8px;
+    margin-top: 40px;
+  }
+  h3 { font-size: 18px; margin-top: 24px; }
+
+  /* タイムライン */
+  .timeline {
+    display: flex;
+    gap: 16px;
+    margin: 24px 0;
+    flex-wrap: wrap;
+  }
+  .timeline-card {
+    flex: 1;
+    min-width: 320px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .timeline-card.done { border-left: 4px solid var(--done); }
+  .timeline-card.pending { border-left: 4px solid var(--pending); }
+  .timeline-card h3 { margin-top: 0; display: flex; align-items: center; gap: 8px; }
+  .timeline-card .status-badge {
+    font-size: 11px;
+    font-weight: bold;
+    padding: 2px 8px;
+    border-radius: 12px;
+    color: white;
+  }
+  .timeline-card.done .status-badge { background: var(--done); }
+  .timeline-card.pending .status-badge { background: var(--pending); }
+  .timeline-card ul { padding-left: 20px; margin: 8px 0; }
+  .timeline-card code {
+    background: var(--code-bg);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 90%;
+  }
+
+  /* サマリーテーブル */
+  table.summary {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  table.summary th, table.summary td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    font-size: 14px;
+  }
+  table.summary th {
+    background: var(--bg);
+    font-weight: 600;
+  }
+  table.summary tr:last-child td { border-bottom: none; }
+
+  /* 優先度バッジ */
+  .priority {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 12px;
+    color: white;
+    font-size: 12px;
+    font-weight: bold;
+    margin-right: 8px;
+  }
+  .priority.p1 { background: var(--p1); }
+  .priority.p2 { background: var(--p2); }
+  .priority.p3 { background: var(--p3); }
+  .priority.p4 { background: var(--p4); }
+
+  /* ステップカード */
+  .step {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin: 24px 0;
+    overflow: hidden;
+  }
+  .step-header {
+    background: linear-gradient(to right, var(--bg), var(--card-bg));
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .step-header h3 { margin: 0; font-size: 17px; }
+  .step-meta {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .step-meta span code {
+    background: var(--code-bg);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: var(--text);
+  }
+
+  .step-body { padding: 0; }
+  .problem, .fix {
+    padding: 16px 20px;
+  }
+  .problem {
+    background: var(--problem-bg);
+    border-left: 4px solid var(--problem-border);
+  }
+  .fix {
+    background: var(--fix-bg);
+    border-left: 4px solid var(--fix-border);
+  }
+  .problem h4, .fix h4 {
+    margin: 0 0 10px;
+    font-size: 14px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .problem h4 { color: var(--problem-text); }
+  .fix h4 { color: var(--fix-text); }
+  .problem h4::before { content: "⚠ "; }
+  .fix h4::before { content: "✓ "; }
+
+  .step .meta-row {
+    padding: 12px 20px;
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+  }
+  .step .meta-row strong { color: var(--text); }
+
+  /* コードブロック */
+  pre {
+    background: #1f2328;
+    color: #e6edf3;
+    padding: 12px 16px;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.5;
+    margin: 12px 0;
+  }
+  pre code { background: transparent; padding: 0; color: inherit; }
+  code {
+    font-family: "SF Mono", "Monaco", "Menlo", "Consolas", monospace;
+    font-size: 90%;
+    background: var(--code-bg);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  /* 却下カード */
+  .rejected-card {
+    background: #f6f8fa;
+    border-left: 4px solid var(--rejected);
+    padding: 16px 20px;
+    border-radius: 8px;
+    margin: 16px 0;
+    border: 1px solid var(--border);
+  }
+  .rejected-card h4 { margin-top: 0; color: var(--rejected); }
+  .rejected-card h4::before { content: "✗ "; }
+
+  /* テーブル */
+  table.detail {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 13px;
+  }
+  table.detail th, table.detail td {
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    text-align: left;
+  }
+  table.detail th { background: var(--bg); }
+
+  .commit-hash {
+    font-family: "SF Mono", monospace;
+    background: #1f2328;
+    color: #79c0ff;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+  }
+
+  /* インライン情報ブロック */
+  .info-block {
+    background: #fff8e1;
+    border-left: 4px solid #f9c513;
+    padding: 12px 16px;
+    border-radius: 4px;
+    margin: 16px 0;
+    font-size: 14px;
+  }
+  .info-block strong { color: #9a6700; }
+
+  /* レスポンシブ */
+  @media (max-width: 700px) {
+    body { padding: 12px; }
+    .timeline-card { min-width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <h1>修正計画: PR #49 残課題 (Round 2)</h1>
+  <div class="meta">
+    <strong>PR:</strong> <a href="https://github.com/standandforce/data-connector/pull/49">#49 — feat: Google Drive ファイル取り込み + Distributed Map 並列化対応</a>
+  </div>
+  <div class="meta"><strong>ブランチ:</strong> worktree-implement-google-drive → main</div>
+  <div class="meta"><strong>計画日:</strong> 2026-05-22</div>
+  <div class="meta"><strong>前提コミット:</strong> <span class="commit-hash">97b2db5</span> (Round 1 完了)</div>
+</header>
+
+<h2>📜 Round 構成 (タイムライン)</h2>
+
+<div class="timeline">
+  <div class="timeline-card done">
+    <h3>Round 1 <span class="status-badge">DONE</span></h3>
+    <p style="margin: 0 0 8px; color: var(--muted); font-size: 13px;">コミット <span class="commit-hash">97b2db5</span> で完了済み</p>
+    <ul>
+      <li><code>ApiFetchPageOutput</code> 型に <code>driveMode</code> / <code>driveIndex</code> 追加</li>
+      <li>handler dual-mode passthrough 実装</li>
+      <li><code>api-chain.ts</code> に <code>driveMode='ENUMERATE_ALL_DRIVES'</code> 注入</li>
+      <li><code>DrivesFetchPage</code> extraResultSelector 拡張</li>
+      <li>handler.test.ts に passthrough テスト 56 行追加</li>
+      <li>CDK snapshot 更新</li>
+    </ul>
+    <p style="font-size: 13px; color: var(--muted);">→ Critical #1 + PR レビュー #4-#7 (devin/greptile) クローズ</p>
+  </div>
+  <div class="timeline-card pending">
+    <h3>Round 2 <span class="status-badge">PENDING</span></h3>
+    <p style="margin: 0 0 8px; color: var(--muted); font-size: 13px;">本計画スコープ</p>
+    <ul>
+      <li>Critical #2: SM timeout (6h vs 想定 50h)</li>
+      <li>Critical #3: folder-path-cache 循環参照</li>
+      <li>gemini #1: process ループ内 timeout チェック</li>
+      <li>gemini #2: <code>files.get</code> fields ハードコード重複</li>
+      <li>greptile #8: StubTokenProvider セキュリティ</li>
+    </ul>
+    <p style="font-size: 13px; color: var(--muted);">Minor #4-#18 はフォローアップ PR で対応</p>
+  </div>
+</div>
+
+<h2>📊 修正サマリー</h2>
+
+<table class="summary">
+  <thead>
+    <tr>
+      <th>優先度</th>
+      <th>件数</th>
+      <th>該当ステップ</th>
+      <th>分類</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td><span class="priority p1">P1</span> Critical</td><td>6 件</td><td>ステップ 1, 2, 3, 4, 7, 8</td><td>本番ブロッカー / バグ修正</td></tr>
+    <tr><td><span class="priority p2">P2</span> High</td><td>3 件</td><td>ステップ 5, 6, 9</td><td>品質 / セキュリティ強化</td></tr>
+    <tr><td><span class="priority p3">P3</span> Medium</td><td>1 件</td><td>ステップ 10</td><td>レビュー返信</td></tr>
+  </tbody>
+</table>
+
+<h2>📥 入力ソース取込み結果</h2>
+
+<table class="summary">
+  <thead>
+    <tr><th>ソース</th><th>件数</th><th>反映方針</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>tmp/review/unified.md</code> Critical #2 (SM timeout)</td><td>1</td><td>ステップ 7-8</td></tr>
+    <tr><td><code>tmp/review/unified.md</code> Critical #3 (循環参照)</td><td>1</td><td>ステップ 1-2</td></tr>
+    <tr><td>PR レビュー gemini #1 (process ループ timeout)</td><td>1</td><td>ステップ 3-4</td></tr>
+    <tr><td>PR レビュー gemini #2 (fields ハードコード)</td><td>1</td><td>ステップ 5</td></tr>
+    <tr><td>PR レビュー gemini #3 (My Drive driveKey='root')</td><td>1</td><td><strong style="color: var(--rejected);">却下</strong> — <code>tmp/lessons.md</code> 2026-05-21 で検証済み</td></tr>
+    <tr><td>PR レビュー greptile #8 (StubTokenProvider)</td><td>1</td><td>ステップ 6</td></tr>
+    <tr><td><code>tmp/review/unified.md</code> Minor #4-#18</td><td>15</td><td>本計画スコープ外 (フォローアップ PR)</td></tr>
+  </tbody>
+</table>
+
+<h2>🛠 実装ステップ</h2>
+
+<!-- ステップ 1 -->
+<div class="step">
+  <div class="step-header">
+    <h3><span class="priority p1">P1</span>ステップ 1: <code>folder-path-cache.ts</code> に循環検出を追加</h3>
+    <div class="step-meta">
+      <span><strong>種別:</strong> バグ修正</span>
+      <span><strong>出典:</strong> unified.md Critical #3</span>
+      <span><strong>対象:</strong> <code>lambda/data-pipeline/api/ingestion/google-drive/_lib/exploration/folder-path-cache.ts:81-108</code></span>
+    </div>
+  </div>
+  <div class="step-body">
+    <div class="problem">
+      <h4>現状の問題</h4>
+      <p><code>buildFromFlatList</code> 内の再帰関数 <code>resolve(folderId)</code> は memoization のみで循環検出がない。Google Drive API が <code>A→B→A</code> のように <code>parents</code> 循環を返した場合 (API バグ・破損データ・競合) に再帰スタックがオーバーフローし Lambda がクラッシュする。Drive ごとに数十万フォルダを扱う想定なので発火確率は無視できない。</p>
+<pre><code>function resolve(folderId: string): string {
+  const cached = cache.paths[folderId];
+  if (cached !== undefined) return cached;
+  // ...
+  const parentPath = resolve(folder.parentId);  // ← in-progress マーカーなし
+  const fullPath = `${parentPath}/${folder.name}`;
+  cache.paths[folderId] = fullPath;
+  return fullPath;
+}</code></pre>
+    </div>
+    <div class="fix">
+      <h4>修正方針</h4>
+      <p>関数スコープに <code>inProgress = new Set&lt;string&gt;()</code> を保持し、再帰呼び出し前に追加・完了時に削除する <code>try/finally</code> パターン。循環検出時は warn ログ + フォルダ名のみで graceful degradation。</p>
+<pre><code>const inProgress = new Set&lt;string&gt;();
+
+function resolve(folderId: string): string {
+  const cached = cache.paths[folderId];
+  if (cached !== undefined) return cached;
+  if (folderId === driveKey) return driveName;
+
+  if (inProgress.has(folderId)) {
+    const folder = folders.get(folderId);
+    const fallback = folder?.name ?? folderId;
+    cache.paths[folderId] = fallback;
+    logger.warn('folder-path-cache: cycle detected', { folderId, fallback });
+    return fallback;
+  }
+  // ...
+  inProgress.add(folderId);
+  try {
+    const parentPath = resolve(folder.parentId);
+    // ...
+  } finally {
+    inProgress.delete(folderId);
+  }
+}</code></pre>
+    </div>
+  </div>
+  <div class="meta-row">
+    <span><strong>テスト:</strong> ステップ 2 で TDD</span>
+    <span><strong>影響範囲:</strong> 1 ファイル / 戻り値型変更なし</span>
+  </div>
+</div>
+
+<!-- ステップ 2 -->
+<div class="step">
+  <div class="step-header">
+    <h3><span class="priority p1">P1</span>ステップ 2: <code>folder-path-cache.test.ts</code> に循環テストを追加</h3>
+    <div class="step-meta">
+      <span><strong>種別:</strong> テスト追加 (TDD)</span>
+      <span><strong>対象:</strong> <code>_lib/exploration/folder-path-cache.test.ts</code></span>
+    </div>
+  </div>
+  <div class="step-body">
+    <div class="problem">
+      <h4>現状の問題</h4>
+      <p>既存テストには通常系・graceful degradation 系は存在するが、循環参照 (<code>A→B→A</code> / <code>A→A</code>) のリグレッション防止テストが欠落している。ステップ 1 を実装しても、将来再帰ロジックを変更した際に循環ケースが回帰しても検知できない。</p>
+    </div>
+    <div class="fix">
+      <h4>修正方針</h4>
+      <p>3 ケースを追加。ステップ 1 実装前に書いて <strong>赤テスト → 実装 → 緑</strong> を確認する TDD 手順。</p>
+      <ul>
+        <li><strong>ケース 1:</strong> <code>A→B→A</code> でスタックオーバーフローせず <code>cache.paths['A']/['B']</code> が定義される</li>
+        <li><strong>ケース 2:</strong> <code>A→A</code> 自己参照でも throw しない</li>
+        <li><strong>ケース 3:</strong> 通常ケースが memoization で従来通り <code>'Test Drive/A/B'</code> を返す (リグレッション防止)</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ステップ 3 -->
+<div class="step">
+  <div class="step-header">
+    <h3><span class="priority p1">P1</span>ステップ 3: process フェーズループ内に <code>isApproachingTimeout</code> チェックを追加</h3>
+    <div class="step-meta">
+      <span><strong>種別:</strong> バグ修正</span>
+      <span><strong>出典:</strong> PR レビュー gemini #1</span>
+      <span><strong>対象:</strong> <code>handler.ts:475-516</code></span>
+    </div>
+  </div>
+  <div class="step-body">
+    <div class="problem">
+      <h4>現状の問題</h4>
+      <p>process フェーズのバッチループ <code>for (let i = 0; i &lt; batch.length; i += batchConcurrency)</code> に timeout チェックがない。500 アイテムバッチ × API 応答遅延で 10 分上限を超えると、<code>state.totalProcessedFiles</code> の加算と <code>storePendingFileIds</code> 退避が走らず再実行時に同じバッチを丸ごと再処理する。drives / explore フェーズには既存チェックがあるのに process だけ抜けている。</p>
+    </div>
+    <div class="fix">
+      <h4>修正方針</h4>
+      <p>バッチループ先頭で <code>isApproachingTimeout()</code> を判定し、true なら <strong>未処理 chunk を <code>pendingFileIds</code> 先頭に巻き戻し</strong> て <code>break</code>。ループ後の既存ロジック (<code>storePendingFileIds</code> + <code>buildPaginationOutput</code>) で次回再開状態が自然に保存される。</p>
+<pre><code>const items: GoogleDriveFileItem[] = [];
+for (let i = 0; i &lt; batch.length; i += batchConcurrency) {
+  if (isApproachingTimeout()) {
+    pendingFileIds.unshift(...batch.slice(i));
+    logger.info('Process phase approaching timeout, suspending batch', {
+      processedInBatch: items.length,
+      remainingInBatch: batch.length - i,
+    });
+    break;
+  }
+  const chunk = batch.slice(i, i + batchConcurrency);
+  // ... 既存の Promise.allSettled ロジック (変更なし)
+}</code></pre>
+    </div>
+  </div>
+  <div class="meta-row">
+    <span><strong>テスト:</strong> ステップ 4 で TDD</span>
+    <span><strong>影響範囲:</strong> handler.ts process フェーズ 1 箇所のみ</span>
+  </div>
+</div>
+
+<!-- ステップ 4 -->
+<div class="step">
+  <div class="step-header">
+    <h3><span class="priority p1">P1</span>ステップ 4: handler.test.ts に process timeout テストを追加</h3>
+    <div class="step-meta">
+      <span><strong>種別:</strong> テスト追加 (TDD)</span>
+      <span><strong>対象:</strong> <code>handler.test.ts</code></span>
+    </div>
+  </div>
+  <div class="step-body">
+    <div class="problem">
+      <h4>現状の問題</h4>
+      <p>process フェーズの timeout 中断パスがテスト未カバー。<code>MAX_BATCH_DURATION_MS</code> を極小値に env override する手法は drives/explore フェーズの既存テストで確立済みだが、process フェーズには未適用。</p>
+    </div>
+    <div class="fix">
+      <h4>修正方針</h4>
+      <ul>
+        <li><strong>ケース 1:</strong> 100 件 pendingFileIds 投入、<code>MAX_BATCH_DURATION_MS=100ms</code>。1 chunk 目処理後に timeout 発火 → 残り 40 件 + 元 50 件 = 90 件が pendingFileIds に再保存。output に <code>nextLink</code> 含む。</li>
+        <li><strong>ケース 2 (リグレッション防止):</strong> timeout 中断時も既処理 items は <code>saveToDataLake</code> 呼び出しで保存される (mock assertion)。</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ステップ 5 -->
+<div class="step">
+  <div class="step-header">
+    <h3><span class="priority p2">P2</span>ステップ 5: <code>files.get</code> fields を <code>DRIVE_FILE_FIELDS</code> から動的生成</h3>
+    <div class="step-meta">
+      <span><strong>種別:</strong> 品質改善</span>
+      <span><strong>出典:</strong> PR レビュー gemini #2</span>
+      <span><strong>対象:</strong> <code>handler.ts:484</code> + <code>_lib/google-drive-api/types.ts</code></span>
+    </div>
+  </div>
+  <div class="step-body">
+    <div class="problem">
+      <h4>現状の問題</h4>
+      <p><code>handler.ts:484</code> で <code>files.get</code> の <code>fields</code> パラメータがハードコード:</p>
+<pre><code>fields: 'id,name,mimeType,size,createdTime,modifiedTime,parents,owners(displayName,emailAddress,permissionId),lastModifyingUser(displayName,emailAddress),webViewLink,webContentLink,shared,trashed,trashedTime,version,sha1Checksum,description,driveId,capabilities(canDownload,canEdit,canShare)',</code></pre>
+      <p><code>_lib/google-drive-api/types.ts:225-245</code> に同じフィールドが <code>DRIVE_FILE_FIELDS</code> 配列定数として定義済み。今後のフィールド変更で 2 箇所の更新漏れリスク。</p>
+    </div>
+    <div class="fix">
+      <h4>修正方針</h4>
+      <p>types.ts に <code>DRIVE_FILE_GET_FIELDS_PARAM</code> を新規追加 (files.list 用の <code>DRIVE_FILE_FIELDS_PARAM</code> とは別)。handler.ts はこの定数を参照する。</p>
+<pre><code>// types.ts に追加
+export const DRIVE_FILE_GET_FIELDS_PARAM = DRIVE_FILE_FIELDS.join(',');
+
+// handler.ts:482-486 を差し替え
+const response = await processClient.get&lt;DriveFile&gt;(`/files/${fileId}`, {
+  fields: DRIVE_FILE_GET_FIELDS_PARAM,
+  supportsAllDrives: 'true',
+});</code></pre>
+    </div>
+  </div>
+</div>
+
+<!-- ステップ 6 -->
+<div class="step">
+  <div class="step-header">
+    <h3><span class="priority p2">P2</span>ステップ 6: <code>StubTokenProvider</code> にプロダクションガードを追加</h3>
+    <div class="step-meta">
+      <span><strong>種別:</strong> セキュリティ強化</span>
+      <span><strong>出典:</strong> PR レビュー greptile #8</span>
+      <span><strong>対象:</strong> <code>_lib/google-drive-api/stub-token-provider.ts</code></span>
+    </div>
+  </div>
+  <div class="step-body">
+    <div class="problem">
+      <h4>現状の問題</h4>
+      <p><code>handler.ts:183</code> で <code>new StubTokenProvider()</code> を無条件に生成。<code>GOOGLE_DRIVE_STUB_TOKEN</code> 環境変数から固定トークンを読み込み、本番環境に誤って有効なトークンがセットされた場合、全ユーザーが同一認証情報で処理されるリスク。Phase 2 で <code>WifTokenProvider</code> に差し替え予定だが、過渡期のガードがない。</p>
+    </div>
+    <div class="fix">
+      <h4>修正方針</h4>
+      <p>コンストラクタで stage を判定し、prd では明示 throw。非 prd でも warn ログを出して使用中であることを毎 invocation で明示。</p>
+<pre><code>export class StubTokenProvider implements TokenProvider {
+  constructor() {
+    const stage = process.env.STAGE ?? process.env.NODE_ENV;
+    if (stage === 'prd' || stage === 'production') {
+      throw new Error(
+        'StubTokenProvider must not be used in production. Use WifTokenProvider instead.',
+      );
+    }
+    logger.warn('Using StubTokenProvider (Phase 1 only).', { stage });
+  }
+}</code></pre>
+      <p>テスト 2 ケース追加: <code>STAGE=prd</code> で throw / <code>STAGE=dev</code> で warn ログを出して成功。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ステップ 7 -->
+<div class="step">
+  <div class="step-header">
+    <h3><span class="priority p1">P1</span>ステップ 7: <code>OrchestrationStrategy</code> に <code>timeoutHours</code> を追加</h3>
+    <div class="step-meta">
+      <span><strong>種別:</strong> 実装漏れ (Critical #2 前提整備)</span>
+      <span><strong>対象:</strong> <code>config.ts</code> + <code>distributed-map-api-state-machine.ts:190</code></span>
+    </div>
+  </div>
+  <div class="step-body">
+    <div class="problem">
+      <h4>現状の問題</h4>
+      <p><code>distributed-map-api-state-machine.ts:190</code> で <code>timeout: Duration.hours(6)</code> がハードコード。pipeline ごとにチューニング不可能で、Critical #2 の根本対処ができない。</p>
+    </div>
+    <div class="fix">
+      <h4>修正方針</h4>
+      <p>型に <code>timeoutHours?: number</code> を追加。construct 側でデフォルト 24h で受ける。</p>
+<pre><code>export type OrchestrationStrategy =
+  | { type: 'sequential' }
+  | {
+      type: 'distributed-map';
+      maxConcurrency: number;
+      toleratedFailurePercentage?: number;
+      timeoutHours?: number;  // ← 追加 (デフォルト 24h)
+    };
+
+// distributed-map-api-state-machine.ts
+timeout: Duration.hours(orchestrationStrategy.timeoutHours ?? 24),</code></pre>
+    </div>
+  </div>
+</div>
+
+<!-- ステップ 8 -->
+<div class="step">
+  <div class="step-header">
+    <h3><span class="priority p1">P1</span>ステップ 8: GOOGLE_DRIVE config を運用想定値に変更</h3>
+    <div class="step-meta">
+      <span><strong>種別:</strong> バグ修正 (Critical #2 — 本番投入で確実に失敗する設定)</span>
+      <span><strong>対象:</strong> <code>config.ts:337-341</code> + <code>state-machine/index.ts</code></span>
+    </div>
+  </div>
+  <div class="step-body">
+    <div class="problem">
+      <h4>現状の問題</h4>
+      <table class="detail">
+        <thead>
+          <tr><th>設定</th><th>現状値</th><th>想定実行時間</th><th>問題</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Distributed Map SM timeout</td><td>6h</td><td>500 Drive × 30min ÷ 並列 5 = <strong>50h</strong></td><td>本番投入で確実に timeout</td></tr>
+          <tr><td>maxConcurrency</td><td>5</td><td>—</td><td>並列度が低すぎる</td></tr>
+          <tr><td>toleratedFailurePercentage</td><td>0%</td><td>—</td><td>1 Drive 失敗で全体失敗 (運用詰み)</td></tr>
+          <tr><td>メイン Pipeline SM</td><td>8h</td><td>—</td><td>Distributed Map SM (24h 候補) を内包できない</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="fix">
+      <h4>修正方針: 段階的チューニング (3 段階)</h4>
+      <table class="detail">
+        <thead>
+          <tr><th>段階</th><th>maxConcurrency</th><th>toleratedFailurePercentage</th><th>timeoutHours</th><th>メイン SM</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>① 本 PR (初期投入)</strong></td><td>10</td><td>5%</td><td>24h</td><td>12h</td></tr>
+          <tr><td>② 観測 2 週間後</td><td>20</td><td>0% (F-6 後)</td><td>24h</td><td>12h</td></tr>
+          <tr><td>③ 定常運用</td><td>実測再調整</td><td>0</td><td>実測再調整</td><td>—</td></tr>
+        </tbody>
+      </table>
+<pre><code>// config.ts:337-341
+orchestrationStrategy: {
+  type: 'distributed-map',
+  maxConcurrency: 10,
+  toleratedFailurePercentage: 5,
+  timeoutHours: 24,
+},
+
+// state-machine/index.ts
+timeout: Duration.hours(12),  // 8h → 12h</code></pre>
+      <p><strong>採用根拠:</strong></p>
+      <ul>
+        <li>並列度 10 × batchConcurrency 15 = 150 QPS。Google Drive Quota (1000 QPS) に十分余裕</li>
+        <li>500 Drive × 30min ÷ 並列 10 = <strong>25h</strong> → timeoutHours=24h でほぼ収まる</li>
+        <li>toleratedFailurePercentage 5% で 500 Drive × 5% = 25 Drive まで許容 (F-6 完了前の安全弁)</li>
+      </ul>
+      <p><strong>運用ガイド追加 (<code>docs/google-drive/operations.md</code> 新規):</strong></p>
+      <ul>
+        <li>失敗 Drive の特定手順 (CloudWatch Logs Insights クエリ)</li>
+        <li>F-6 (ResultWriterV2) 完了後に <code>toleratedFailurePercentage=0</code> に戻すロードマップ</li>
+      </ul>
+    </div>
+  </div>
+  <div class="meta-row">
+    <span><strong>他パイプライン影響:</strong> sequential 戦略の Box / Entra / M365 / HRMOS は無影響</span>
+  </div>
+</div>
+
+<!-- ステップ 9 -->
+<div class="step">
+  <div class="step-header">
+    <h3><span class="priority p2">P2</span>ステップ 9: CDK snapshot 更新 + <code>pnpm cdk synth</code> 確認</h3>
+    <div class="step-meta">
+      <span><strong>種別:</strong> 品質改善 (テスト固定化)</span>
+      <span><strong>対象:</strong> <code>test/__snapshots__/data-pipeline.test.ts.snap</code></span>
+    </div>
+  </div>
+  <div class="step-body">
+    <div class="problem">
+      <h4>現状の問題</h4>
+      <p>ステップ 7-8 で SM timeout / concurrency / tolerated failure を変更するため CFN テンプレートが変わる。snapshot が古いままだと CI 失敗。</p>
+    </div>
+    <div class="fix">
+      <h4>修正方針</h4>
+      <p>期待される差分は以下のみ。それ以外の論理 ID / リソース変動が無いことを目視確認する。</p>
+      <ul>
+        <li>Distributed Map SM <code>TimeoutSeconds</code>: <code>21600</code> (6h) → <code>86400</code> (24h)</li>
+        <li>メイン Pipeline SM <code>TimeoutSeconds</code>: <code>28800</code> (8h) → <code>43200</code> (12h)</li>
+        <li>Distributed Map <code>MaxConcurrency</code>: <code>5</code> → <code>10</code></li>
+        <li><code>ToleratedFailurePercentage</code>: <code>0</code> → <code>5</code></li>
+      </ul>
+      <p><code>pnpm test -- -u</code> で snapshot 更新 + <code>pnpm cdk synth</code> 別途実行 (synth-time validation の乖離対策 / 教訓 2026-05-22)。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ステップ 10 -->
+<div class="step">
+  <div class="step-header">
+    <h3><span class="priority p3">P3</span>ステップ 10: PR レビュー gemini #3 への却下返信</h3>
+    <div class="step-meta">
+      <span><strong>種別:</strong> コミュニケーション</span>
+      <span><strong>対象:</strong> なし (PR コメント返信のみ)</span>
+    </div>
+  </div>
+  <div class="step-body">
+    <div class="rejected-card">
+      <h4>却下根拠付き返信</h4>
+      <p><strong>gemini 指摘:</strong> 「My Drive の場合、<code>driveKey</code> にエイリアス <code>'root'</code> を使用しているが、API レスポンスの <code>parents</code> フィールドには実際のフォルダ ID が含まれるため一致しない可能性」</p>
+      <p><strong>反論根拠 (<code>tmp/lessons.md</code> 2026-05-21):</strong></p>
+      <blockquote style="border-left: 3px solid var(--p3); padding-left: 12px; color: var(--muted); margin: 12px 0;">
+        Google Drive API は My Drive ルート配下のアイテムについて <code>parents: ['root']</code> を返す。<code>driveKey='root'</code> で実装することで folder-path-cache の親解決が正しく機能する。<code>'user:{email}'</code> を driveKey にすると <code>parents: ['root']</code> と一致しないため逆に解決失敗する。
+      </blockquote>
+      <p><strong>返信文 (案):</strong></p>
+<pre><code>ご指摘ありがとうございます。本実装は実機検証済みで、Google Drive API は
+My Drive ルート配下のアイテムに対して `parents: ['root']` を返すため、
+`driveKey='root'` で文字列比較が成立します。
+
+`'user:{email}'` を driveKey にすると API レスポンスの 'root' と
+一致せず逆に path resolution が失敗するため、現実装が正しいです。</code></pre>
+    </div>
+  </div>
+</div>
+
+<h2>🧪 テスト方針</h2>
+
+<table class="summary">
+  <tbody>
+    <tr><td><strong>TDD 順序</strong></td><td>ステップ 2 (赤) → 1 (実装) → 緑 / ステップ 4 (赤) → 3 (実装) → 緑</td></tr>
+    <tr><td><strong>CDK 側</strong></td><td>ステップ 7-8 完了後 <code>pnpm test -- -u</code> → 差分目視 → <code>pnpm cdk synth</code></td></tr>
+    <tr><td><strong>全体回帰</strong></td><td><code>pnpm test</code> で全 393+ テスト pass</td></tr>
+    <tr><td><strong>手動 dry-run (推奨)</strong></td><td>マージ前にサンドボックステナント (Drive 数 1-5) で Distributed Map 経路を 1 回実行</td></tr>
+  </tbody>
+</table>
+
+<h2>📦 コミット粒度</h2>
+
+<table class="summary">
+  <thead>
+    <tr><th>コミット</th><th>含まれるステップ</th><th>説明</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>C1</strong></td><td>ステップ 1, 2</td><td>folder-path-cache 循環検出 + テスト</td></tr>
+    <tr><td><strong>C2</strong></td><td>ステップ 3, 4, 5, 6</td><td>handler / StubTokenProvider 修正をまとめて</td></tr>
+    <tr><td><strong>C3</strong></td><td>ステップ 7, 8, 9</td><td>CDK 側修正 + snapshot 更新</td></tr>
+    <tr><td>C4 (任意)</td><td>ステップ 8 の運用ドキュメント</td><td><code>docs/google-drive/operations.md</code> 新規 or <code>phases.md</code> 追記</td></tr>
+    <tr><td>PR 返信</td><td>ステップ 10</td><td>GitHub PR 上で投稿</td></tr>
+  </tbody>
+</table>
+
+<h2>🗂 影響範囲</h2>
+
+<table class="summary">
+  <thead>
+    <tr><th>レイヤー</th><th>ファイル</th><th>種別</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Lambda</td><td><code>_lib/exploration/folder-path-cache.ts</code></td><td>cycle 検出追加</td></tr>
+    <tr><td>Lambda テスト</td><td><code>_lib/exploration/folder-path-cache.test.ts</code></td><td>テスト追加</td></tr>
+    <tr><td>Lambda</td><td><code>handler.ts</code></td><td>process ループ timeout + fields 共有化</td></tr>
+    <tr><td>Lambda</td><td><code>_lib/google-drive-api/types.ts</code></td><td><code>DRIVE_FILE_GET_FIELDS_PARAM</code> 追加</td></tr>
+    <tr><td>Lambda</td><td><code>_lib/google-drive-api/stub-token-provider.ts</code></td><td>prd ガード追加</td></tr>
+    <tr><td>Lambda テスト</td><td><code>handler.test.ts</code> + <code>stub-token-provider.test.ts</code></td><td>テスト追加</td></tr>
+    <tr><td>CDK</td><td><code>config.ts</code></td><td><code>timeoutHours</code> 型 + GOOGLE_DRIVE config 値変更</td></tr>
+    <tr><td>CDK</td><td><code>constructs/distributed-map-api-state-machine.ts</code></td><td>timeout を config 経由に変更</td></tr>
+    <tr><td>CDK</td><td><code>constructs/state-machine/index.ts</code></td><td>メイン Pipeline SM 8h → 12h</td></tr>
+    <tr><td>CDK テスト</td><td><code>test/__snapshots__/data-pipeline.test.ts.snap</code></td><td>snapshot 更新</td></tr>
+    <tr><td>ドキュメント</td><td><code>docs/google-drive/operations.md</code> (新規)</td><td>運用ガイド</td></tr>
+  </tbody>
+</table>
+
+<div class="info-block">
+  <strong>他パイプライン影響:</strong>
+  <code>OrchestrationStrategy</code> の <code>timeoutHours</code> は optional のため、<code>sequential</code> 戦略の Box / Entra / M365 / HRMOS は無影響。<code>DRIVE_FILE_GET_FIELDS_PARAM</code> は Google Drive 専用なので他サービスに波及なし。
+</div>
+
+<h2>⚠️ 注意事項</h2>
+
+<ul>
+  <li><strong>Round 1 (97b2db5) を前提</strong>: driveMode passthrough 等の整合性修正は完了済みのため、本計画では再修正しない</li>
+  <li><strong>Minor #4-#18 は本計画スコープ外</strong>: マージブロッカーではない指摘は別 PR で対応</li>
+  <li><strong>Critical #2 の運用観測</strong>: ステップ 8 の <code>maxConcurrency=10 / tolerated=5 / 24h</code> は観測無しでの保守的初期値。マージ後 2 週間程度の dev/stg 観測を経て第 2 段階チューニングへ</li>
+  <li><strong>StubTokenProvider ガード</strong>: Phase 2 (WifTokenProvider) 切り替え漏れによる本番事故を防ぐ予防策</li>
+  <li><strong><code>tmp/fix-plan.md</code> はリポジトリにコミットしない</strong> (グローバル CLAUDE.md ルール)</li>
+  <li><strong>デプロイは Google Drive パイプラインの非実行時間帯に行う</strong> (教訓 2026-05-22 — Round 1 から継続)</li>
+</ul>
+
+<h2>📌 フォローアップ候補 (別 PR)</h2>
+
+<table class="summary">
+  <thead>
+    <tr><th>分類</th><th>項目</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>本 PR 同時対応推奨 (低コスト)</strong></td><td>Minor #4 (folderMeta リーク) / #5 (サニタイズ) / #6 (dead args) / #14 (バッチサマリログ)</td></tr>
+    <tr><td>別 PR / フォローアップ</td><td>Minor #7-#13, #15-#18 (リトライ累積回数 / cleanup ヘルパー化 / 型ガード / parseGoogleDriveItems / normalization default / handler 700 行分割 / F-7 リーク / 可観測性 / FGAC / timeout バッファ)</td></tr>
+  </tbody>
+</table>
+
+<footer style="margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; text-align: center;">
+  Generated from <code>tmp/fix-plan.md</code> · 2026-05-22 · PR #49 Round 2
+</footer>
+
+</div>
+</body>
+</html>
