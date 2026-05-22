@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>[ADR][Storage &amp; Files] Google Drive 全量取り込みパイプライン [2026-05]</title>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --fg: #1f2328;
+      --muted: #57606a;
+      --border: #d0d7de;
+      --code-bg: #f6f8fa;
+      --callout-bg: #ddf4ff;
+      --callout-border: #54aeff;
+      --accent: #0969da;
+      --highlight: #fff8c5;
+      --highlight-border: #d4a72c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans",
+                   "Hiragino Kaku Gothic ProN", "Noto Sans CJK JP", Meiryo, sans-serif;
+      line-height: 1.7;
+      color: var(--fg);
+      background: var(--bg);
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem 4rem;
+      font-size: 15px;
+    }
+    header.adr-header {
+      border-bottom: 2px solid var(--border);
+      padding-bottom: 1rem;
+      margin-bottom: 2rem;
+    }
+    header.adr-header h1 {
+      font-size: 1.75rem;
+      margin: 0 0 0.5rem;
+      line-height: 1.3;
+    }
+    header.adr-header .meta {
+      color: var(--muted);
+      font-size: 0.875rem;
+      margin: 0;
+    }
+    header.adr-header .meta dt,
+    header.adr-header .meta dd {
+      display: inline;
+      margin: 0;
+    }
+    header.adr-header .meta dt::after { content: ": "; }
+    header.adr-header .meta dd::after { content: " / "; }
+    header.adr-header .meta dd:last-child::after { content: ""; }
+
+    h1, h2, h3, h4 {
+      line-height: 1.3;
+      font-weight: 600;
+    }
+    h2 {
+      font-size: 1.5rem;
+      margin: 2.5rem 0 1rem;
+      padding-bottom: 0.3rem;
+      border-bottom: 1px solid var(--border);
+    }
+    h3 {
+      font-size: 1.2rem;
+      margin: 1.75rem 0 0.75rem;
+    }
+    h4 {
+      font-size: 1.05rem;
+      margin: 1.25rem 0 0.5rem;
+    }
+
+    p { margin: 0.75rem 0; }
+
+    ul, ol {
+      padding-left: 1.5rem;
+      margin: 0.5rem 0;
+    }
+    li { margin: 0.25rem 0; }
+    li > ul, li > ol { margin: 0.25rem 0; }
+
+    code {
+      background: var(--code-bg);
+      padding: 0.125rem 0.375rem;
+      border-radius: 4px;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 0.875em;
+    }
+    pre {
+      background: var(--code-bg);
+      padding: 1rem;
+      border-radius: 6px;
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      font-size: 0.875em;
+      line-height: 1.5;
+    }
+    pre code {
+      background: transparent;
+      padding: 0;
+      font-size: 1em;
+    }
+
+    .callout {
+      background: #ddfbe8;
+      border-left: 4px solid #1f883d;
+      padding: 1rem 1.25rem;
+      border-radius: 6px;
+      margin: 1.5rem 0;
+    }
+    .callout .callout-title {
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .callout .callout-title::before { content: "📌"; }
+    .callout p { margin: 0.5rem 0; }
+
+    .info-callout {
+      background: var(--callout-bg);
+      border-left: 4px solid var(--callout-border);
+      padding: 1rem 1.25rem;
+      border-radius: 6px;
+      margin: 1.5rem 0;
+      font-size: 0.95em;
+    }
+
+    details {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      margin: 0.75rem 0;
+    }
+    details summary {
+      cursor: pointer;
+      font-weight: 600;
+      padding: 0.25rem 0;
+    }
+    details[open] summary {
+      margin-bottom: 0.75rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 1rem 0;
+      font-size: 0.95em;
+    }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 0.5rem 0.75rem;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: var(--code-bg);
+      font-weight: 600;
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    a:hover { text-decoration: underline; }
+
+    .status {
+      display: inline-block;
+      padding: 0.25rem 0.75rem;
+      background: #dafbe1;
+      color: #1a7f37;
+      border-radius: 12px;
+      font-size: 0.875rem;
+      font-weight: 600;
+    }
+
+    .mermaid {
+      background: white;
+      padding: 1rem;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      text-align: center;
+      margin: 1rem 0;
+    }
+
+    hr {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 2rem 0;
+    }
+
+    .highlight {
+      background: var(--highlight);
+      padding: 0.125rem 0.25rem;
+      border-radius: 3px;
+    }
+
+    @media print {
+      details { break-inside: avoid; }
+      details:not([open]) > *:not(summary) { display: none; }
+      details[open] > *:not(summary) { display: block; }
+      pre { white-space: pre-wrap; }
+      a { color: var(--fg); text-decoration: none; }
+    }
+  </style>
+</head>
+<body>
+
+<header class="adr-header">
+  <h1>[ADR][Storage &amp; Files] Google Drive 全量取り込みパイプライン [2026-05]</h1>
+  <dl class="meta">
+    <dt>ADR-ID</dt><dd>ADR-376</dd>
+    <dt>Collaborator</dt><dd>蒲生廣人</dd>
+    <dt>作成日</dt><dd>2026-05-22</dd>
+    <dt>最終更新日</dt><dd>2026-05-22</dd>
+    <dt>採用状況</dt><dd><span class="status">承認済み</span></dd>
+    <dt>関連 PR</dt><dd><a href="https://github.com/standandforce/dresscode-data-connector/pull/49">#49</a></dd>
+  </dl>
+</header>
+
+<section>
+  <h2>文脈</h2>
+
+  <h3>背景</h3>
+  <p>
+    dresscode-data-connector の既存 API パイプライン（ENTRA / M365 / BOX / HRMOS）は、<code>FetchPage</code> Lambda を <code>nextLink</code> で直列ループする <code>ApiStateMachine</code> を共通利用している。新規追加する <strong>GOOGLE_DRIVE × FILE</strong> は以下のドメイン特性により、既存 sequential パターンでは現実的な時間で完了しない。
+  </p>
+  <ul>
+    <li><strong>対象規模</strong>: 500 Drive 程度 / 1 Drive あたり最大 30 分（実測ベース）</li>
+    <li><strong>Drive 単位の独立性</strong>: My Drive はオーナー毎、Shared Drive は driveId 毎に認証 (DwD impersonation) と quotas が分離しており、並列化しても互いに干渉しない</li>
+    <li><strong>API 制約</strong>:
+      <ul>
+        <li><code>files.list</code> の <code>pageSize</code> 最大値は 100（Box の 1000 と異なる）</li>
+        <li>Drive 横断のページネーションは存在しない（1 Drive 内のみ）</li>
+        <li><code>permissions.list</code> はファイル単位 API のため「ファイル数 × 1 呼び出し」が必要</li>
+      </ul>
+    </li>
+    <li><strong>基盤制約</strong>: Lambda 10 分タイムアウト / Step Functions Standard 子実行 25,000 遷移上限 / state 256KB 上限</li>
+    <li><strong>取り込みモード</strong>: 初期実装は FULL のみ（INCREMENTAL は将来対応）</li>
+  </ul>
+  <p>
+    直列実行した場合、500 Drive × 30 分 = <strong>250 時間</strong>となり、リトライ・運用に耐えない。かつ、<strong>既存 4 サービスのパイプラインを 1 byte も壊さずに</strong>拡張することが必須条件（CI の CFN snapshot diff で担保）。
+  </p>
+</section>
+
+<section>
+  <h2>結論</h2>
+
+  <div class="callout">
+    <div class="callout-title">チームに特に共有したい 2 点</div>
+    <p><strong>1. 全ファイル・フォルダの収集方法</strong> — Drive 単位のフラット <code>files.list</code> で 1 Drive 内の <strong>ファイル + フォルダを区別なく一気に列挙</strong>し、収集後に <code>folderMeta</code> から <code>FolderPathCache</code> を O(N) メモ化で構築する。再帰的にフォルダを掘る従来パターンを採用しなかった。</p>
+    <p><strong>2. Distributed Map による Drive 単位並列 Fetch</strong> — 新規 construct <code>DistributedMapApiStateMachine</code> を導入し、<strong>1 子実行 = 1 Drive</strong> で <code>FetchPage</code> Lambda を並列に走らせる。Lambda 10 分タイムアウトと Step Functions 25,000 遷移上限の双方を 1 つの設計で吸収する。</p>
+    <p>その他の判断（Claim-Check / handler dual-mode / ファクトリー / CDK 循環依存回避）はこの 2 点を成立させるための補助である。</p>
+  </div>
+
+  <h3>重点 1: フラット <code>files.list</code> + 後段 <code>FolderPathCache</code> で全件収集</h3>
+
+  <h4>何を採用したか</h4>
+  <p>
+    1 Drive あたり 1 種類の API 呼び出し（<code>files.list</code>）で <strong>ファイルとフォルダを区別なくフラットに全件列挙</strong>し、すべて集めた後で <code>folderMeta</code> Map から <code>FolderPathCache</code> を構築する。フォルダを再帰的に掘り下げて子を辿る古典パターンは採用しなかった。
+  </p>
+
+  <h4>実装の中心</h4>
+  <p><code>lambda/data-pipeline/api/ingestion/google-drive/_lib/google-drive-api/files.ts</code>:</p>
+<pre><code>export async function listDriveItems(
+  client: GoogleDriveApiClient,
+  options: { driveId?: string; ownerEmail?: string; pageToken?: string },
+) {
+  const params: Record&lt;string, string&gt; = {
+    fields: DRIVE_FILE_FIELDS_PARAM,
+    pageSize: '100',                 // Google Drive API の最大値
+    supportsAllDrives: 'true',
+  };
+  if (options.driveId) {
+    // Shared Drive: 内側全件を 1 リストで取得
+    params.corpora = 'drive';
+    params.driveId = options.driveId;
+    params.includeItemsFromAllDrives = 'true';
+    params.q = 'trashed=false';
+  } else {
+    // My Drive: オーナーのファイルのみ
+    params.q = "'me' in owners and trashed=false";
+  }
+}</code></pre>
+  <p><code>explore</code> フェーズの handler 側ループでは、<strong>ファイル / フォルダの両方を <code>pendingFileIds</code> に積み、フォルダだけ <code>folderMeta</code> にも保存</strong>する：</p>
+<pre><code>for (const item of result.files) {
+  if (item.mimeType === FOLDER_MIME_TYPE) {
+    folderMeta.set(item.id, { name: item.name, parentId: item.parents?.[0] });
+  }
+  // ファイル・フォルダ両方を Data Lake 保存対象にする
+  pendingFileIds.push(item.id);
+  exploreCache.set(item.id, item);
+}</code></pre>
+  <p>
+    全件列挙が終わったタイミングで <code>FolderPathCache</code> を一括構築する。フラット list では <strong>子フォルダが親より先に出現することがある</strong>ため、メモ化付き再帰でパス解決を行う（計算量 O(N)、各フォルダは 1 度しか resolve されない）。
+  </p>
+
+  <h4>My Drive と Shared Drive で <code>driveKey</code> を揃える</h4>
+  <p>
+    Google Drive API は My Drive のトップに置かれたファイルの親として <code>'root'</code> を返すため、My Drive 用の <code>driveKey</code> も <code>'root'</code> に揃える（<code>'user:{email}'</code> などにすると親解決が崩れる）。Shared Drive は <code>driveId</code> をそのまま使う。
+  </p>
+<pre><code>const driveKey = driveId ?? 'root';
+const driveName = currentDrive.type === 'SHARED_DRIVE' ? currentDrive.driveName : 'My Drive';
+const folderPathCache = buildFromFlatList(folderMeta, driveKey, driveName);</code></pre>
+
+  <h4><code>permissions.list</code> だけはファイル単位</h4>
+  <p>
+    <code>files.list</code> は権限を返さないため、<code>process</code> フェーズで 500 件単位のバッチを <code>Promise.allSettled</code> + <code>GOOGLE_DRIVE_BATCH_CONCURRENCY=15</code> で並列実行する。403/404 は空配列を返して skip、それ以外は warn ログのみで握りつぶさず例外化する。
+  </p>
+
+  <h3>重点 2: Distributed Map による Drive 単位並列 Fetch</h3>
+
+  <h4>何を採用したか</h4>
+  <p>
+    新規 construct <code>DistributedMapApiStateMachine</code> を導入し、AWS Step Functions <strong>Distributed Map</strong> で Drive 単位に水平並列化する。<strong>1 子実行 = 1 Drive</strong> で <code>FetchPage</code> Lambda を回し、Drive 内のページネーションは子実行内ループで処理する。
+  </p>
+
+  <h4>フロー図</h4>
+<pre class="mermaid">
+flowchart TD
+    A["DrivesFetchPage<br>driveMode=ENUMERATE_ALL_DRIVES"] --> B{"CheckDrivesNextLink"}
+    B -- "nextLink あり" --> A
+    B -- "nextLink なし" --> C["DistributedMap<br>S3JsonItemReader<br>maxConcurrency=5"]
+    C --> D["DriveFetchPage<br>driveMode=PROCESS_SINGLE_DRIVE"]
+    D --> E{"CheckDriveNextLink"}
+    E -- "nextLink あり" --> D
+    E -- "nextLink なし" --> F["DriveDone"]
+    C --> G["ListPages"]
+    G --> H["NormalizeMap"]
+</pre>
+
+  <h4>itemReader / itemSelector の要点</h4>
+  <p><code>lib/stack/data-pipeline/constructs/distributed-map-api-state-machine.ts</code>:</p>
+<pre><code>const distributedMap = new sfn.DistributedMap(this, `DistributedMap_${constructId}`, {
+  itemReader: new sfn.S3JsonItemReader({
+    bucket: workBucket,
+    key: sfn.JsonPath.stringAt('$.driveListS3Key'),   // 前段が S3 に退避した driveList を入力
+  }),
+  mapExecutionType: sfn.StateMachineType.STANDARD,
+  maxConcurrency: orchestrationStrategy.maxConcurrency,            // 5
+  toleratedFailurePercentage: orchestrationStrategy.toleratedFailurePercentage ?? 0,
+  itemSelector: {
+    'tenantId.$': '$.tenantId',
+    /* ... */
+    'driveListS3Key.$': '$.driveListS3Key',
+    'driveIndex.$': '$$.Map.Item.Index',              // Map が割り当てる Drive 番号
+    driveMode: 'PROCESS_SINGLE_DRIVE',
+    nextLink: null,
+  },
+  resultPath: sfn.JsonPath.DISCARD,
+});</code></pre>
+
+  <h4>dual-mode handler</h4>
+  <p>
+    同じ FetchPage Lambda が <strong>3 つのモードを <code>driveMode</code> で演じ分ける</strong>ことで、列挙ロジックと処理ロジックを 1 つのコードベースで保つ：
+  </p>
+  <table>
+    <thead>
+      <tr><th><code>driveMode</code></th><th>役割</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>未指定</td><td>全 Drive を 1 実行で直列処理（既存 sequential 互換、障害時のフォールバック）</td></tr>
+      <tr><td><code>'ENUMERATE_ALL_DRIVES'</code></td><td>drives 列挙だけ実行し <code>driveListS3Key</code> を Distributed Map に渡す</td></tr>
+      <tr><td><code>'PROCESS_SINGLE_DRIVE'</code></td><td>Map 子実行が <code>driveIndex</code> 指定で起動。drives フェーズを飛ばして explore から開始し、完了時に per-drive S3 をクリーンアップ</td></tr>
+    </tbody>
+  </table>
+  <p>
+    <code>ENUMERATE_ALL_DRIVES</code> では <strong>pagination 中も完了時も <code>driveListS3Key</code> を必ず出力</strong>（pagination 中は <code>null</code>）。Step Functions の <code>resultSelector</code> が JsonPath でこのフィールドを参照するため、フィールド未出力 (<code>undefined</code>) だと <code>States.ResultPathMatchFailure</code> で実行が失敗する。
+  </p>
+
+  <h4>タイムアウト階層と並列度</h4>
+  <table>
+    <thead><tr><th>レイヤー</th><th>タイムアウト</th><th>備考</th></tr></thead>
+    <tbody>
+      <tr><td>メイン Pipeline SM</td><td><strong>8 時間</strong></td><td>3h → 8h に延長</td></tr>
+      <tr><td>Distributed Map SM</td><td><strong>6 時間</strong></td><td>500 Drive × 30min / maxConcurrency=5 の実測ベース</td></tr>
+      <tr><td>FetchPage Lambda</td><td>10 分</td><td><code>MAX_BATCH_DURATION_MS</code> は 9 分（60s バッファ）</td></tr>
+      <tr><td>Drive 並列度</td><td>5</td><td>My Drive / Shared Drive 共通。将来は分離検討（F-3）</td></tr>
+    </tbody>
+  </table>
+
+  <h3>補助的な設計判断</h3>
+  <p>重点 1・2 を支えるための判断。優先度は低いが、再現性のために残す。</p>
+
+  <details>
+    <summary>補助 1: Claim-Check パターンで中間データを S3 退避</summary>
+    <p>
+      <code>_lib/exploration/claim-check.ts</code> を新設し、<code>driveList</code> / <code>pendingFileIds</code> / <code>exploreCache</code> / <code>folderPathCache</code> / <code>folderMeta</code> を Work Bucket に書き出し、state には S3 キーのみ持つ。キー構造は <code>{tenantId}/{orgId}/{taskId}/[drive-{index}/]{name}.json</code> で、<code>driveIndex</code> 付与で Distributed Map 子実行同士の S3 衝突を防ぐ。<code>driveList</code> だけは task レベル共有のため driveIndex を付けない。
+    </p>
+    <p><strong>理由</strong>: Step Functions state 256KB 上限を超える中間データを Lambda 跨ぎで持ち回すため。</p>
+  </details>
+
+  <details>
+    <summary>補助 2: handler の Phase Machine + driveMode 化</summary>
+    <p>
+      handler は 3 フェーズ Phase Machine (<code>drives</code> → <code>explore</code> → <code>process</code>) を <code>nextLink</code> (base64url JSON) に詰めて Step Functions に戻す。各フェーズ内で <code>isApproachingTimeout()</code> を都度チェックし、9 分超過直前に中間データを S3 退避してから return する。<strong>Lambda タイムアウトを自然なシャーディング境界として使う</strong>イディオム。dual-mode との合わせ技で、列挙だけ / 1 Drive だけ / 全 Drive 直列 の 3 用途を 1 つの handler でカバーする。
+    </p>
+  </details>
+
+  <details>
+    <summary>補助 3: ファクトリーパターン + 共通部品抽出（CFN diff ゼロ）</summary>
+    <p>
+      <code>api-state-machine-factory.ts</code> で <code>ApiPipelineConfig.orchestrationStrategy</code> (<code>sequential</code> / <code>distributed-map</code>) を切り替え、<code>_lib/api-state-machine-parts.ts</code> に共通の Task / Map / Fail 部品を抽出。共通部品は <strong>scope と child id を呼び出し側から引数で受ける</strong>設計（関数内部で Construct を生成しない）。
+    </p>
+    <p><strong>理由</strong>: 既存 ENTRA / M365 / BOX / HRMOS の CFN snapshot を 1 byte も変えずに済ませる。scope/id を内部生成すると論理 ID が変わり既存リソース replacement になる。</p>
+  </details>
+
+  <details>
+    <summary>補助 4: CDK Token 循環依存を <code>formatArn</code> で回避</summary>
+    <p>
+      Distributed Map の IAM 権限付与で <code>stateMachine.stateMachineArn</code>（CDK Token）を Role policy に渡すと <strong>StateMachine → Role → StateMachine</strong> の CFN 循環依存になる。<code>stack.formatArn({service:'states', resource:'stateMachine', resourceName:&lt;name&gt;, arnFormat: ArnFormat.COLON_RESOURCE_NAME})</code> で <strong>既知の name から static ARN 文字列</strong>を組み立てて Token 参照を切る。
+    </p>
+    <p><strong>理由</strong>: CDK Token は合成時にプレースホルダー文字列のままで、<code>.split()</code> しても undefined を返すためビルド時に気付けない。Lambda / DynamoDB / SQS の自己参照でも同じ罠が再発する。</p>
+  </details>
+
+  <details>
+    <summary>補助 5: 細かな CDK / Step Functions の罠</summary>
+    <ul>
+      <li><code>mapExecutionType</code> と <code>itemProcessor.executionType</code> の両方が必要（CDK は warn を出すが synth validation 上は必須）</li>
+      <li><code>S3JsonItemReader</code> はルート配列 JSON しか読まないため、<code>DriveList</code> 型を <code>{drives: DriveEntry[]}</code> → <code>DriveEntry[]</code> に変更</li>
+      <li><code>files.list</code> の <code>pageSize</code> 最大値は <strong>100</strong>（Box の 1000 と勘違いしない）</li>
+    </ul>
+  </details>
+
+  <h3>結果</h3>
+
+  <h4>正の影響</h4>
+  <ul>
+    <li><strong>500 Drive 規模で 直列 250h → 並列 50h 以内</strong>の見込みになり、メイン Pipeline SM 8 時間ウィンドウ × 複数回のスケジュール実行で全量取り込みが現実的になった</li>
+    <li><strong>既存 4 サービス（ENTRA / M365 / BOX / HRMOS）の CFN snapshot を 1 byte も変えずに済んだ</strong>。ファクトリーパターンと共通部品抽出により破壊変更ゼロを CI で担保</li>
+    <li><code>explore</code> を <strong>フラット list + 後段 <code>FolderPathCache</code></strong> にしたことで、Lambda 中断時の再開コストが最小化された（<code>folderMeta</code> を S3 から読み戻すだけ）</li>
+    <li>handler の dual-mode 設計により、開発時は <code>driveMode</code> 未指定で直列実行による手動デバッグが可能、本番では Distributed Map で並列、という local→prod の経路差を最小化</li>
+    <li><strong>Box の <code>process</code> フェーズも同じファクトリーで Distributed Map 化可能</strong>（F-2 フォローアップ）</li>
+  </ul>
+
+  <h4>負の影響 / 既知の制限</h4>
+  <ul>
+    <li><strong><code>driveList.json</code> のクリーンアップは lifecycle 任せ</strong>: 子実行ごとの <code>cleanupSingleDriveArtifacts</code> では <code>driveListS3Key</code> を削除できない（他の子実行が読み込み中の可能性）。Work Bucket の 7 日 lifecycle に依存（F-7 で全 Map 完了後の明示削除を検討）</li>
+    <li><strong>INCREMENTAL 未対応</strong>: Phase 4 で Drive Changes API を使った差分取り込みを実装予定（F-5）</li>
+    <li><strong>My Drive / Shared Drive で共通の <code>maxConcurrency=5</code></strong>: 認証単位の API クォータが異なるため本来は別値が望ましい（F-3）</li>
+    <li><strong><code>toleratedFailurePercentage=0</code></strong>: 初期は厳しめで運用。1 Drive 失敗で Map 全体が失敗するため運用負荷あり（F-6 で <code>ResultWriterV2</code> 集約と percentage 引き上げ）</li>
+    <li><strong>handler の認知負荷が増えた</strong>: 3 モード分のテストが必要になり、<code>handler.test.ts</code> に 7 ケース追加</li>
+  </ul>
+
+  <h4>チーム共有時に強調したい教訓</h4>
+  <ol>
+    <li><strong>Drive のように「認証単位で独立した塊」を全件収集するときは、まずフラット list で全件取って後段で構造化する</strong>。再帰探索は中断・再開・並列化のすべてで不利</li>
+    <li><strong>Step Functions Distributed Map + S3JsonItemReader は Step Functions の 25K / 256KB 制約を一気に解消するための定番パターン</strong>。今後 Box の process フェーズなど同型の問題には迷わず採用する</li>
+    <li><code>S3JsonItemReader</code> を使うなら型をルート配列に揃える（<code>{drives: []}</code> 形式は読めない）</li>
+    <li>CDK Role policy に SM の ARN を入れる時は <code>formatArn</code> で static 化する</li>
+    <li>CDK construct を共通化するなら scope/id を引数で受ける（CFN diff ゼロの条件）</li>
+    <li><code>mapExecutionType</code> と <code>itemProcessor.executionType</code> は警告が出ても両方必須</li>
+    <li>Step Functions の <code>resultSelector</code> が参照するフィールドは handler が pagination 中も <code>null</code> 出力する（undefined はエラー）</li>
+    <li>Google Drive API の <code>pageSize</code> 最大値は 100。Box の 1000 と勘違いしない</li>
+  </ol>
+</section>
+
+<section>
+  <h2>代替案</h2>
+
+  <h3>重点 1（収集方法）の代替案</h3>
+
+  <h4>採用しなかった: フォルダ単位の再帰探索</h4>
+  <p>
+    各フォルダに対して <code>files.list?q='{folderId}' in parents</code> を投げ、子フォルダが見つかったら再帰的に潜る古典パターン。
+  </p>
+  <table>
+    <thead><tr><th>観点</th><th>再帰探索</th><th>フラット list（採用）</th></tr></thead>
+    <tbody>
+      <tr><td>API 呼び出し回数</td><td>フォルダ数 × <code>files.list</code> で O(F)</td><td>Drive あたり N/100 回（1 種類のクエリ）</td></tr>
+      <tr><td>ページネーション境界</td><td>フォルダごとに別 token を持ち回し state 肥大化</td><td>Drive 単位の <code>listPageToken</code> 1 本</td></tr>
+      <tr><td>Lambda 中断耐性</td><td>「どのフォルダを掘っている途中か」を保持する必要</td><td><code>folderMeta</code> を S3 退避するだけで再開可</td></tr>
+      <tr><td>横に広い Drive</td><td>浅いが大量のフォルダで呼び出しが爆発</td><td>一定</td></tr>
+      <tr><td>深いフォルダ</td><td>木の深さに応じて呼び出しが増える</td><td>深さに非依存</td></tr>
+    </tbody>
+  </table>
+  <p>
+    要点は <span class="highlight"><strong>「認証単位 (Drive) でフラットに全件取り、構造化は後段でやる」</strong></span>。Drive API は親情報 (<code>parents[]</code>) を最初から返してくれるので、わざわざフォルダ単位で再帰する必要がない。
+  </p>
+
+  <h3>重点 2（並列化）の代替案</h3>
+
+  <h4>採用しなかった: Inline Map</h4>
+  <p><code>sfn.Map</code> で <code>$.chunks</code> 等 state 内配列を items とする方式。</p>
+  <p><strong>評価</strong>: items が state に乗るため、<strong>500 Drive 規模の DriveList JSON が Step Functions の 256KB 上限</strong>を超える可能性が高い。Distributed Map の S3JsonItemReader なら配列を S3 から読むためサイズ無制限。</p>
+
+  <h4>採用しなかった: 並列 Lambda 自作 (Promise.allSettled で Lambda を fan-out)</h4>
+  <p><strong>評価</strong>: 失敗の集計 / 再試行 / 観測性をすべて自前実装になり、Step Functions と二重管理になる。Distributed Map なら <code>toleratedFailurePercentage</code> で部分失敗を構造化でき、CloudWatch との統合も標準。</p>
+
+  <h4>採用しなかった: EventBridge による fan-out</h4>
+  <p>EventBridge イベントで Drive 単位の Lambda を非同期起動する方式。</p>
+  <p><strong>評価</strong>: スケジューラと Pipeline の状態が分離し、<strong>メイン Step Functions から完了監視ができない</strong>。失敗時の retry も EventBridge 側の独立した設定になり、Pipeline 全体の Atomicity が崩れる。</p>
+
+  <h4>採用した: Distributed Map</h4>
+  <ul>
+    <li>items を <strong>S3 上のルート配列 JSON</strong> から読めるためサイズ無制限</li>
+    <li>子実行は STANDARD で 25K 遷移上限が独立</li>
+    <li><code>toleratedFailurePercentage</code> で部分失敗を構造化</li>
+    <li>メイン Step Functions からの観測性がそのまま使える</li>
+  </ul>
+
+  <h3>handler 設計の代替案</h3>
+
+  <h4>採用しなかった: 列挙用 Lambda と処理用 Lambda の分離</h4>
+  <p><strong>評価</strong>: 認証 / 共通ロジック / テストが二重化する。<code>driveMode</code> で分岐する dual-mode の方が <strong>同じテストでカバーできる</strong>。</p>
+
+  <h4>採用した: 単一 handler の dual-mode 化</h4>
+  <ul>
+    <li>1 つの handler が 3 モード（未指定 / <code>ENUMERATE_ALL_DRIVES</code> / <code>PROCESS_SINGLE_DRIVE</code>）を演じ分け</li>
+    <li>開発時は <code>driveMode</code> 未指定で直列実行による手動デバッグが可能</li>
+    <li>テストは <code>handler.test.ts</code> 1 ファイルでカバー</li>
+  </ul>
+</section>
+
+<section>
+  <h2>参考</h2>
+  <ul>
+    <li>PR: <a href="https://github.com/standandforce/dresscode-data-connector/pull/49">standandforce/dresscode-data-connector#49</a></li>
+    <li>実装計画: <code>docs/google-drive/plan.md</code></li>
+    <li>計画レビュー: <code>docs/google-drive/plan-review.md</code></li>
+    <li>フェーズ詳細: <code>docs/google-drive/google-drive-phases.md</code></li>
+    <li>AWS Step Functions Distributed Map: <a href="https://docs.aws.amazon.com/step-functions/latest/dg/concepts-asl-use-map-state-distributed.html">公式ドキュメント</a></li>
+    <li>S3JsonItemReader: <a href="https://docs.aws.amazon.com/step-functions/latest/dg/input-output-itemreader.html">公式ドキュメント</a></li>
+    <li>Google Drive API files.list: <a href="https://developers.google.com/drive/api/reference/rest/v3/files/list">公式リファレンス</a></li>
+    <li>Admin SDK users.list: <a href="https://developers.google.com/admin-sdk/directory/reference/rest/v1/users/list">公式リファレンス</a></li>
+  </ul>
+
+  <h3>関連実装ファイル</h3>
+  <ul>
+    <li><strong>重点 1（収集方法）</strong>:
+      <ul>
+        <li><code>lambda/data-pipeline/api/ingestion/google-drive/_lib/google-drive-api/files.ts</code></li>
+        <li><code>lambda/data-pipeline/api/ingestion/google-drive/_lib/exploration/folder-path-cache.ts</code></li>
+        <li><code>lambda/data-pipeline/api/ingestion/google-drive/handler.ts</code>(explore phase)</li>
+      </ul>
+    </li>
+    <li><strong>重点 2（Distributed Map）</strong>:
+      <ul>
+        <li><code>lib/stack/data-pipeline/constructs/distributed-map-api-state-machine.ts</code></li>
+        <li><code>lib/stack/data-pipeline/constructs/api-state-machine-factory.ts</code></li>
+        <li><code>lib/stack/data-pipeline/constructs/_lib/api-state-machine-parts.ts</code></li>
+        <li><code>lib/stack/data-pipeline/config.ts</code> (<code>OrchestrationStrategy</code>)</li>
+      </ul>
+    </li>
+    <li><strong>補助</strong>:
+      <ul>
+        <li><code>lambda/data-pipeline/api/ingestion/google-drive/_lib/exploration/claim-check.ts</code></li>
+        <li><code>lambda/data-pipeline/api/ingestion/google-drive/_lib/exploration/state.ts</code></li>
+      </ul>
+    </li>
+  </ul>
+</section>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'loose' });
+</script>
+
+</body>
+</html>

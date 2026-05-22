@@ -299,6 +299,20 @@ Provide the following to the user:
 3. **指摘サマリ** — Critical / Minor / Info 件数、優先対応項目
 4. **出力ファイル** — `./tmp/review/unified.md` and `./tmp/review/*-review.md`
 
+#### HTML view 化 (オプション)
+
+unified.md 生成完了直後に、以下をユーザーに尋ねる (Phase 4 末尾固定。Phase 5 で再実行しない):
+
+> **HTML 化しますか?** (人間レビュア向けのデザイン HTML を生成)
+
+ユーザーが Yes と回答した場合、**Claude は自動実行せず**、次のコマンドを案内する:
+
+```
+/html-view ./tmp/review/unified.md
+```
+
+ユーザーが明示的に slash command を入力することで HTML 生成 + ブラウザ自動起動が完了する。
+
 ### Phase 5 (任意): Edge Case 再検証（subagent 並列）
 
 Phase 4 の集約結果が以下のいずれかに該当する場合、追加の subagent 並列レビューで edge case を再検証する:

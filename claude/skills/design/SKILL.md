@@ -190,3 +190,17 @@ project-root/
   - `/review-plan` で計画レビュー（推奨、特に medium/low 確信度がある場合）
   - `/revise` で計画修正
   - `/implement` で実装開始
+
+#### HTML view 化 (オプション)
+
+完了報告に続けて、以下をユーザーに尋ねる:
+
+> **HTML 化しますか?** (人間レビュア向けのデザイン HTML を生成)
+
+ユーザーが Yes と回答した場合、**Claude は自動実行せず**、次のコマンドを案内する:
+
+```
+/html-view ./tmp/plan.md
+```
+
+ユーザーが明示的に slash command を入力することで HTML 生成 + ブラウザ自動起動が完了する。
