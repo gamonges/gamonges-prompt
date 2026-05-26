@@ -158,3 +158,154 @@ low confidence のステップは検証ステップを必ず併記する:
 ```
 | low | ステップ 4（外部 API 連携） | スパイク実装で 1 リクエスト送信し、レート制限とレスポンス形式を確認 |
 ```
+
+## 構造的欠陥防止チェックリスト（フェーズ 4 必須）
+
+> **SSOT 宣言**: 本セクションは `/design` フェーズ 4 と `/revise` フェーズ 6.5 の両方から参照される single source of truth。テンプレートと [BAD]/[GOOD] 例の重複コピーは禁止。他 SKILL.md からは 1 行リンクで誘導する。
+
+同じ抽象度のレビューを 2 周回しても発見されにくい 6 種の構造的欠陥に対し、計画段階で防衛機構として 6 カテゴリのチェックを必須化する。各カテゴリは「いつ書くか / [BAD] / [GOOD] / 該当しない場合」の 4 ブロックで記述する。
+
+### 1. 統合点トレース
+
+**いつ書くか**: 計画内に「skip」「削除」「短絡」「フォールバック」を含む step がある場合（既存の処理経路を省略する提案）。
+
+**[BAD]** — 副作用が追跡されていない。downstream の何が壊れるか不明。
+
+```
+ステップ 3: 既存の validate ステップを skip する（理由: 高速化）
+```
+
+**[GOOD]**
+
+```
+ステップ 3: 既存の validate ステップを skip する
+  副作用追跡:
+    - downstream A の前提条件 X が満たされなくなる → ステップ 4 で代替検証を追加
+    - エラー報告経路 B でのエラーコード分布が変わる → 監視アラートの閾値見直し（F-2 で起票）
+    - 既存テスト T1, T2 が validate を前提としている → ステップ 5 で再設計
+```
+
+**該当しない場合**: 新規処理のみで既存経路の skip / 削除 / 短絡を含まない場合は「該当なし」と明記。
+
+### 2. Decision 間相互整合性マトリクス
+
+**いつ書くか**: 計画内で Decision（設計判断）を 3 個以上立てた場合。
+
+**[BAD]** — Decision 間の前提・衝突関係が見えない。
+
+```
+- Decision 1: キャッシュは Redis を使う
+- Decision 2: マルチテナント分離は DB レベルで行う
+- Decision 3: バックグラウンドジョブは BullMQ で実行
+```
+
+**[GOOD]**
+
+| Decision | 前提 | 衝突しない相手 | 責任分界 |
+|----------|------|-----------------|----------|
+| 1. Redis キャッシュ | Redis インスタンスがテナント単位で分離されている | Decision 2 (DB マルチテナント分離と独立) | キャッシュ層は tenant_id プレフィックスで分離 |
+| 2. DB マルチテナント分離 | row-level security 有効 | Decision 1 (Redis は別チャネル) | DB クエリ層で必須適用 |
+| 3. BullMQ ジョブ | Redis インスタンスが必要 | Decision 1 と **Redis インスタンス共有** | キャッシュ用 DB と job queue 用 DB を分離（DB 0 / DB 1） |
+
+**該当しない場合**: Decision が 2 個以下なら「該当なし」。ただし 2 個の Decision に明らかな相互依存がある場合はマトリクスを書く。
+
+### 3. 並列性マトリクス
+
+**いつ書くか**: 並列実行（並列 step / Step Functions Map state / Promise.all / worker pool / multi-tenant 同時アクセス）を伴う feature を計画する場合。
+
+**[BAD]** — 共有リソースと並列度が未定義。競合状態の可能性が見えない。
+
+```
+ステップ 5: ユーザーごとに並列で集計処理を実行する
+```
+
+**[GOOD]**
+
+| 共有リソース | 並列度 | 衝突パターン | 対処 |
+|--------------|--------|-------------|------|
+| DB connection pool (max 20) | ユーザー数 × ステップ数 | 並列 100 → connection 不足 | semaphore で 同時実行 15 に制限 |
+| S3 bucket prefix `summary/` | ユーザー数 | 同一 prefix 書き込み → eventual consistency 問題 | prefix を `summary/{user_id}/` に変更 |
+| Stripe API レート制限 (100 req/s) | ユーザー数 | 並列 200 → 429 | exponential backoff + jitter |
+
+**該当しない場合**: 直列処理のみ / 並列実行が独立リソースのみ（in-memory 計算など）の場合は「該当なし」と明記。
+
+### 4. 「変更不要」「透過」断言の根拠付け
+
+**いつ書くか**: 計画内に「変更不要」「透過」「影響なし」「既存のまま」と書く箇所がある場合。
+
+**[BAD]** — 根拠が無い。後から見ると本当に確認したのか判別不能。
+
+```
+- 既存の AuthMiddleware は **変更不要** （新機能から透過的に使える）
+```
+
+**[GOOD]**
+
+```
+- 既存の AuthMiddleware は **変更不要**
+  - 根拠: `grep -rn "AuthMiddleware" src/` で利用箇所 12 件を確認、すべて `req.user` 経由でのみアクセスしており、新機能の追加属性 `req.user.workspaceId` は middleware を経由しないため衝突なし
+  - 確認した実装: `src/middleware/auth.ts:L42` `next()` 呼び出し時点で req.user は他フィールドを保持する
+```
+
+**該当しない場合**: 「変更不要」「透過」断言を計画内で行わなかった場合は「該当なし」。
+
+### 5. HTTP / API contract concrete 化
+
+**いつ書くか**: 計画内で API・RPC・コマンドインターフェースを定義する場合。抽象 IF（型シグネチャ・OpenAPI 概略・自然言語の API 説明）を含む。
+
+**[BAD]** — method / path / header / body / response の 5 要素が揃っておらず、実装時の解釈ぶれが発生する。
+
+```
+- 新規エンドポイント: POST /workspaces/:id/members を追加する
+```
+
+**[GOOD]**
+
+```
+POST /workspaces/:id/members
+  Headers:
+    Authorization: Bearer <jwt>
+    Content-Type: application/json
+  Body:
+    { "email": "user@example.com", "role": "editor" }
+  Response (201):
+    { "memberId": "mem_...", "invitedAt": "2026-05-26T10:00:00Z" }
+  Response (409 if already member):
+    { "error": "ALREADY_MEMBER", "memberId": "mem_..." }
+
+  curl で叩ける具体例:
+    curl -X POST https://api.example.com/workspaces/ws_123/members \
+      -H "Authorization: Bearer $JWT" -H "Content-Type: application/json" \
+      -d '{"email":"a@example.com","role":"editor"}'
+```
+
+**該当しない場合**: API・RPC・コマンドインターフェースを定義しない計画（純粋な内部リファクタリング・ドキュメント変更等）は「該当なし」。
+
+### 6. 完了パスツリー
+
+**いつ書くか**: feature 完了パスが複数分岐する場合（成功 / 失敗 / partial / リトライ / キャンセル など）。finalize 系のパスが複数ある feature 全般。
+
+**[BAD]** — 完了パスの分岐が網羅されていない。AC との対応が不明。
+
+```
+- ステップ 7: ジョブ完了処理を実装する
+```
+
+**[GOOD]**
+
+```
+ジョブ完了パスツリー:
+
+complete()
+├── success
+│   ├── full → AC-3 (全件処理成功)
+│   └── partial (一部失敗あり) → AC-4 (skipped 件数を report に含む)
+├── failure
+│   ├── retryable (network / 5xx) → AC-5 (3 回までリトライ後 dead-letter)
+│   └── unrecoverable (validation / 4xx) → AC-6 (即座に dead-letter)
+└── cancelled (user / timeout) → AC-7 (中間状態を rollback)
+```
+
+各葉に AC を割り当て、`## 受入条件` で網羅性を保証する。
+
+**該当しない場合**: 完了パスが単一（成功か失敗のみで、partial や retryable / unrecoverable の分岐がない）の場合は「該当なし」。
