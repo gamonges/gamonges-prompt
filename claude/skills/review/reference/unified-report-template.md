@@ -124,6 +124,9 @@ Phase 4 で `./tmp/review/unified.md` に書き出す統合レポートのテン
 
 ## ℹ️ Info & Questions（確認事項）
 
+> finding は捨てない。各 subagent が報告した項目は全て保持し、confidence × severity で並べる。
+> **Low confidence の指摘は本セクションの下部に `(Low confidence)` ラベル付きで配置**して可視性を下げる（削除しない）。
+
 ### I-1. {タイトル}
 **ファイル**: `src/full/path/to/file.tsx:L100`
 
