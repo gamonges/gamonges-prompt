@@ -22,7 +22,7 @@ Perform comprehensive code review using specialized AI agents working in paralle
 
 ## Subagent Output Template
 
-Each subagent MUST write its review to `./tmp/review/{agent-name}-review.md`.
+Each subagent writes its review to `./tmp/review/{agent-name}-review.md`.
 
 **File path rules**: Always use relative paths from project root with `L{number}` line format (e.g. `src/apps/app/src/routes/_staff/file.tsx:L42-50`). Never use bare file names.
 
@@ -56,7 +56,7 @@ Each subagent MUST write its review to `./tmp/review/{agent-name}-review.md`.
 
 **Notes**:
 - 該当なしのセクションは省略すること
-- Low confidence の指摘は ⚠️ Minor 以下に分類すること
+- **coverage 優先**: finding 段では確信度・重要度に関わらず気づいた問題を全て報告する。各 finding に確信度（High/Medium/Low）とカテゴリ（severity 相当）を必ず付す。フィルタや並べ替えは集約段（Phase 4）で行うため、ここで Low confidence を理由に握りつぶさない
 
 ## Review Agents
 
@@ -275,7 +275,7 @@ Confirm every selected subagent has started. Re-launch any that failed.
 - Read each `./tmp/review/{agent}-review.md`
 - Merge identical issues into one finding, listing all agreeing agents: `[frontend・code-quality]`
 - Use **カテゴリタグ** for mechanical matching during deduplication
-- **Low confidence の指摘は ℹ️ Info 以下に自動降格**
+- **集約段でのフィルタリング**: finding は捨てずに全件保持する。confidence × severity で並べ替え、Low confidence の指摘は ℹ️ Info セクションの下部に配置して可視性を下げる（情報は残す）
 
 #### 2. Generate unified report
 
