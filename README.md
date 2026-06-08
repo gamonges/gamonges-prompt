@@ -103,7 +103,8 @@ git pull
 | `blog` / `outline` | ブログドラフト / アウトライン生成 |
 | `notion-adr` / `notion-qa-progress` | Notion 連携 |
 | `playwright-cli` | ブラウザ自動操作 |
-| `worktree-cleanup` | マージ済み PR の worktree 一括削除 |
+| `context-index` | claude-context にコードベースを index（個人定義の ignore で不要ディレクトリ除外、`disable-model-invocation`） |
+| `worktree-cleanup` | マージ済み PR の worktree 一括削除（削除時に claude-context index も回収） |
 | `strategic-ddd` / `review-strategic-ddd` | 戦略的 DDD 設計と そのレビュー |
 
 ## 🤖 SubAgents 一覧

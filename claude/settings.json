@@ -1,4 +1,12 @@
 {
+  "env": {
+    "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+    "OTEL_METRICS_EXPORTER": "otlp",
+    "OTEL_LOGS_EXPORTER": "otlp",
+    "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "https://otlp.ap1.datadoghq.com",
+    "OTEL_METRICS_INCLUDE_SESSION_ID": "false"
+  },
   "permissions": {
     "allow": [
       "Bash(cat:*)",
@@ -67,6 +75,7 @@
     ],
     "defaultMode": "bypassPermissions"
   },
+  "model": "sonnet[1m]",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -199,13 +208,5 @@
   "skipDangerousModePermissionPrompt": true,
   "theme": "dark-daltonized",
   "autoCompactEnabled": false,
-  "agentPushNotifEnabled": true,
-  "env": {
-    "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
-    "OTEL_METRICS_EXPORTER": "otlp",
-    "OTEL_LOGS_EXPORTER": "otlp",
-    "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
-    "OTEL_EXPORTER_OTLP_ENDPOINT": "https://otlp.ap1.datadoghq.com",
-    "OTEL_METRICS_INCLUDE_SESSION_ID": "false"
-  }
+  "agentPushNotifEnabled": true
 }
