@@ -27,7 +27,7 @@ description: マージ済み PR の worktree を一括削除する。「worktree
 2. **一覧取得** — 現在のworktreeとチェックアウト中ブランチを列挙
 3. **マージ済み判定 + 状態チェック** — マージ状態と未コミット変更を確認
 4. **確認フェーズ** — 削除候補をユーザーに提示して確認を取る
-5. **削除実行** — 承認されたworktreeのみ削除
+5. **削除実行** — 承認されたworktreeのみ削除（claude-context MCP 接続時は対応するインデックスも削除）
 
 ---
 
@@ -150,6 +150,7 @@ git -C /path/to/worktree status --porcelain
 
 ```
 以下のworktreeディレクトリとローカルブランチを削除します。よろしいですか？
+（claude-context MCP 接続時は、対応する claude-context インデックスも併せて削除します）
 
 【削除候補】
   1. /path/to/worktrees/feature-foo (150MB)
@@ -187,6 +188,8 @@ git -C /path/to/worktree status --porcelain
 - 番号を指定（例：「1だけ」）→ 指定分のみ削除
 - 「いいえ」「キャンセル」→ 削除しない
 
+削除の承認は、対応する claude-context インデックスの削除（5-1.5）も含む。index 削除について別途の確認は取らない（claude-context MCP 接続時のみ実行）。
+
 ---
 
 ## Step 5: 削除実行
@@ -204,6 +207,22 @@ git worktree remove /path/to/worktrees/feature-foo
 # 未コミット変更あり（Step 4 でユーザー承認済み）→ --force で削除
 git worktree remove /path/to/worktrees/fix-bar --force
 ```
+
+### 5-1.5: claude-context インデックスの削除（claude-context MCP 接続時のみ）
+
+claude-context の `clear_index` が**ツールとして利用可能な場合のみ**、本サブステップを実行する。ツール自体が存在しない（MCP 未接続）環境では、本サブステップをスキップする（worktree 削除は 5-2 以降を通常通り実行）。
+
+Step 4 で実際に削除を承認された各 worktree の絶対パスについてのみ `clear_index(path)` を呼ぶ。番号指定で一部のみ承認された場合は、その承認対象だけが対象となる。未承認・スキップした worktree の collection は消さない。`clear_index` は path の実在を要求しないため、worktree ディレクトリ削除後（本サブステップは 5-1 の後）でも有効。
+
+承認対象には事前確認なしで無条件に `clear_index(path)` を呼んでよい（`get_indexing_status` は不要）。各呼び出しのレスポンスを次の3通りに分類する:
+
+- **実削除**: `Successfully cleared codebase '<path>'` — Milvus collection と `~/.context/` 配下の snapshot を削除済み。
+- **未 index（no-op）**: `Error: Codebase '<path>' is not indexed or being indexed.`（`isError` 形式）— その path は index されていない。**良性の no-op であり、失敗として扱わない。** worktree を個別 index していない運用ではこれが通常のレスポンス。
+- **失敗**: `Failed to clear <path>: <message>`（`isError` 形式）— drop 処理自体が失敗。5-4 の完了報告で警告表示する。
+
+削除候補が多数（十数件規模）の場合は、`clear_index` を順に呼ぶ間、処理中である旨を逐次示す。
+
+このサブステップは付帯処理であり、`clear_index` の結果（未 index・失敗のいずれも）で後続処理（5-2 以降）を止めない。collection 削除は MCP ツール経由でのみ実行でき、`scripts/list-merged.sh` などの bash からは呼べない。
 
 ### 5-2. Git 内部参照の整理
 
@@ -236,8 +255,13 @@ git branch -D fix/bar
   - /path/to/worktrees/feature-foo (feature/foo)
   - /path/to/worktrees/fix-bar (fix/bar)
 
+claude-context インデックス: 実削除 1 件 / 未 index で no-op 1 件 / 失敗 0 件
 残りのworktree: 3件
 ```
+
+- claude-context インデックスの行は claude-context MCP 接続時のみ表示する。未接続環境では出さない。
+- 各件数は 5-1.5 のレスポンス分類を集計したもの（実削除 = `Successfully cleared` / no-op = `is not indexed or being indexed` / 失敗 = `Failed to clear`）。
+- 「実削除 0 件（対象がすべて未 index）」が出る場合、worktree を個別 index する運用が空回りしている可能性に事後で気づける（Step 4 での事前 `get_indexing_status` 問い合わせは行わない）。
 
 ---
 
@@ -245,3 +269,5 @@ git branch -D fix/bar
 
 - **メインのworktree**（最初のエントリ）は絶対に削除しない
 - **fork からの PR** は `gh pr list --head` のスコープ外。fork ワークフローを使用している場合は手動確認が必要
+- **claude-context インデックス削除は claude-context MCP 接続時のみ**実行する。未接続環境では従来通り worktree 削除のみを行う（`gh` + `git` で動作）
+- この index 削除が実効するのは **worktree を個別に index している運用**の場合。本体（develop）のみ index している場合は `clear_index(worktree path)` が no-op となり回収されない（本体 collection に混入した worktree コードは本機能の対象外）
