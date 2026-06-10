@@ -75,14 +75,14 @@
     ],
     "defaultMode": "bypassPermissions"
   },
-  "model": "sonnet[1m]",
+  "model": "claude-opus-4-8",
   "hooks": {
     "UserPromptSubmit": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/gamouhiroto/.local/share/mise/installs/node/23.7.0/bin/ccm hook UserPromptSubmit"
+            "command": "/Users/gamouhiroto/.local/share/mise/shims/ccm hook UserPromptSubmit"
           },
           {
             "type": "command",
@@ -101,7 +101,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/gamouhiroto/.local/share/mise/installs/node/23.7.0/bin/ccm hook PreToolUse"
+            "command": "/Users/gamouhiroto/.local/share/mise/shims/ccm hook PreToolUse"
           }
         ]
       },
@@ -134,7 +134,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/gamouhiroto/.local/share/mise/installs/node/23.7.0/bin/ccm hook PostToolUse"
+            "command": "/Users/gamouhiroto/.local/share/mise/shims/ccm hook PostToolUse"
           }
         ]
       },
@@ -154,7 +154,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/gamouhiroto/.local/share/mise/installs/node/23.7.0/bin/ccm hook Notification"
+            "command": "/Users/gamouhiroto/.local/share/mise/shims/ccm hook Notification"
           }
         ]
       }
@@ -165,7 +165,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/gamouhiroto/.local/share/mise/installs/node/23.7.0/bin/ccm hook Stop"
+            "command": "/Users/gamouhiroto/.local/share/mise/shims/ccm hook Stop"
           }
         ]
       }
