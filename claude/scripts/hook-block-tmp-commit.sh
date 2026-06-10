@@ -5,7 +5,8 @@
 #
 # scope 限定: 静的に判定可能な範囲のみ扱う。
 #   - 直接の `git add ...` (含む `cd foo && git add ...`) は deny
-#   - wrapper (`bash -c "..."` / `eval "..."` / `xargs git add`) は内部展開不可なので ask 昇格
+#   - wrapper (`bash -c "..."` / `eval "..."` / `xargs ...`) で git add を運ぶものは内部展開不可なので ask 昇格
+#   - git add を運ばない探索系 wrapper (`find | xargs grep` 等) は通す (コード探索を止めないため)
 #   - `eval` 内の動的展開 (例: `eval "$VAR"`) は対象外 (静的解析の限界)
 
 set -euo pipefail
@@ -22,14 +23,16 @@ if [[ -z "$COMMAND" ]]; then
   exit 0
 fi
 
-# (1) wrapper コマンド検知 → ask 昇格 (内部に隠れた git add を人間判断に委ねる)
-if echo "$COMMAND" | grep -qE '(^|[[:space:]]|;|&&|\|\|)[[:space:]]*(bash[[:space:]]+-c|eval[[:space:]]|xargs[[:space:]])'; then
+# (1) wrapper コマンド かつ git add を含む → ask 昇格 (内部に隠れた git add を人間判断に委ねる)
+#     git add を運ばない探索系 wrapper (find | xargs grep 等) は次の段へ素通し
+if echo "$COMMAND" | grep -qE '(^|[[:space:]]|;|&&|\|\|)[[:space:]]*(bash[[:space:]]+-c|eval[[:space:]]|xargs[[:space:]])' \
+   && echo "$COMMAND" | grep -qE 'git[[:space:]]+add'; then
   cat <<EOF
 {
   "hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "ask",
-    "permissionDecisionReason": "wrapper コマンド (bash -c / eval / xargs) を検出しました。内部に 'git add .' / '-A' / 'tmp/' が含まれていないか目視確認のうえ承認してください (CLAUDE.md の Git ルール準拠)。"
+    "permissionDecisionReason": "git add を含む wrapper コマンド (bash -c / eval / xargs) を検出しました。'git add .' / '-A' / 'tmp/' を隠していないか目視確認のうえ承認してください (CLAUDE.md の Git ルール準拠)。"
   }
 }
 EOF
