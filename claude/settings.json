@@ -82,10 +82,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/gamouhiroto/.local/share/mise/shims/ccm hook UserPromptSubmit"
-          },
-          {
-            "type": "command",
             "command": "~/.claude/scripts/sync-claude-to-worktree.sh"
           },
           {
@@ -96,15 +92,6 @@
       }
     ],
     "PreToolUse": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/Users/gamouhiroto/.local/share/mise/shims/ccm hook PreToolUse"
-          }
-        ]
-      },
       {
         "matcher": "Bash",
         "hooks": [
@@ -130,42 +117,11 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/Users/gamouhiroto/.local/share/mise/shims/ccm hook PostToolUse"
-          }
-        ]
-      },
-      {
         "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
             "command": "/Users/gamouhiroto/.claude/scripts/hook-prompt-retrospective.sh"
-          }
-        ]
-      }
-    ],
-    "Notification": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/Users/gamouhiroto/.local/share/mise/shims/ccm hook Notification"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/Users/gamouhiroto/.local/share/mise/shims/ccm hook Stop"
           }
         ]
       }
