@@ -75,7 +75,7 @@
     ],
     "defaultMode": "bypassPermissions"
   },
-  "model": "claude-opus-4-8",
+  "model": "sonnet",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -102,6 +102,10 @@
           {
             "type": "command",
             "command": "/Users/gamouhiroto/.claude/scripts/hook-confirm-destructive-git.sh"
+          },
+          {
+            "type": "command",
+            "command": "/Users/gamouhiroto/.claude/scripts/hook-block-full-lint.sh"
           }
         ]
       },
