@@ -92,11 +92,13 @@ git pull
 | `/retrospective` | 日次 PR 振り返り |
 | `/adr` / `/state-machine` / `/status` | ADR 生成 / 状態遷移図追加 / ワークフロー進捗表示 |
 | `/memory` / `/recall` | 記憶の保存・読み込み（実装は `agent-memory` skill に委譲） |
+| `/coupling-audit` / `/coupling-plan-diff` / `/coupling-precheck` / `/coupling-gate` | 結合(Coupling)モデルによる分析4種（既存コード棚卸し / Before-After差分分析 / 設計前整理 / plan.mdゲート） |
 
 ### ユーティリティ系
 | スキル名 | 説明 |
 |---------|------|
 | `agent-memory` | 記憶の保存・読み込みの実装本体（`user-invocable: false`） |
+| `coupling-anatomy` | 結合モデル判定基準の実装本体（`user-invocable: false`）|
 | `domain-name-brainstormer` | ドメイン名のブレインストーミング |
 | `figma` | Figma 関連の操作 |
 | `marp` | Marp スライド生成 |
