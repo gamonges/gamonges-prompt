@@ -57,7 +57,7 @@ description: `/design` 着手前に扱う概念・モジュール候補・想定
 
 ### フェーズ5: レポート出力
 
-`./tmp/coupling-precheck.md` に `coupling-anatomy` の標準フォーマットのうち**推測ベース変種**（想定モジュール名/概念名、根拠列は `plan.md:L{number}` または `(推測)` タグ）で出力する。
+`./tmp/coupling-precheck.md` に `coupling-anatomy` の標準フォーマットのうち**推測ベース変種**（想定モジュール名/概念名、根拠列は `context.md:L{number}`（または `strategic-ddd.md:L{number}`）や `(推測)` タグ）で出力する。
 
 ### フェーズ6: 完了報告
 

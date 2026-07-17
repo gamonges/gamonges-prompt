@@ -98,7 +98,7 @@ git pull
 | スキル名 | 説明 |
 |---------|------|
 | `agent-memory` | 記憶の保存・読み込みの実装本体（`user-invocable: false`） |
-| `coupling-anatomy` | 結合モデル判定基準の実装本体（`user-invocable: false`）|
+| `coupling-anatomy` | 結合モデル判定基準の実装本体（`user-invocable: false`） |
 | `domain-name-brainstormer` | ドメイン名のブレインストーミング |
 | `figma` | Figma 関連の操作 |
 | `marp` | Marp スライド生成 |
