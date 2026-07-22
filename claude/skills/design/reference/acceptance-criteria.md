@@ -85,6 +85,19 @@
   - **検証ステップ**: `echo '{...}' | bash claude/scripts/hook-lint-skill-frontmatter.sh` の手動確認
 ```
 
+### 例 4: タイブレーク・優先順位判定ロジックの変更
+
+```markdown
+## 受入条件（Acceptance Criteria）
+
+- [ ] **AC-1**: スコアが同点の場合、`registeredAt` が最も早い候補を優先して選ぶ
+  - **テストケース**: `tests/tieBreak.test.ts` の `resolves tie by earliest registeredAt`
+  - **期待出力**: 同点候補のうち `registeredAt` が最小の 1 件が返る
+
+- [ ] **AC-2**: 対象データにおける同点候補の分布を実データで確認する
+  - **検証ステップ**: `SELECT score, COUNT(*) FROM candidates GROUP BY score HAVING COUNT(*) > 1` を実データに対して実行し、同点が発生する件数・スコア帯を確認する
+```
+
 ## 確信度サマリとの cross-link
 
 `/design` で生成される確信度サマリの「検証ステップ」と本セクションのテストケースは可能な限り対応させる:
@@ -100,3 +113,4 @@
 - すべての主要要件が AC でカバーされていること（要件カバレッジ検証）
 - AC は **客観的に判定可能** な記述にする（曖昧な「使いやすいこと」「速いこと」は避ける）
 - `/review-plan` / `/review` の機械的チェックに耐えるよう、**確認手段** を必ず記述する
+- 同点候補の選ばれ方（優先順位・タイブレーク）を変える設計の場合、対象データでの重複件数・分布を実データで確認する AC を最低 1 つ含める
