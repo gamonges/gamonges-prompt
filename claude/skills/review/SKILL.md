@@ -239,7 +239,7 @@ Phase 3 で各サブエージェントには以下のみを渡す:
 |-------|-----------|-----------------|
 | pm-reviewer | API/ビジネスロジックの変更を含む場合 | — |
 | backend-reviewer | ソースコード（.ts）の変更を含む場合 | `architecture.mdc` 要約, `coding-rule.mdc` 要約, backend checklist（後述） |
-| database-reviewer | Prisma スキーマ・マイグレーション・QueryService・Repository・.prisma ファイルの変更、または変更ファイル中に SQL キーワード（`SELECT`/`FROM`/`WHERE`/`INSERT`/`UPDATE` 等）を含む文字列リテラルがある場合、`athena`/`sql`/`query-builder` 等のパス・識別子命名を含む場合 | `coding-rule.mdc`（DB 関連セクション）, database checklist（後述） |
+| database-reviewer | Prisma スキーマ・マイグレーション・QueryService・Repository・.prisma ファイルの変更、またはソースコードファイル（.ts/.tsx 等。Markdown・ドキュメント類は対象外）内で `SELECT ... FROM ...` / `INSERT INTO ...` / `UPDATE ... SET ...` のように SQL キーワードが文単位で共起する文字列リテラルがある場合、`athena`/`sql`/`query-builder` 等のパス・識別子命名を含む場合 | `coding-rule.mdc`（DB 関連セクション）, database checklist（後述） |
 | infrastructure-reviewer | Dockerfile, docker-compose, CI, AWS 設定の変更を含む場合 | — |
 
 **Unknown project** (`project_type = unknown`): 従来通り、変更ファイルの種類に基づいて全エージェントから選択する。
