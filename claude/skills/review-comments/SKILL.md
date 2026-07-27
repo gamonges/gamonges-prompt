@@ -1,13 +1,13 @@
 ---
 name: review-comments
-description: PRレビューコメントの妥当性チェック・返信・resolve（/review-comments <PR URL>）
+description: PR レビューコメントの妥当性チェック・返信・resolve を行う。レビュー指摘に対応する時、`/review-comments <PR URL>` 呼び出しで使用。
+disable-model-invocation: true
 ---
 
 # PR レビューコメント対応スキル
 
 PR 上の未解決レビューコメント（Gemini、Greptile、人間レビュアー等）を取得し、各コメントに対して「対応済み」「却下（理由付き）」「要対応」を判定した上で、**返信メッセージの投稿と resolve を実行する**。
 
-**規約**: CLAUDE.md の Skills 共通規約に従う
 ## パラメーター
 
 `<PR URL or number>` — 対象の PR を指定する。省略時は現在のブランチの PR を自動検出する。

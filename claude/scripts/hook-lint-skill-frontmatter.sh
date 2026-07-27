@@ -154,6 +154,16 @@ DESC_VALUE=$(echo "$FRONTMATTER" | awk '
 ')
 
 # 6. トリガー語の存在チェック (連語化、単一文字を回避、case-insensitive)
+#
+# disable-model-invocation: true の skill は description が listing に載らず Claude からも
+# 起動されないため、トリガー語 (Claude の自動選択精度を上げるための記述) を強制しない。
+# 強制すると、誰も読まない死んだ指示を書かせ続けることになる。
+# skillOverrides (settings.json 側) は見ない — name-only の skill は listing に名前が載って
+# Claude から起動されうるため、トリガー語は依然として意味を持つ。
+if echo "$FRONTMATTER" | grep -qE '^disable-model-invocation:[[:space:]]*true'; then
+  exit 0
+fi
+
 TRIGGER_REGEX='時に|する時|使用|呼び出|キーワード|トリガー|when |trigger|use this|use when'
 
 if ! echo "$DESC_VALUE" | grep -qiE "$TRIGGER_REGEX"; then

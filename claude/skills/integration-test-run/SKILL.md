@@ -1,20 +1,23 @@
 ---
 name: integration-test-run
-description: |
-  integration-test-scenario が作成したシナリオ手順書を実施する。playwright-cliのnetwork層キャプチャで観点を実測判定し、非2xxや失敗は回帰か環境要因かを切り分けてから4区分のstatusで結果を記録する。
-  「統合テスト実施」「シナリオ実行」「テスト実行」等のキーワードで使用。integration-test-scenario の後工程。
+description: シナリオ手順書を実施し network 層の実測で観点を判定して 4 区分の status で記録する。「統合テスト実施」「シナリオ実行」のキーワードで使用。integration-test-scenario の後工程。
 ---
 
-**規約**: CLAUDE.md の Skills 共通規約に従う
-
 ## 補助ドキュメントへの参照
+
+**必ず読む**（起動したら必ず通るフェーズで使う）:
+
+| 補助ドキュメント | タイミング |
+|------------------|-----------|
+| `./reference/report-template.md` | フェーズ 4 で結果を記録する時（記録は本 skill の目的そのもの） |
+
+**条件付きで読む**:
 
 | 補助ドキュメント | 読むタイミング |
 |------------------|----------------|
 | `./reference/judgment-checklist.md` | フェーズ 3 で非 2xx や失敗を回帰か環境要因かに切り分ける時 |
-| `./reference/report-template.md` | フェーズ 4 で結果を記録する時 |
 
-「念のため全部読む」は禁止。表のトリガー条件に該当する場合のみ読み込む。
+「念のため全部読む」は禁止。条件付きの表はトリガー条件に該当する場合のみ読み込む。
 
 ## パラメーター
 

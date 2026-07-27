@@ -6,7 +6,6 @@ description: 実装計画(plan.md)とgit diffを対象に、実装前後で結�
 実装計画(plan.md)と実際のコード差分(git diff)を対象に、実装前後で結合構造がどう変化したかを Before(plan=意図) / After(diff=事実) で分析する。`coupling-anatomy` の3軸（統合強度×距離×変動性）を判定基準として用いる。
 
 **重要**: ソースコードは一切変更しない。デフォルト出力は `./tmp/coupling-plan-diff.md` のみ。
-**規約**: CLAUDE.md の Skills 共通規約に従う
 
 判定基準・訳語・出力フォーマットは `coupling-anatomy` スキルを参照する（本スキルでは再宣言しない）。
 
@@ -52,7 +51,7 @@ description: 実装計画(plan.md)とgit diffを対象に、実装前後で結�
 
 ### フェーズ6: artifact生成（`--artifact` 指定時のみ）
 
-- [ ] `coupling-anatomy/reference/artifact-procedure.md` の手順に従う
+- [ ] `../coupling-anatomy/reference/artifact-procedure.md` の手順に従う
 - [ ] `artifact-design`、`dataviz` スキルを **Skillツールで明示ロードしてから作業する**（暗黙知で代用しない）
 
 ### フェーズ7: 完了報告

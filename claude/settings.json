@@ -46,7 +46,8 @@
       "Bash(sudo:*)",
       "Bash(wget:*)",
       "Read(**/*.env*)",
-      "Read(**/*aws*)",
+      "Read(**/.aws/**)",
+      "Read(**/*credentials*)",
       "Read(**/*key)",
       "Read(**/*token*)",
       "Read(**/*secrets*)",
@@ -54,7 +55,8 @@
       "Read(id_ed25519)",
       "Read(id_rsa)",
       "Edit(**/*.env*)",
-      "Edit(**/*aws*)",
+      "Edit(**/.aws/**)",
+      "Edit(**/*credentials*)",
       "Edit(**/*key)",
       "Edit(**/*production*)",
       "Edit(**/*secrets*)",
@@ -76,13 +78,23 @@
     "defaultMode": "bypassPermissions"
   },
   "model": "sonnet",
+  "skillOverrides": {
+    "find-skills": "user-invocable-only",
+    "coupling-anatomy": "name-only",
+    "coupling-audit": "name-only",
+    "coupling-gate": "name-only",
+    "coupling-plan-diff": "name-only",
+    "coupling-precheck": "name-only",
+    "fix-lgtm": "name-only",
+    "fix-lgtm-implement": "name-only"
+  },
   "hooks": {
     "UserPromptSubmit": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/scripts/sync-claude-to-worktree.sh"
+            "command": "/Users/gamouhiroto/.claude/scripts/sync-claude-to-worktree.sh"
           },
           {
             "type": "command",
@@ -135,7 +147,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/gamouhiroto/.claude/scripts/hook-inject-recent-lessons.sh"
+            "command": "/Users/gamouhiroto/.claude/scripts/hook-check-scripts-sync.sh"
           }
         ]
       }
@@ -143,25 +155,25 @@
   },
   "statusLine": {
     "type": "command",
-    "command": "~/.claude/scripts/statusline.py"
+    "command": "/Users/gamouhiroto/.claude/scripts/statusline.py"
   },
   "enabledPlugins": {
-    "code-review@claude-plugins-official": true,
+    "code-review@claude-plugins-official": false,
     "commit-commands@claude-plugins-official": true,
     "context7@claude-plugins-official": true,
     "explanatory-output-style@claude-plugins-official": true,
     "feature-dev@claude-plugins-official": true,
-    "figma@claude-plugins-official": true,
-    "frontend-design@claude-plugins-official": true,
-    "github@claude-plugins-official": true,
+    "figma@claude-plugins-official": false,
+    "frontend-design@claude-plugins-official": false,
+    "github@claude-plugins-official": false,
     "learning-output-style@claude-plugins-official": true,
-    "Notion@claude-plugins-official": true,
+    "Notion@claude-plugins-official": false,
     "playwright@claude-plugins-official": true,
     "pr-review-toolkit@claude-plugins-official": true,
     "serena@claude-plugins-official": true,
     "typescript-lsp@claude-plugins-official": true,
     "superpowers@claude-plugins-official": true,
-    "slack@claude-plugins-official": true
+    "slack@claude-plugins-official": false
   },
   "language": "日本語",
   "effortLevel": "xhigh",

@@ -1,21 +1,27 @@
 ---
 name: retrospective
 description: 指定日の Pull Request 群を振り返り学びを抽出する。日次レビュー、週次サマリ、振り返り目的で `/retrospective [date]` 呼び出しで使用。
+disable-model-invocation: true
 ---
 
 指定された日（または今日）に作成したプルリクエストを振り返り、学びと知見をまとめる。
 
-**規約**: CLAUDE.md の Skills 共通規約に従う
-
 ## 補助ドキュメントへの参照
+
+**必ず読む**（起動したら必ず通るフェーズで使う）:
+
+| 補助ドキュメント | タイミング |
+|------------------|-----------|
+| `./reference/data-fetching.md` | Phase 1 で PR を取得する時（取得なしには分析が始まらない） |
+| `./reference/output-format.md` | Phase 4 でレポートを出力する時 / Phase 2-3 の分析観点を確認する時 |
+
+**条件付きで読む**:
 
 | 補助ドキュメント | 読むタイミング |
 |------------------|----------------|
-| `./reference/data-fetching.md` | Phase 1 で PR を取得する時 / API レート制限を確認する時 |
-| `./reference/output-format.md` | Phase 4 でレポートを出力する時 / Phase 2-3 の分析観点を確認する時 |
 | `./scripts/daily-prs.sh` | Phase 1 で日次 PR 集計を最小実装で取得する時 |
 
-「念のため全部読む」は禁止。表のトリガー条件に該当する場合のみ読み込む。
+「念のため全部読む」は禁止。条件付きの表はトリガー条件に該当する場合のみ読み込む。
 
 ## 引数
 

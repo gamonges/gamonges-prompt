@@ -1,12 +1,12 @@
 ---
 name: document-spec
-description: 既存実装ファイル群から openspec spec を直接生成する（/document-spec --domain <name> --files "..."）
+description: 既存実装ファイル群から openspec spec を直接生成する。未文書化の実装を仕様化する時、`/document-spec --domain <name> --files "..."` で使用。
+disable-model-invocation: true
 ---
 
 未文書化の既存実装を openspec 仕様として書き起こす。`/spec-archive`（plan.md ベース）と `/spec-propose`（proposal フロー）の中間を埋める用途。
 
 **重要**: `openspec/specs/` 配下のみを変更する。ソースコードは変更しない。
-**規約**: CLAUDE.md の Skills 共通規約に従う
 ## パラメーター
 
 引数として以下を指定する（対話的に取得することも可能）:

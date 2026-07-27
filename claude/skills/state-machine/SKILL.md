@@ -1,8 +1,9 @@
 ---
 name: state-machine
-description: Add a state machine diagram to a plan file to clarify requirements
+description: Add a state machine diagram to a plan file to clarify requirements. Use when a plan involves complex state transitions.
 argument-hint: [path to plan file (auto-search if omitted)]
 allowed-tools: Read, Write, Edit, Glob, Grep, AskUserQuestion
+disable-model-invocation: true
 ---
 
 Read a plan file, generate a state machine diagram (ASCII format), and clarify requirements.

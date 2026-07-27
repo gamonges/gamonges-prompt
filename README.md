@@ -41,10 +41,11 @@ cd gamonges-prompt
 ./setup.sh install
 ```
 
-これにより、以下の場所にシンボリックリンクが作成されます：
-- Skills → `~/.claude/skills/`
-- SubAgents → `~/.claude/sub-agents/`
-- Scripts → `~/.claude/scripts/`
+これにより、以下の場所に配置されます：
+- Skills → `~/.claude/skills/`（シンボリックリンク）
+- SubAgents → `~/.claude/sub-agents/`（シンボリックリンク）
+- settings.json → `~/.claude/settings.json`（シンボリックリンク）
+- Scripts → `~/.claude/scripts/`（**実体コピー**。編集・pull したら `./setup.sh install` を再実行する）
 
 ### 状態確認
 
@@ -55,7 +56,9 @@ cd gamonges-prompt
 ### 検証
 
 ```bash
-./claude/scripts/verify-skills.sh   # SKILL.md 数 / frontmatter / symlink を機械的に検証
+./claude/scripts/verify-skills.sh   # SKILL.md 数 / frontmatter (name とディレクトリ名の一致) /
+                                    # symlink / scripts の同期・orphan・install 元 / listing budget
+                                    # fail があれば exit 1、warn のみなら exit 0
 ```
 
 ### アンインストール
@@ -76,6 +79,10 @@ git pull
 
 開発ワークフロー系（旧 commands から移行）と、ユーティリティ系（既存）に分類:
 
+> **起動方法（重要）**: `disable-model-invocation: true` を付けた skill は **`/` 呼び出しのみ**で、自然言語からは起動しない。無反応で終わるのではなく有効な別実装（plugin など）に流れることがあるため、明示的に `/名前` で呼ぶ。
+> `settings.json` の `skillOverrides: "name-only"` を付けた skill は listing に name だけ載る（description が落ちるだけで、自然言語からの起動は可能）。
+> 現在の状態: `grep -l 'disable-model-invocation: true' claude/skills/*/SKILL.md` と `jq .skillOverrides claude/settings.json`
+
 ### 開発ワークフロー系
 | スキル名 | 説明 |
 |---------|------|
@@ -86,7 +93,7 @@ git pull
 | `/implement` | 計画に基づき TDD で実装 |
 | `/review` | PR レビュー（並列サブエージェント） |
 | `/fix` | 修正項目から fix-plan.md を生成 |
-| `/create-pr` | develop 向けドラフト PR を作成 |
+| `/create-pr` | 既定ブランチ向けドラフト PR を作成（ベースは `gh repo view` から取得） |
 | `/spec-check` / `/spec-propose` / `/spec-archive` / `/document-spec` | OpenSpec 仕様管理 |
 | `/review-comments` | PR レビューコメントの妥当性評価 + 返信 + resolve |
 | `/retrospective` | 日次 PR 振り返り |
@@ -108,6 +115,7 @@ git pull
 | `context-index` | claude-context にコードベースを index（個人定義の ignore で不要ディレクトリ除外、`disable-model-invocation`） |
 | `worktree-cleanup` | マージ済み PR の worktree 一括削除（削除時に claude-context index も回収） |
 | `strategic-ddd` / `review-strategic-ddd` | 戦略的 DDD 設計と そのレビュー |
+| `skill-authoring` | skill / subagent を書くときの規約（Claude 5 向け変換ルール T1–T8、起動制御フィールドの判断表、追加手順）。**起動制御の正本** |
 
 ## 🤖 SubAgents 一覧
 
@@ -178,6 +186,8 @@ description: Brief description of what this Skill does
 
 ## ⚠️ 注意事項
 
-- シンボリックリンクを使用しているため、リポジトリ内のファイルを更新すると自動的に反映されます
+- Skills / SubAgents / settings.json はシンボリックリンクのため、リポジトリ内のファイルを更新すると自動的に反映されます
+- **Scripts は実体コピーのため即時反映されません。** `claude/scripts/` を編集・pull したら `./setup.sh install` を再実行してください。忘れても hook は失敗せず古いスクリプトで静かに動き続けます（同期状態は `./setup.sh status` か `verify-skills.sh` で確認）
 - リポジトリを削除すると、リンクが壊れます（アンインストールを先に実行してください）
-- 既存の同名ファイルは `.backup.YYYYMMDDHHMMSS` としてバックアップされます
+- 既存の同名ファイルは、内容が異なる場合に `.backup.YYYYMMDDHHMMSS` としてバックアップされます
+- **install はメインチェックアウトから実行してください。** worktree から実行すると symlink がその worktree を指し、削除時に設定が失われます（`./setup.sh install` が警告します）

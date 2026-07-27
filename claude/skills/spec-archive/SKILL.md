@@ -1,12 +1,12 @@
 ---
 name: spec-archive
 description: OpenSpec 変更提案を仕様にマージ、または plan.md から直接 spec を作成する。`/spec-propose` レビュー後の確定、`/implement` 完了後の仕様永続化、`/spec-archive` 呼び出しで使用。
+disable-model-invocation: true
 ---
 
 changes/ の変更提案を specs/ にマージし archive/ に移動する（完全フロー）、または plan.md から直接 specs/ に書き込む（簡易フロー）。
 
 **重要**: 変更対象は `openspec/` ディレクトリのみに限定する（ソースコード、`tmp/` の変更禁止）。
-**規約**: CLAUDE.md の Skills 共通規約に従う
 ## パラメーター
 
 `$ARGUMENTS` で change-name を指定できる。

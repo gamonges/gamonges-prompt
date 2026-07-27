@@ -1,11 +1,12 @@
 ---
 name: html-view
 description: |
-  Markdown ドキュメント (plan / fix-plan / review / research) を Claude 自身が読んで人間レビュア向けのデザイン HTML に変換する。
-  PdM/SRE への共有時、ブラウザでデザインプレビューを開きたい時、`/html-view <file.md>` のキーワードで使用。
+  Markdown (plan / fix-plan / review / research) をローカル完結の HTML に変換しブラウザで開く。
+  外部送信を避けたい時、`/html-view <file.md>` 呼び出しで使用。共有目的の既定は Artifact。
+disable-model-invocation: true
 ---
 
-**規約**: CLAUDE.md の Skills 共通規約に従う
+> **位置付け**: 成果物を人が読む形にする既定の手段は **Artifact**（CLAUDE.md の Skills 共通規約を参照）。本 skill は**ローカルに閉じたい場合の退避手段**で、内容が claude.ai に送信されない点が違い。本 skill の `reference/` にある style-guide・example・種別別 prompt は**ローカル HTML 専用**であり、Artifact 生成時には参照しない（Artifact 側は `artifact-design` skill に従う）。
 
 入力 Markdown を Claude (本セッション) 自身が読み込み、ドキュメント種別に応じた prompt + 参照 example HTML を文脈にして単体完結 HTML を組み立てる。生成 HTML は `tmp/` 配下に Write し、`--no-open` 指定がない限りブラウザで自動起動する。Python script は使わない (LLM 直接生成方式)。
 
@@ -29,16 +30,16 @@ description: |
 
 | 前工程 | 本コマンド | 後工程 |
 |--------|-----------|--------|
-| `/ask` `/design` `/review` `/fix` の完了報告で「HTML 化しますか?」プロンプト | `/html-view <出力ファイル>` | (ブラウザで人間レビュー) |
+| 成果物の生成（`/ask` `/design` `/review` `/fix` 等） | ユーザーが `/html-view <出力ファイル>` を明示的に呼ぶ | (ブラウザで人間レビュー) |
 
-本コマンドは独立して呼び出してもよい (任意の Markdown を HTML 化する用途)。Claude による自動チェイン実行はしない (オプトイン運用)。
+成果物を人が読む形にする既定は Artifact 化であり、ローカルに閉じたいときだけ本コマンドを使う。任意の Markdown を HTML 化する用途で独立して呼び出してもよい。
 
 ## 実行条件
 
 - 入力 `<input.md>` が存在すること
-- `~/.claude/skills/html-view/reference/prompts/{review,plan,fix-plan,research,generic}-style.md` のうち、判定された style 用ファイルが存在する
-- `~/.claude/skills/html-view/reference/style-guide.md` が存在する
-- `~/.claude/skills/html-view/reference/examples/*.html` の参照例が存在する
+- `./reference/prompts/{review,plan,fix-plan,research,generic}-style.md` のうち、判定された style 用ファイルが存在する
+- `./reference/style-guide.md` が存在する
+- `./reference/examples/*.html` の参照例が存在する
 
 いずれかが満たされない場合は処理を即停止しユーザーに報告する。
 
@@ -72,13 +73,13 @@ description: |
 
 判定された style に応じて以下を Read する:
 
-1. `~/.claude/skills/html-view/reference/prompts/{style}-style.md` — 種別固有のデザイン指示 + 必須要素チェックリスト
-2. `~/.claude/skills/html-view/reference/style-guide.md` — 共通 CSS 変数 / フォント / レスポンシブ / `@media print` / 単体完結原則
+1. `./reference/prompts/{style}-style.md` — 種別固有のデザイン指示 + 必須要素チェックリスト
+2. `./reference/style-guide.md` — 共通 CSS 変数 / フォント / レスポンシブ / `@media print` / 単体完結原則
 3. 該当 example HTML を Read:
-   - `fix-plan` style: `~/.claude/skills/html-view/reference/examples/fix-plan.html`
-   - `plan` style: `~/.claude/skills/html-view/reference/examples/adr-pipeline.html` (+ レイヤー別タブが必要な場合のみ `css-tabs.html`)
-   - `review` style: `~/.claude/skills/html-view/reference/examples/fix-plan.html` (カードレイアウト流用)
-   - `research` style: `~/.claude/skills/html-view/reference/examples/adr-pipeline.html` + (情報量多 → `css-tabs.html`)
+   - `fix-plan` style: `./reference/examples/fix-plan.html`
+   - `plan` style: `./reference/examples/adr-pipeline.html` (+ レイヤー別タブが必要な場合のみ `css-tabs.html`)
+   - `review` style: `./reference/examples/fix-plan.html` (カードレイアウト流用)
+   - `research` style: `./reference/examples/adr-pipeline.html` + (情報量多 → `css-tabs.html`)
    - `generic` style: example 不要
 4. 入力 `<input.md>` を Read
 

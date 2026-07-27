@@ -1,6 +1,7 @@
 ---
-name: domain-name-brainstorming
+name: domain-name-brainstormer
 description: プロジェクトに最適なドメイン名を提案し、複数 TLD (.com, .io, .dev, .ai, .app) での空き状況を確認する。新規プロジェクト開始時 / 製品ローンチ時 / 希望ドメインが取得済みで代替を探す際に使用。
+disable-model-invocation: true
 ---
 
 # ドメイン名ブレインストーミング

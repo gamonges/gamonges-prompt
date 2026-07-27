@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # PostToolUse hook: タスクの区切り (gh pr create / openspec archive 等) を検知し
-# 自己改善ループの振り返り（tmp/lessons.md 末尾追記）を促す
+# 自己改善ループの振り返り（auto-memory への記録）を促す
+#
+# 記録先は Claude Code ネイティブの auto-memory。旧 tmp/lessons.md 方式は
+# SessionStart で本文を無条件に前渡ししていたため廃止した（auto-memory は索引のみ常駐し、
+# 関連する記憶だけが必要時に想起される）。
 # 公式: https://code.claude.com/docs/en/hooks
 #
 # 対象 tool: Bash 限定 (settings.json の matcher: "Bash" で限定)
@@ -53,7 +57,7 @@ fi
 jq -n --arg trigger "$matched" '{
   hookSpecificOutput: {
     hookEventName: "PostToolUse",
-    additionalContext: ("📝 [自己改善ループ] タスクの区切りを検知 (\($trigger))。次の応答前に:\n1. 本タスクの失敗 / 学び を 1-3 件抽出\n2. 既存 tmp/lessons.md と重複しないか確認\n3. 重複なければ末尾追記 (append-only)\n4. 教訓が無ければ '\''記録なし'\'' と明示")
+    additionalContext: ("📝 [自己改善ループ] タスクの区切りを検知 (\($trigger))。次の応答前に:\n1. 本タスクの失敗 / 学び を 1-3 件抽出\n2. 既存の auto-memory と重複しないか確認\n3. 重複がなければ auto-memory に `type: feedback` として保存し、MEMORY.md に 1 行追記\n4. 既存の記憶に該当があれば新規作成せず更新する\n5. 教訓が無ければ '\''記録なし'\'' と明示")
   }
 }'
 

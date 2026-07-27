@@ -1,29 +1,51 @@
 ---
 name: create-pr
-description: 現在のブランチから develop ブランチへ Pull Request を作成する。実装完了後の PR 化、レビュー依頼の準備、`/create-pr` 呼び出しで使用。
+description: 現在のブランチから既定のベースブランチへ Pull Request を作成する。実装完了後の PR 化、レビュー依頼の準備、`/create-pr` 呼び出しで使用。
+disable-model-invocation: true
 ---
 
-指定されたブランチ（または現在のブランチ）から develop ブランチ向けのプルリクエストを作成します。
+指定されたブランチ（または現在のブランチ）から、リポジトリの既定ブランチ（`gh repo view --json defaultBranchRef -q .defaultBranchRef.name`）向けのプルリクエストを作成します。ユーザーがベースブランチを明示した場合はそれを優先します。
 
-**規約**: CLAUDE.md の Skills 共通規約に従う
+## 補助ドキュメントへの参照
+
+**必ず読む**:
+
+| 補助ドキュメント | 読むタイミング |
+|------------------|----------------|
+| `./reference/pr-description-template.md` | Phase 5 で PR 本文を生成する時（起動したら必ず通る） |
+
+「念のため全部読む」は禁止。上記以外の補助ファイルを増やす場合は「条件付きで読む」表を別に作り、トリガー条件を書く。
+
 ## Notion Page ID によるリファレンス付与
 
-ユーザーがコマンド実行時にNotionのページID（例: `DC-6050`, `DC-1234 DC-5678`）を一緒に入力した場合、PR本文の**先頭**に `ref` 行を自動付与します。
+ユーザーがコマンド実行時に Notion のページ ID（例: `DC-6050`, `DC-1234 DC-5678`）を一緒に入力した場合、PR 本文の**先頭**に `ref` 行を自動付与します。
 
-**ルール**:
+**ルール**（本仕様の SSOT。reference 側では再宣言しない）:
 
-- ユーザーの入力から `DC-` で始まるID（例: `DC-6050`）をすべて抽出する
-- 1件の場合: `ref DC-6050` を本文の1行目に挿入
-- 複数件の場合: `ref DC-6050 DC-1234` のようにスペース区切りで1行にまとめる
-- IDが見つからない場合: ref 行は付与しない（従来通りの動作）
-- ref 行の後に空行を1行入れてからPR本文を続ける
+- ユーザーの入力から `DC-` で始まる ID（例: `DC-6050`）をすべて抽出する
+- 1 件の場合: `ref DC-6050` を本文の 1 行目に挿入
+- 複数件の場合: `ref DC-6050 DC-1234` のようにスペース区切りで 1 行にまとめる
+- ID が見つからない場合: ref 行は付与しない（従来通りの動作）
+- ref 行の後に空行を 1 行入れてから PR 本文を続ける
+
+```
+# ID が見つかった場合の本文構造:
+ref DC-6050
+
+## 📝 PR 概要 📝
+...
+
+# ID が見つからなかった場合の本文構造:
+## 📝 PR 概要 📝
+...
+```
 
 ## Execution Conditions
 
 You must verify the following conditions before proceeding:
 
-- Current branch is not `develop` or `main`
-- Current branch has commits that are not in `develop`
+- Current branch is not the repository's default branch
+- Current branch has commits that are not in the default branch
 - There is no existing Pull Request for the current branch
 
 If any condition is not met:
@@ -42,14 +64,20 @@ When all conditions are met, execute these phases in order:
 # Get current branch
 current_branch=$(git branch --show-current)
 
-# Verify branch is not develop or main
-if [ "$current_branch" = "develop" ] || [ "$current_branch" = "main" ]; then
-    echo "Error: Cannot create PR from develop or main branch"
+# ベースブランチを 1 箇所で解決し、以降のフェーズはこの変数だけを使う。
+# リポジトリごとに main / develop が異なるため、ブランチ名をハードコードすると
+# 存在しないブランチを参照して `fatal: ambiguous argument` になる
+base_branch=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
+# ユーザーがベースブランチを明示した場合はその値で上書きする
+
+# Verify branch is not the default branch
+if [ "$current_branch" = "$base_branch" ]; then
+    echo "Error: Cannot create PR from the default branch ($base_branch)"
     exit 1
 fi
 
-# Check if there are commits ahead of develop
-commits_ahead=$(git rev-list --count develop..HEAD)
+# Check if there are commits ahead of the base branch
+commits_ahead=$(git rev-list --count "${base_branch}..HEAD")
 if [ "$commits_ahead" -eq 0 ]; then
     echo "Error: No commits to create PR"
     exit 1
@@ -101,14 +129,14 @@ modified_count=$(git status --porcelain | grep -c -E '^ [AMD]' || true)
 変更内容を分析して PR 本文を生成するための情報を収集します。
 
 ```bash
-# Get changed files
-changed_files=$(git diff --name-only develop...HEAD)
+# Get changed files（$base_branch は Phase 1 で解決済み）
+changed_files=$(git diff --name-only "${base_branch}...HEAD")
 
 # Get commit messages
-commit_messages=$(git log develop..HEAD --pretty=format:"%s")
+commit_messages=$(git log "${base_branch}..HEAD" --pretty=format:"%s")
 
 # Get diff stats
-diff_stats=$(git diff develop...HEAD --stat)
+diff_stats=$(git diff "${base_branch}...HEAD" --stat)
 ```
 
 ### Phase 4: Determine PR Purpose
@@ -126,42 +154,7 @@ diff_stats=$(git diff develop...HEAD --stat)
 
 `.github/PULL_REQUEST_TEMPLATE.md`のフォーマットに従って PR 本文を生成します。
 
-**Notion Page ID の処理**:
-
-ユーザー入力から `DC-` で始まるIDを抽出し、見つかった場合はPR本文の先頭に挿入します。
-
-```
-# IDが見つかった場合の本文構造:
-ref DC-6050
-
-## 📝 PR 概要 📝
-...
-
-# IDが見つからなかった場合の本文構造:
-## 📝 PR 概要 📝
-...
-```
-
-テンプレート構成:
-
-```markdown
-## 📝 PR 概要 📝
-
-- **目的**:
-  - [機能追加/仕様変更/バグ修正/リファクタリング]
-- **関連リンク**:
-  - [関連する Issue、Notion、Figma など]
-- **変更点の概要**:
-  - [主要な変更内容を箇条書き]
-
-## 👮‍♂️ 動作確認 👮‍♂️
-
-- [ ] API に破壊的な変更がない（エンドポイント削除やレスポンス変更など）
-- [ ] ローカルで動作確認済み
-- [ ] CI が正常に通過
-- [ ] ドキュメント（README, Swagger など）が更新済み
-- [ ] gemini のレビュー指摘をチェック
-```
+PR 本文の構成と Notion Page ID の挿入位置は `./reference/pr-description-template.md` を参照する。
 
 変更内容に基づいて、以下を自動的に埋めます：
 
@@ -178,7 +171,7 @@ ref DC-6050
 gh pr create \
   --title "$pr_title" \
   --body "$pr_description" \
-  --base develop \
+  --base "$base_branch" \
   --head "$current_branch" \
   --draft
 ```

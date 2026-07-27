@@ -10,7 +10,7 @@ ADR（Architecture Decision Record）データベースの詳細スキーマ情�
 
 ## スキーマ検証状況
 
-**注意**: 以下のプロパティは `/adr` コマンドテンプレート（`claude/commands/adr.md`）からの推定です。Notion MCP 接続時に `user-Notion:notion-fetch` でデータベースにアクセスし、正確なプロパティ名・型を検証してください。
+**注意**: 以下のプロパティは `/adr` skill（`claude/skills/adr/SKILL.md`）からの推定です。Notion MCP 接続時に `user-Notion:notion-fetch` でデータベースにアクセスし、正確なプロパティ名・型を検証してください。
 
 検証後、このファイルを更新して「推定」の注記を削除してください。
 

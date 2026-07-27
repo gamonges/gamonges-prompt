@@ -1,6 +1,7 @@
 ---
 name: notion-qa-progress
 description: NotionのQA指摘データベースから「In Progress」ステータスのタスクを取得する。QA対応状況の確認、対応すべきタスクの一覧取得時に使用。
+disable-model-invocation: true
 ---
 
 # Notion QA指摘取得スキル

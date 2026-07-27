@@ -6,15 +6,23 @@ description: PR / 変更差分を専門サブエージェント並列でレビ�
 Perform comprehensive code review using specialized AI agents working in parallel.
 
 **IMPORTANT**: Never modify source files — only output review files.
-**規約**: CLAUDE.md の Skills 共通規約に従う
 
 ## 補助ドキュメントへの参照
+
+**必ず読む**（起動したら必ず通るフェーズで使う）:
+
+| 補助ドキュメント | 読むタイミング |
+|------------------|----------------|
+| `./reference/project-detection.md` | Phase 1.5 でプロジェクト種別を判定する時 |
+
+**条件付きで読む**:
 
 | 補助ドキュメント | 読むタイミング |
 |------------------|----------------|
 | `./reference/edge-case-reverification.md` | Critical Issue が出た時 / 境界値・並行処理・テナント分離・トランザクション境界を含む変更の時 / 既存テストカバレッジが低い領域を変更した時 |
 
-「念のため全部読む」は禁止。表のトリガー条件に該当する場合のみ読み込む。
+「念のため全部読む」は禁止。条件付きの表はトリガー条件に該当する場合のみ読み込む。
+
 ## Execution Conditions
 
 - Pull Request exists for the current branch (draft or opened), OR the user appended a PR link or number after the command.
@@ -112,40 +120,9 @@ failed_checks=$(echo "$ci_checks" | jq -c '.[] | select(.bucket == "fail")')
 
 ### Phase 1.5: Detect Project Type
 
-Detect the project type to determine which agents and rules to use.
+Detect the project type to determine which agents and rules to use. 判定手順は `./reference/project-detection.md` を参照する。
 
-#### Detection logic (priority order)
-
-**Step 1: package.json dependencies (highest priority)**
-
-Check the root or primary `package.json` for framework dependencies:
-
-| Dependency | Frontend | Backend |
-|-----------|----------|---------|
-| `@nestjs/core` in dependencies | — | ✅ |
-| `react` in dependencies | ✅ | — |
-
-For monorepos with multiple `package.json` files, check the root one first, then the primary app package.
-
-**Step 2: CLAUDE.md keywords (supplementary)**
-
-If Step 1 is inconclusive, scan `.claude/CLAUDE.md` for framework keywords:
-
-| Keyword in CLAUDE.md | Frontend | Backend |
-|---------------------|----------|---------|
-| "NestJS" or "Prisma" | — | ✅ |
-| "React" or "TanStack" | ✅ | — |
-
-**Step 3: Directory structure (final fallback)**
-
-| Signal | Frontend | Backend |
-|--------|----------|---------|
-| `src/apps/` directory exists | ✅ | — |
-| `v2/src/` directory exists | — | ✅ |
-
-**If detection fails**: Set `project_type = unknown` and use all agents as candidates (equivalent to legacy behavior).
-
-Result: `project_type` = `frontend` | `backend` | `unknown`
+Result: `project_type` = `frontend` | `backend` | `unknown`（判定不能時は全エージェントを候補にする）
 
 ### Phase 2: PR Overview Analysis
 
@@ -299,19 +276,7 @@ Provide the following to the user:
 3. **指摘サマリ** — Critical / Minor / Info 件数、優先対応項目
 4. **出力ファイル** — `./tmp/review/unified.md` and `./tmp/review/*-review.md`
 
-#### HTML view 化 (オプション)
-
-unified.md 生成完了直後に、以下をユーザーに尋ねる (Phase 4 末尾固定。Phase 5 で再実行しない):
-
-> **HTML 化しますか?** (人間レビュア向けのデザイン HTML を生成)
-
-ユーザーが Yes と回答した場合、**Claude は自動実行せず**、次のコマンドを案内する:
-
-```
-/html-view ./tmp/review/unified.md
-```
-
-ユーザーが明示的に slash command を入力することで HTML 生成 + ブラウザ自動起動が完了する。
+> 成果物の共有形式（Artifact / ローカル HTML）と提案タイミングは CLAUDE.md の Skills 共通規約に従う（本 skill では `unified.md` の生成完了が「完了報告」にあたる）。
 
 ### Phase 5 (任意): Edge Case 再検証（subagent 並列）
 

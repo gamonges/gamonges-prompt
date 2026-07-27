@@ -1,14 +1,12 @@
 ---
 name: context-index
-description: claude-context にコードベースを index して semantic search を可能にする。個人定義の ignorePattern（repo 外・非コミット）を参照し不要ディレクトリを除外する。`/context-index` で起動。
+description: claude-context にコードベースを index して semantic search を可能にする。個人定義の ignorePattern で不要ディレクトリを除外。`/context-index` 呼び出しで使用。
 disable-model-invocation: true
 ---
 
 # Context Index Skill
 
 claude-context（Milvus + 埋め込み）にコードベースを index し、`search_code` での意味検索を可能にする。個人/ローカル定義の ignorePattern を参照して不要ディレクトリを除外する。
-
-**規約**: CLAUDE.md の Skills 共通規約に従う
 
 > index は副作用（埋め込み計算 + ベクトル storage）を伴うため、本 skill は / メニュー専用（Claude の自動呼出は無効）。
 

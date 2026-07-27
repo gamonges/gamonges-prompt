@@ -1,13 +1,13 @@
 ---
 name: spec-propose
 description: 実装完了後の plan.md から OpenSpec 変更提案を作成する。`/implement` 完了後の仕様提案作成、既存仕様の修正提案、`/spec-propose` 呼び出しで使用。
+disable-model-invocation: true
 ---
 
 実装完了後に plan.md の要点を `openspec/changes/{change-name}/` に変更提案として作成する。
 新規仕様の追加（ADDED）だけでなく、既存仕様の更新（MODIFIED/REMOVED/RENAMED）にも対応する。
 
 **重要**: 変更対象は `openspec/changes/` ディレクトリのみに限定する。ソースコード・`tmp/` の変更は禁止。
-**規約**: CLAUDE.md の Skills 共通規約に従う
 ## パラメーター
 
 `$ARGUMENTS` で change-name を指定できる。省略時は plan.md のタイトルから kebab-case で推定する。
