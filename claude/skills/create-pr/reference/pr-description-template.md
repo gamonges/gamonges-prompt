@@ -2,21 +2,7 @@
 
 `/create-pr` Phase 5 で PR 本文を生成する際の構成。`.github/PULL_REQUEST_TEMPLATE.md` のフォーマットに従う。
 
-**Notion Page ID の処理**:
-
-ユーザー入力から `DC-` で始まるIDを抽出し、見つかった場合はPR本文の先頭に挿入します。
-
-```
-# IDが見つかった場合の本文構造:
-ref DC-6050
-
-## 📝 PR 概要 📝
-...
-
-# IDが見つからなかった場合の本文構造:
-## 📝 PR 概要 📝
-...
-```
+**Notion Page ID の処理**は `SKILL.md` の「Notion Page ID によるリファレンス付与」を参照（抽出ルールと本文構造例はそちらが SSOT。本ファイルでは再宣言しない）。
 
 テンプレート構成:
 

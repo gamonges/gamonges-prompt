@@ -7,8 +7,6 @@ description: <150-200 字以内、動詞 + 目的 + 主要トリガー 2-3 個�
 # 両方とも省略すれば user / Claude 両方から呼出可能（デフォルト）
 ---
 
-**規約**: CLAUDE.md の Skills 共通規約に従う
-
 > **新規 skill 作成時のテンプレート**。
 > このディレクトリは `_` プレフィックスで `setup.sh:install_skills()` の対象外。
 > コピーして `claude/skills/<新skill名>/SKILL.md` を作成し、本テンプレートに従って記述する。
@@ -46,4 +44,4 @@ skill 実行に必要なファイル / 環境を列挙する。条件未達時�
 
 - SKILL.md には書かず必ず `reference/gotchas.md` に追記
 - 同じ罠が 3 回以上発生 → 構造的対策（script / hook / template）に昇格させて gotchas.md から削除
-- 半年以上発生していない罠 → `reference/gotchas-archive.md` に移動
+- 半年以上発生していない罠 → `reference/gotchas-archive.md`（無ければその時点で作成する）に移動

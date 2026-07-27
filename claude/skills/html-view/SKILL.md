@@ -6,8 +6,6 @@ description: |
 disable-model-invocation: true
 ---
 
-**規約**: CLAUDE.md の Skills 共通規約に従う
-
 > **位置付け**: 成果物を人が読む形にする既定の手段は **Artifact**（CLAUDE.md の Skills 共通規約を参照）。本 skill は**ローカルに閉じたい場合の退避手段**で、内容が claude.ai に送信されない点が違い。本 skill の `reference/` にある style-guide・example・種別別 prompt は**ローカル HTML 専用**であり、Artifact 生成時には参照しない（Artifact 側は `artifact-design` skill に従う）。
 
 入力 Markdown を Claude (本セッション) 自身が読み込み、ドキュメント種別に応じた prompt + 参照 example HTML を文脈にして単体完結 HTML を組み立てる。生成 HTML は `tmp/` 配下に Write し、`--no-open` 指定がない限りブラウザで自動起動する。Python script は使わない (LLM 直接生成方式)。
@@ -32,9 +30,9 @@ disable-model-invocation: true
 
 | 前工程 | 本コマンド | 後工程 |
 |--------|-----------|--------|
-| `/ask` `/design` `/review` `/fix` の完了報告で「HTML 化しますか?」プロンプト | `/html-view <出力ファイル>` | (ブラウザで人間レビュー) |
+| 成果物の生成（`/ask` `/design` `/review` `/fix` 等） | ユーザーが `/html-view <出力ファイル>` を明示的に呼ぶ | (ブラウザで人間レビュー) |
 
-本コマンドは独立して呼び出してもよい (任意の Markdown を HTML 化する用途)。Claude による自動チェイン実行はしない (オプトイン運用)。
+成果物を人が読む形にする既定は Artifact 化であり、ローカルに閉じたいときだけ本コマンドを使う。任意の Markdown を HTML 化する用途で独立して呼び出してもよい。
 
 ## 実行条件
 

@@ -6,16 +6,23 @@ description: PR / 変更差分を専門サブエージェント並列でレビ�
 Perform comprehensive code review using specialized AI agents working in parallel.
 
 **IMPORTANT**: Never modify source files — only output review files.
-**規約**: CLAUDE.md の Skills 共通規約に従う
 
 ## 補助ドキュメントへの参照
+
+**必ず読む**（起動したら必ず通るフェーズで使う）:
 
 | 補助ドキュメント | 読むタイミング |
 |------------------|----------------|
 | `./reference/project-detection.md` | Phase 1.5 でプロジェクト種別を判定する時 |
+
+**条件付きで読む**:
+
+| 補助ドキュメント | 読むタイミング |
+|------------------|----------------|
 | `./reference/edge-case-reverification.md` | Critical Issue が出た時 / 境界値・並行処理・テナント分離・トランザクション境界を含む変更の時 / 既存テストカバレッジが低い領域を変更した時 |
 
-「念のため全部読む」は禁止。表のトリガー条件に該当する場合のみ読み込む。
+「念のため全部読む」は禁止。条件付きの表はトリガー条件に該当する場合のみ読み込む。
+
 ## Execution Conditions
 
 - Pull Request exists for the current branch (draft or opened), OR the user appended a PR link or number after the command.
@@ -269,7 +276,7 @@ Provide the following to the user:
 3. **指摘サマリ** — Critical / Minor / Info 件数、優先対応項目
 4. **出力ファイル** — `./tmp/review/unified.md` and `./tmp/review/*-review.md`
 
-> 成果物の共有形式（Artifact / ローカル HTML）は CLAUDE.md の Skills 共通規約に従う。提案は unified.md 生成完了直後に 1 回だけ行い、Phase 5 で再実行しない。
+> 成果物の共有形式（Artifact / ローカル HTML）と提案タイミングは CLAUDE.md の Skills 共通規約に従う（本 skill では `unified.md` の生成完了が「完了報告」にあたる）。
 
 ### Phase 5 (任意): Edge Case 再検証（subagent 並列）
 

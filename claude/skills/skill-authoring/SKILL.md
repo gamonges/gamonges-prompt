@@ -17,6 +17,7 @@ skill / subagent のプロンプトは Claude 5 世代の挙動に合わせる�
 - **T2（subagent の条件化）**: 「常に並列に subagent で調査」ではなく「**複数の独立タスクへ fan-out する場合・複数ファイルを読む場合は同一ターンで複数 spawn。単一の探索や 1 ファイルで完結する作業は直接実行**」。
   - 除外: 並列 subagent が**ワークフローの本質的価値**である箇所（`/review` の並列レビュー、`/implement` Medium/Large の並列編集）は維持する。
 - **T3（進捗 scaffolding の削減）**: 「N ステップごとに要約」「3 周レビュー」等の**回数・過程**の強制は削除する。**構造を足すのは「次の反復のトリガー」と「完了の定義」を名指しできる時だけ**。plan.md の確信度サマリ等の**成果物**構造は維持。
+  - 反復を書くときは「**開始トリガー / 反復トリガー / 完了条件 / 打ち切り（上限 + 到達時の報告義務）**」の 4 点を必ず名指しする。**打ち切りのない反復は書かない** — 上限は 3 巡を既定とし、到達したら完了扱いにせず残る指摘と収束しない理由を報告する。上限のない内側ループを上限つきの外側ループが呼ぶと総コストの上界が誰にも書けなくなる。
 - **T4（review の coverage 化）**: finding 段は確信度・重要度に関わらず全件報告し、各 finding に confidence/severity を付す。フィルタ・並べ替えは集約段で行う。
 - **T5（網羅煽り→具体基準/effort 委譲）**: 「徹底的に/できる限り多く/exhaustive」は具体的な完了基準に置換。網羅度は effort（xhigh/high）に委ねる。
 - **T6（重複排除）**: 同じ指示を skill 本文・description・subagent 定義で繰り返さない。ガイダンスは最も近い定義側に 1 回だけ置く。
@@ -70,9 +71,13 @@ skill / subagent のプロンプトは Claude 5 世代の挙動に合わせる�
 新たに付与する前に、呼び出しグラフを再確認する:
 
 ```bash
-grep -rn '`Skill`' claude/skills/      # skill 間のプログラム的呼び出し
-grep -rn '^skills:' claude/subagents/  # subagent への preload
+# リポジトリルートで実行する。バッククォート囲みだけを見ると
+# 「Skillツールで明示ロード」のような表記揺れと reference/ 配下を取りこぼす
+grep -rniE 'Skill[[:space:]]*(ツール|tool)' claude/skills/   # skill 間のプログラム的呼び出し
+grep -rn '^skills:' claude/subagents/                        # subagent への preload
 ```
+
+scheduled task から repo skill を回している場合は `/schedule` の一覧も確認する（`disable-model-invocation` は scheduled task 起動もブロックする）。
 
 **progressive disclosure を目的とする skill には付けない。** description が listing にあるからこそ Claude が必要時にロードできる仕組みであり、隠すと目的を果たせない。
 
@@ -84,13 +89,14 @@ grep -rn '^skills:' claude/subagents/  # subagent への preload
 2. `./setup.sh install` を再実行
 3. `./claude/scripts/verify-skills.sh` で構造検証
 
-補助ファイル（テンプレート、参考資料、検証スクリプト等）は同じ skill ディレクトリ内に配置可（例: `claude/skills/adr/template/adr-template.md`）。**本文が長い skill は `reference/` に切り出し、「読むタイミング」を表で示す**（`claude/skills/review/SKILL.md` の冒頭が実例）。
+補助ファイル（テンプレート、参考資料、検証スクリプト等）は同じ skill ディレクトリ内に配置する（例: `claude/skills/design/reference/plan-template.md`）。**本文が長い skill は `reference/` に切り出し、「読むタイミング」を表で示す**（`claude/skills/review/SKILL.md` の冒頭が実例）。表は「必ず読む」と「条件付きで読む」の 2 段に分ける — 起動したら必ず通るフェーズのものを条件付きと並べると、「該当する場合のみ読む」という規約の意味が薄れる。
 
 注意点:
 
 - **ディレクトリ名が起動名**になる。frontmatter の `name` と一致させる（不一致でも動くが `skillOverrides` のキー指定で事故になる）。
 - `description` にトリガー語（`時に` / `する時` / `使用` / `呼び出` / `キーワード` / `トリガー` / `when` / `trigger` / `use this` / `use when`）を含める。`hook-lint-skill-frontmatter.sh` が検査する。
-- **worktree で編集した内容は反映されない。** `~/.claude/skills/` はメインチェックアウトを指す symlink のため、マージするまでランタイムに効かない。同じ理由で `verify-skills.sh` は worktree から実行すると必ず FAIL する（メインチェックアウトで実行する）。
+- **`~/.claude/skills/` は「最後に `./setup.sh install` を実行したチェックアウト」を指す symlink。** どれが効いているかは `ls -l ~/.claude/skills/<name>` で確認する。worktree から install すると未マージの内容が全プロジェクトのランタイムに即時適用され、その worktree を削除すると skill symlink と `~/.claude/settings.json` がまとめて dangling になる。**install はメインチェックアウトから実行する。**
+- install 元と異なるチェックアウトから `verify-skills.sh` を実行すると check 1/3 が FAIL する。**FAIL したらまず install 元を確認する**（skill の内容不備とは限らない）。
 
 ### SubAgents の追加
 

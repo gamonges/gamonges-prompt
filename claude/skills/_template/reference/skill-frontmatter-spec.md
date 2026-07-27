@@ -19,8 +19,8 @@
 | `when_to_use` | description に追加するトリガー文脈 |
 | `argument-hint` | autocomplete で表示する引数ヒント（例: `[issue-number]`）|
 | `arguments` | 名前付き位置引数の定義（`$name` 置換に使う）|
-| `disable-model-invocation` | `true` で Claude 自動呼出を禁止（手動 `/name` のみ）|
-| `user-invocable` | `false` で `/` メニュー非表示（Claude は呼出可能）|
+| `disable-model-invocation` | Claude 側の起動を**全経路**ブロック（下記「起動制御フィールド」参照）|
+| `user-invocable` | `false` で `/` メニュー非表示（Claude は呼出可能。listing budget は減らない）|
 | `allowed-tools` | skill 有効時に承認なしで使える tool 一覧 |
 | `model` | skill 専用モデル（session モデルを override）|
 | `effort` | skill 専用 effort level（session effort を override）|
@@ -30,13 +30,11 @@
 | `paths` | この skill を自動 load するファイルの glob パターン |
 | `shell` | `bash`（default）または `powershell` |
 
-### `disable-model-invocation` と `user-invocable` の違い
+### 起動制御フィールド（`disable-model-invocation` / `user-invocable` / `skillOverrides`）
 
-両者は別物・両立可能:
+3 者の違い・listing budget への効き方・**付けてはいけない skill**（`Skill` ツール連鎖 / subagent preload の被呼び出し側）は `claude/skills/skill-authoring/SKILL.md` の「起動制御フィールドの選び方」を参照（本ファイルでは再宣言しない）。
 
-- **`disable-model-invocation: true`** → `/` メニューに表示するが、Claude 自動呼出は禁止（例: `/commit` のような副作用ある操作）
-- **`user-invocable: false`** → `/` メニューに表示しないが、Claude は呼出可能（例: バックグラウンド知識）
-- 両方とも省略すれば user / Claude 両方から呼出可能（default）
+要点だけ: `disable-model-invocation: true` は「Claude 自動呼出の禁止」に留まらず、**`Skill` ツールからのプログラム的呼び出し・subagent への preload・scheduled task 起動もすべてブロック**する。被呼び出し側の skill に付けるとワークフロー連鎖が実行時に壊れる。
 
 ## H5 lint の検査ロジック
 

@@ -12,7 +12,7 @@ When invoked:
 1. Run `git diff --name-only` to identify changed files since last sync
 2. Identify related spec files in `openspec/specs/` based on changed modules
 3. Read the current implementation plan (`$ARGUMENTS` or `./tmp/plan.md`)
-4. Read existing lessons from auto-memory (`MEMORY.md` index, then the relevant entries)
+4. Read existing lessons from auto-memory. The path is `~/.claude/projects/<slug>/memory/`, where `<slug>` is the project's absolute path with `/` replaced by `-` (e.g. `/Users/me/work/repo` → `-Users-me-work-repo`). As a non-interactive subagent you do not receive this path in your system prompt — derive it. Read `MEMORY.md` (the index) first, then the entries it points to.
 
 ## Core Responsibilities
 
@@ -45,8 +45,8 @@ Capture reusable patterns and lessons from the implementation session:
 
 **Output to auto-memory (`type: feedback`):**
 - Deduplicate against existing memories first; update an existing entry rather than creating a near-duplicate
-- One fact per file, with `**Why:**` and `**How to apply:**` lines in the body
-- Add a one-line pointer to `MEMORY.md`
+- Follow the file format defined in the `agent-memory` skill ("auto-memory の場所と書式"): one fact per file, frontmatter with `name` / `description` / `metadata.type`, and `**Why:**` / `**How to apply:**` lines in the body
+- Add a one-line pointer to `MEMORY.md` (`- [Title](file.md) — hook`); never put memory content in the index itself
 - If the same type of mistake appears 3+ times, propose a prevention rule
 
 ### 3. Knowledge Compression
