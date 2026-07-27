@@ -8,7 +8,6 @@ plan.md が既存仕様（`openspec/specs/`）と矛盾しないか網羅的に�
 `/design` の自動参照はベストエフォートの参照であり、`/spec-check` はフォーマルな検証ステップとして機能する。
 
 **重要**: ソースコードは一切変更しない。`./tmp/spec-check.md` のみ出力する。
-**規約**: CLAUDE.md の Skills 共通規約に従う
 ## パラメーター
 
 `$ARGUMENTS` で検証対象の plan ファイルを指定できる。省略時は `./tmp/plan.md` を使用する。

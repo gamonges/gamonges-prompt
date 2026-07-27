@@ -8,7 +8,6 @@ disable-model-invocation: true
 
 **入力**: `./tmp/strategic-ddd.md`
 **出力**: `./tmp/strategic-ddd-review.md`
-**規約**: CLAUDE.md の Skills 共通規約に従う
 
 ## 補助ドキュメントへの参照
 

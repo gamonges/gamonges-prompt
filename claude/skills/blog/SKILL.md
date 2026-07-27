@@ -10,7 +10,6 @@ disable-model-invocation: true
 
 **出力**: `./tmp/blog-draft.md`
 **入力**: `$ARGUMENTS` または `./tmp/outline.md`
-**規約**: CLAUDE.md の Skills 共通規約に従う
 ## ワークフロー上の位置付け
 
 | 前工程 | 本スキル | 後工程 |

@@ -7,7 +7,6 @@ disable-model-invocation: true
 changes/ の変更提案を specs/ にマージし archive/ に移動する（完全フロー）、または plan.md から直接 specs/ に書き込む（簡易フロー）。
 
 **重要**: 変更対象は `openspec/` ディレクトリのみに限定する（ソースコード、`tmp/` の変更禁止）。
-**規約**: CLAUDE.md の Skills 共通規約に従う
 ## パラメーター
 
 `$ARGUMENTS` で change-name を指定できる。

@@ -14,7 +14,6 @@ disable-model-invocation: true
 **出力**: `./slides/YYYYMMDD_title.md`
 **入力**: `$ARGUMENTS` または `./tmp/outline.md`
 **参照**: `./references/dresscode-marp-rules.md`（dresscode テーマの生成ルール）
-**規約**: CLAUDE.md の Skills 共通規約に従う
 ## ワークフロー上の位置付け
 
 | 前工程 | 本スキル | 後工程 |

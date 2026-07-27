@@ -11,7 +11,6 @@ disable-model-invocation: true
 
 **出力**: `./tmp/outline.md`
 **入力**: `./tmp/context.md`（テーマ、ターゲット、制約を記述したファイル）
-**規約**: CLAUDE.md の Skills 共通規約に従う
 ## ワークフロー上の位置付け
 
 | 前工程 | 本スキル | 後工程 |

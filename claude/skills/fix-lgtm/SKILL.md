@@ -6,7 +6,6 @@ description: fix で修正計画を作成し、review-plan と revise を LGTM �
 `fix → LGTM ループ` を 1 コマンドで実行する。`fix` で修正計画を作成し、`plan-lgtm` でその計画を `LGTM` になるまで自動修正する。`implement` は呼び出さない。実装まで一気通貫で行いたい場合は `fix-lgtm-implement` を使用する。
 
 **重要**: 本スキル自体はソースコードを変更しない。内部で呼び出す `fix`/`plan-lgtm` がそれぞれの副作用（`./tmp/fix-plan.md` の生成・更新）を行う。
-**規約**: CLAUDE.md の Skills 共通規約に従う
 
 ## パラメーター
 

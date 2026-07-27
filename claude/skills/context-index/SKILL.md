@@ -8,8 +8,6 @@ disable-model-invocation: true
 
 claude-context（Milvus + 埋め込み）にコードベースを index し、`search_code` での意味検索を可能にする。個人/ローカル定義の ignorePattern を参照して不要ディレクトリを除外する。
 
-**規約**: CLAUDE.md の Skills 共通規約に従う
-
 > index は副作用（埋め込み計算 + ベクトル storage）を伴うため、本 skill は / メニュー専用（Claude の自動呼出は無効）。
 
 ## パラメーター

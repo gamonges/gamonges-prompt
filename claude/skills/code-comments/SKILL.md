@@ -3,8 +3,6 @@ name: code-comments
 description: コード内コメントの方針を定め適用する。「経緯は VCS・判断と制約はコード」が原則。既存コメントを見直す時、`/code-comments` 呼び出しで使用。design / fix / implement から参照される。
 ---
 
-**規約**: CLAUDE.md の Skills 共通規約に従う
-
 > **SSOT 宣言**: コードコメントの方針は本スキルが single source of truth。design / fix / implement など他スキルはここを名指し参照し、方針を再宣言しない。方針を更新する場合は本ファイルのみを変更する。
 
 > **`review-comments` との違い**: `review-comments` は PR 上のレビューコメントの返信・resolve を扱う。本スキルは**コード内に残すコメントの書き方**を扱う。別ドメイン。
