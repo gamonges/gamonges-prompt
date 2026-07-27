@@ -59,7 +59,9 @@ skill / subagent のプロンプトは Claude 5 世代の挙動に合わせる�
 - **`disable-model-invocation: true` はどこからも呼ばれない終端 skill にのみ使う**。下記のとおり全起動経路をブロックするため、被呼び出し側に付けると連鎖が黙って壊れる。
 - **`user-invocable: false` は budget 対策にならない**。用途は「ユーザーが直接叩く意味がない背景知識」を `/` メニューから隠すことだけ。
 - **repo 管理外の skill は frontmatter を持てない**ため `settings.json` の `skillOverrides` を使う。
-- **plugin 由来の skill に `skillOverrides` は効かない**。`/plugin` で plugin ごと有効/無効を切り替える。`skillOverrides` に実在しない skill 名を書くと**黙って無効になる**ので、`verify-skills.sh` の check 5 が実在を照合する。
+- **組み込み skill には `skillOverrides` が効く**。実測: `find-skills`（組み込み）に `user-invocable-only` を付けると listing から消え、キーを外すと復活した。repo 管理外の skill を budget から外す正規の手段。
+- **plugin 由来の skill に `skillOverrides` は効かない**。`/plugin` で plugin ごと有効/無効を切り替える。
+- `verify-skills.sh` の check 5 は「repo skill に存在しないキー」を **INFO** で報告する。組み込み skill を隠す正当な設定と、キー名のタイポで黙って無効になっている状態を機械的に区別できないため、warn にはしない（正当な設定で常時点灯させると検出力を失う）。心当たりのないキーが出たらタイポを疑う。
 
 ### `disable-model-invocation` を付けてはいけない skill
 

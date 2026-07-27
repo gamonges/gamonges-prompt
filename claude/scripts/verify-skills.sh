@@ -283,7 +283,13 @@ PY
         warn "description が 120 字を超える skill: ${over_list}"
     fi
     if [ -n "$unknown_ov" ]; then
-        warn "skillOverrides に実在しない skill のキーがあります: ${unknown_ov}（設定が黙って無効になる。plugin 由来 skill には skillOverrides が効かないので /plugin を使う）"
+        # repo skill に無いキーには 2 種類ある: タイポで黙って無効になっているものと、
+        # 組み込み skill を意図的に隠しているもの。後者は正当な運用なので warn にしない
+        # （実測: find-skills は組み込み skill で、user-invocable-only が効いて listing から
+        # 消えていた。キーを外すと listing に復活する）。
+        # 両者を機械的に区別する手段が無いため、判断材料として INFO で出すに留める
+        echo -e "${BLUE}[INFO]${NC} skillOverrides に repo skill 以外のキー: ${unknown_ov}"
+        echo -e "        組み込み / plugin skill を隠している場合は正当。心当たりが無ければキー名のタイポを疑う"
     fi
 else
     warn "check 5 (listing budget) をスキップしました（python3 が利用できないか SKILL.md の読み込みに失敗）"
