@@ -41,10 +41,11 @@ cd gamonges-prompt
 ./setup.sh install
 ```
 
-これにより、以下の場所にシンボリックリンクが作成されます：
-- Skills → `~/.claude/skills/`
-- SubAgents → `~/.claude/sub-agents/`
-- Scripts → `~/.claude/scripts/`
+これにより、以下の場所に配置されます：
+- Skills → `~/.claude/skills/`（シンボリックリンク）
+- SubAgents → `~/.claude/sub-agents/`（シンボリックリンク）
+- settings.json → `~/.claude/settings.json`（シンボリックリンク）
+- Scripts → `~/.claude/scripts/`（**実体コピー**。編集・pull したら `./setup.sh install` を再実行する）
 
 ### 状態確認
 
@@ -55,7 +56,9 @@ cd gamonges-prompt
 ### 検証
 
 ```bash
-./claude/scripts/verify-skills.sh   # SKILL.md 数 / frontmatter / symlink を機械的に検証
+./claude/scripts/verify-skills.sh   # SKILL.md 数 / frontmatter (name とディレクトリ名の一致) /
+                                    # symlink / scripts の同期・orphan・install 元 / listing budget
+                                    # fail があれば exit 1、warn のみなら exit 0
 ```
 
 ### アンインストール
@@ -178,6 +181,8 @@ description: Brief description of what this Skill does
 
 ## ⚠️ 注意事項
 
-- シンボリックリンクを使用しているため、リポジトリ内のファイルを更新すると自動的に反映されます
+- Skills / SubAgents / settings.json はシンボリックリンクのため、リポジトリ内のファイルを更新すると自動的に反映されます
+- **Scripts は実体コピーのため即時反映されません。** `claude/scripts/` を編集・pull したら `./setup.sh install` を再実行してください。忘れても hook は失敗せず古いスクリプトで静かに動き続けます（同期状態は `./setup.sh status` か `verify-skills.sh` で確認）
 - リポジトリを削除すると、リンクが壊れます（アンインストールを先に実行してください）
-- 既存の同名ファイルは `.backup.YYYYMMDDHHMMSS` としてバックアップされます
+- 既存の同名ファイルは、内容が異なる場合に `.backup.YYYYMMDDHHMMSS` としてバックアップされます
+- **install はメインチェックアウトから実行してください。** worktree から実行すると symlink がその worktree を指し、削除時に設定が失われます（`./setup.sh install` が警告します）
