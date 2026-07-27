@@ -37,9 +37,9 @@ disable-model-invocation: true
 ## 実行条件
 
 - 入力 `<input.md>` が存在すること
-- `~/.claude/skills/html-view/reference/prompts/{review,plan,fix-plan,research,generic}-style.md` のうち、判定された style 用ファイルが存在する
-- `~/.claude/skills/html-view/reference/style-guide.md` が存在する
-- `~/.claude/skills/html-view/reference/examples/*.html` の参照例が存在する
+- `./reference/prompts/{review,plan,fix-plan,research,generic}-style.md` のうち、判定された style 用ファイルが存在する
+- `./reference/style-guide.md` が存在する
+- `./reference/examples/*.html` の参照例が存在する
 
 いずれかが満たされない場合は処理を即停止しユーザーに報告する。
 
@@ -73,13 +73,13 @@ disable-model-invocation: true
 
 判定された style に応じて以下を Read する:
 
-1. `~/.claude/skills/html-view/reference/prompts/{style}-style.md` — 種別固有のデザイン指示 + 必須要素チェックリスト
-2. `~/.claude/skills/html-view/reference/style-guide.md` — 共通 CSS 変数 / フォント / レスポンシブ / `@media print` / 単体完結原則
+1. `./reference/prompts/{style}-style.md` — 種別固有のデザイン指示 + 必須要素チェックリスト
+2. `./reference/style-guide.md` — 共通 CSS 変数 / フォント / レスポンシブ / `@media print` / 単体完結原則
 3. 該当 example HTML を Read:
-   - `fix-plan` style: `~/.claude/skills/html-view/reference/examples/fix-plan.html`
-   - `plan` style: `~/.claude/skills/html-view/reference/examples/adr-pipeline.html` (+ レイヤー別タブが必要な場合のみ `css-tabs.html`)
-   - `review` style: `~/.claude/skills/html-view/reference/examples/fix-plan.html` (カードレイアウト流用)
-   - `research` style: `~/.claude/skills/html-view/reference/examples/adr-pipeline.html` + (情報量多 → `css-tabs.html`)
+   - `fix-plan` style: `./reference/examples/fix-plan.html`
+   - `plan` style: `./reference/examples/adr-pipeline.html` (+ レイヤー別タブが必要な場合のみ `css-tabs.html`)
+   - `review` style: `./reference/examples/fix-plan.html` (カードレイアウト流用)
+   - `research` style: `./reference/examples/adr-pipeline.html` + (情報量多 → `css-tabs.html`)
    - `generic` style: example 不要
 4. 入力 `<input.md>` を Read
 

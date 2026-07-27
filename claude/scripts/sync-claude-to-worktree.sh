@@ -47,6 +47,8 @@ echo "Synced .claude/ from main worktree: $MAIN_WORKTREE" >&2
 # .cursor/skills → .claude/skills のシンボリックリンクを再作成
 # (rsync でコピーされたリンクは元のworktreeの .cursor/ を指しておりデッドリンクになる)
 SYNC_SCRIPT="$HOME/.claude/scripts/sync-cursor-skills.sh"
-if [ -x "$SYNC_SCRIPT" ] || [ -L "$SYNC_SCRIPT" ]; then
+# scripts は実体コピー方式なので symlink は作られない。-L を許容すると dangling symlink を
+# 実行しようとして exit 127 になり、本 PR が除去した失敗モードを残すことになる
+if [ -x "$SYNC_SCRIPT" ]; then
   bash "$SYNC_SCRIPT"
 fi

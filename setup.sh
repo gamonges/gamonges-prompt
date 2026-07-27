@@ -124,12 +124,50 @@ install_settings() {
 # deny リスト・hook 定義・全 skill がまとめて失われる。hook のように exit 127 がログに残る形ではなく
 # Claude Code がデフォルト設定で静かに起動するため、スクリプト側の失敗モードより気づきにくい。
 # 判定はパス非依存にする（メインチェックアウトの場所をハードコードしない）。
+# 共通規約を ~/.claude/CLAUDE.md へ配置する
+#
+# 本リポジトリの CLAUDE.md は project スコープなので、他プロジェクトでは 1 行もロードされない。
+# ~/.claude/CLAUDE.md は repo 管理外かつユーザーが手で編集するファイルなので、全置換はできない。
+# マーカーで囲んだブロックだけを冪等に差し替え、ブロック外の記述には触れない。
+GLOBAL_RULES_BEGIN="<!-- BEGIN gamonges-prompt: skills 共通規約 -->"
+GLOBAL_RULES_END="<!-- END gamonges-prompt: skills 共通規約 -->"
+
+install_global_rules() {
+    local src="${SCRIPT_DIR}/claude/global-rules.md"
+    local dest="${CLAUDE_DIR}/CLAUDE.md"
+
+    if [[ ! -f "$src" ]]; then
+        log_warning "  ! ${src} がありません。共通規約の配置をスキップします"
+        return 0
+    fi
+
+    if [[ -f "$dest" ]] && grep -qF "$GLOBAL_RULES_BEGIN" "$dest"; then
+        # 既存ブロックの中身だけを差し替える
+        local tmp="${dest}.new.$$"
+        awk -v b="$GLOBAL_RULES_BEGIN" -v e="$GLOBAL_RULES_END" -v f="$src" '
+            $0 == b { print; while ((getline line < f) > 0) print line; skip = 1; next }
+            $0 == e { skip = 0 }
+            !skip
+        ' "$dest" > "$tmp"
+        mv -f "$tmp" "$dest"
+        log_success "  ✓ CLAUDE.md の共通規約ブロックを更新しました"
+    else
+        {
+            [[ -f "$dest" ]] && echo ""
+            echo "$GLOBAL_RULES_BEGIN"
+            cat "$src"
+            echo "$GLOBAL_RULES_END"
+        } >> "$dest"
+        log_success "  ✓ CLAUDE.md に共通規約ブロックを追記しました"
+    fi
+}
+
 warn_if_worktree() {
     local git_dir git_common
     git_dir=$(git -C "$SCRIPT_DIR" rev-parse --git-dir 2>/dev/null) || return 0
     git_common=$(git -C "$SCRIPT_DIR" rev-parse --git-common-dir 2>/dev/null) || return 0
     if [[ "$git_dir" != "$git_common" ]]; then
-        log_warning "  ! linked worktree から install しています: ${SCRIPT_DIR}"
+        log_warning "  ! linked worktree から実行しています: ${SCRIPT_DIR}"
         log_warning "    settings.json / skills の symlink がこの worktree を指すため、削除すると設定が失われます"
         log_warning "    可能ならメインチェックアウトから install してください"
     fi
@@ -150,6 +188,14 @@ install_scripts() {
     mkdir -p "$target_dir"
 
     local count=0
+
+    # 前回 install 時の commit を 1 回だけ読む。install 全体で同じ基準を使うため、
+    # スクリプトごとのループ内では読み直さない
+    local prev_sha=""
+    if [[ -f "${target_dir}/.installed-from" ]]; then
+        prev_sha=$(cut -f3 "${target_dir}/.installed-from" 2>/dev/null || true)
+    fi
+
     for script in "$scripts_dir"/*.sh "$scripts_dir"/*.py; do
         [ -f "$script" ] || continue
         local name=$(basename "$script")
@@ -162,12 +208,22 @@ install_scripts() {
             # ディレクトリのままだと cp が中に潜り込み chmod +x がディレクトリに当たる。
             # その状態で hook が起動すると exit 126 = 本方式が排除したい失敗モードと同型
             log_warning "  ! ${name} はディレクトリです。退避します"
-            mv "$target" "${target}.backup.$(date +%Y%m%d%H%M%S)"
+            mv "$target" "${target}.backup.$(date +%Y%m%d%H%M%S).$$"
         elif [[ -f "$target" ]] && ! cmp -s "$script" "$target"; then
-            # 他の install 関数と同じくローカル改変を保護する。
-            # 内容が同じときは退避しない（毎回バックアップが増えるとノイズになるため）
-            cp "$target" "${target}.backup.$(date +%Y%m%d%H%M%S)"
-            log_warning "  ! ${name} はローカル改変あり。バックアップしました"
+            # repo 側と差分がある。ただし cmp だけでは「repo が更新された」と
+            # 「インストール先が手で改変された」を区別できず、CLAUDE.md が推奨する標準運用
+            # （claude/scripts/ を編集 → ./setup.sh install）そのものが毎回警告を出して
+            # .backup.* を積み上げる。常時点灯する警告は無視されるようになるため、
+            # .installed-from の sha から前回 install 時の内容を復元して突き合わせ、
+            # そこから変わっているものだけを「ローカル改変」と判定する。
+            # 前回 sha が無い / その sha にファイルが無い（新規追加スクリプト）場合は初回と
+            # みなす。初回に守るべきローカル改変は定義上存在しないので退避しない
+            if [[ -n "$prev_sha" ]] \
+                && git -C "$SCRIPT_DIR" cat-file -e "${prev_sha}:claude/scripts/${name}" 2>/dev/null \
+                && ! git -C "$SCRIPT_DIR" show "${prev_sha}:claude/scripts/${name}" 2>/dev/null | cmp -s - "$target"; then
+                cp "$target" "${target}.backup.$(date +%Y%m%d%H%M%S).$$"
+                log_warning "  ! ${name} はローカル改変あり。バックアップしました"
+            fi
         fi
 
         # hook は常時発火するため、上書き中のファイルが別セッションから実行されうる。
@@ -198,14 +254,21 @@ install_scripts() {
 
     if [ ${#orphans[@]} -gt 0 ]; then
         if [[ "$prune" == true ]]; then
-            local backup_dir="${target_dir}/.orphan-backup.$(date +%Y%m%d%H%M%S)"
+            local backup_dir="${target_dir}/.orphan-backup.$(date +%Y%m%d%H%M%S).$$"
             mkdir -p "$backup_dir"
             local n
             for n in "${orphans[@]}"; do
+                # 緑の「✓」を使わないのは、退避が「成功」ではなく注意すべき操作だから。
+                # ~/.claude/scripts/ にはユーザーが手で置いたスクリプトもありうるため、
+                # dangling symlink（復元価値なし）と実体ファイル（手置きの可能性）を区別する
+                if [[ -L "${target_dir}/${n}" && ! -e "${target_dir}/${n}" ]]; then
+                    log_warning "  ! 退避: ${n} (dangling symlink) → ${backup_dir}/"
+                else
+                    log_warning "  ! 退避: ${n} (実体ファイル。手置きの可能性あり) → ${backup_dir}/"
+                fi
                 mv "${target_dir}/${n}" "${backup_dir}/${n}"
-                log_success "  ✓ 削除: ${n} (orphan)"
             done
-            log_info "  orphan ${#orphans[@]} 件を ${backup_dir} へ退避しました"
+            log_info "  orphan ${#orphans[@]} 件を ${backup_dir} へ退避しました（削除ではなく退避。不要なら手で消す）"
         else
             local n
             for n in "${orphans[@]}"; do
@@ -240,7 +303,7 @@ install_skills() {
                     rm "$target_link"
                 elif [[ -d "$target_link" ]]; then
                     log_warning "既存のディレクトリをバックアップ: ${skill_name}"
-                    mv "$target_link" "${target_link}.backup.$(date +%Y%m%d%H%M%S)"
+                    mv "$target_link" "${target_link}.backup.$(date +%Y%m%d%H%M%S).$$"
                 fi
 
                 ln -s "$skill_dir" "$target_link"
@@ -314,7 +377,7 @@ install_subagents() {
                 rm "$target_link"
             elif [[ -f "$target_link" ]]; then
                 log_warning "既存のファイルをバックアップ: ${filename}"
-                mv "$target_link" "${target_link}.backup.$(date +%Y%m%d%H%M%S)"
+                mv "$target_link" "${target_link}.backup.$(date +%Y%m%d%H%M%S).$$"
             fi
 
             ln -s "$md_file" "$target_link"
@@ -435,6 +498,19 @@ uninstall() {
         fi
     fi
 
+    # 共通規約ブロックの除去。ユーザーがブロック外に書いた内容には触れない
+    local global_md="${CLAUDE_DIR}/CLAUDE.md"
+    if [[ -f "$global_md" ]] && grep -qF "$GLOBAL_RULES_BEGIN" "$global_md"; then
+        local tmp="${global_md}.new.$$"
+        awk -v b="$GLOBAL_RULES_BEGIN" -v e="$GLOBAL_RULES_END" '
+            $0 == b { skip = 1 }
+            !skip
+            $0 == e { skip = 0 }
+        ' "$global_md" > "$tmp"
+        mv -f "$tmp" "$global_md"
+        log_success "  ✓ 削除: CLAUDE.md の共通規約ブロック（ブロック外の記述は保持）"
+    fi
+
     log_info "削除完了 - Scripts: ${scripts_count} 件, Skills: ${skills_count} 件, Commands: ${commands_count} 件, SubAgents: ${subagents_count} 件, Settings: ${settings_count} 件"
 }
 
@@ -497,6 +573,51 @@ show_status() {
                 echo -e "  ${RED}✗${NC} ${name} (未インストール)"
             fi
         done
+
+        # 逆方向の走査。repo 起点のループでは「repo から削除されたのに残っているファイル」が
+        # 見えない。README / CLAUDE.md は本コマンドと verify-skills.sh を同等の確認手段として
+        # 案内しているので、検出能力が食い違うと「status では綺麗なのに verify では warn」になる
+        local installed_script
+        for installed_script in "$scripts_target_dir"/*.sh "$scripts_target_dir"/*.py; do
+            [ -e "$installed_script" ] || [ -L "$installed_script" ] || continue
+            local orphan_name=$(basename "$installed_script")
+            [ -f "${scripts_dir}/${orphan_name}" ] && continue
+            if [[ -L "$installed_script" && ! -e "$installed_script" ]]; then
+                echo -e "  ${RED}✗${NC} ${orphan_name} (repo に無い orphan / dangling — 実行すると exit 127)"
+            else
+                echo -e "  ${YELLOW}!${NC} ${orphan_name} (repo に無い orphan — ./setup.sh install --prune-scripts で退避)"
+            fi
+            has_scripts=true
+        done
+
+        # install 時のバックアップ残存。ローカル改変判定を修正した後は 0 件が正常で、
+        # 増えていれば「repo 更新をローカル改変と誤判定している」兆候になる
+        local backup_count=0
+        local backup_file
+        for backup_file in "$scripts_target_dir"/*.backup.*; do
+            [ -e "$backup_file" ] || continue
+            backup_count=$((backup_count + 1))
+        done
+        if [[ "$backup_count" -gt 0 ]]; then
+            echo -e "  ${YELLOW}!${NC} install 時のバックアップが ${backup_count} 件残存（内容を確認して削除する）"
+        fi
+
+        # install 出自。実体コピーではリンク先から由来が読めないので記録を表示する。
+        # worktree から install した状態を見落とすと、その worktree の削除で設定が消える
+        if [[ -f "${scripts_target_dir}/.installed-from" ]]; then
+            local from_dir_shown
+            from_dir_shown=$(cut -f1 "${scripts_target_dir}/.installed-from" 2>/dev/null || true)
+            if [[ -z "$from_dir_shown" ]]; then
+                echo -e "  ${YELLOW}!${NC} install 元: .installed-from が空"
+            elif [[ "$from_dir_shown" == "$SCRIPT_DIR" ]]; then
+                echo -e "  ${GREEN}✓${NC} install 元: このチェックアウト"
+            else
+                echo -e "  ${YELLOW}!${NC} install 元: ${from_dir_shown} (別のチェックアウト)"
+            fi
+        else
+            echo -e "  ${YELLOW}!${NC} install 元: 不明（.installed-from が無い。./setup.sh install で記録される）"
+        fi
+
         if [[ "$has_scripts" == false ]]; then
             echo "  (インストールされた Scripts はありません)"
         fi
@@ -592,6 +713,16 @@ main() {
             ;;
     esac
 
+    # コマンドとオプションの組み合わせも検証する。install 以外では prune_scripts が
+    # 参照されないため、黙って受理すると「prune したつもりで実行されていない」という
+    # 静かな失敗になる（タイポを弾く上記の case と同じ理由）
+    if [[ "$prune_scripts" == true && "$command" != install ]]; then
+        # 先頭が `--` の文字列を echo に渡すと環境によってオプションとして食われ、
+        # 後続の展開結果まで欠落する。printf で明示的に書式指定する
+        printf -- '--prune-scripts は install でのみ使用できます (指定されたコマンド: %s)\n' "$command"
+        exit 1
+    fi
+
     case "$command" in
         install)
             check_source_dirs
@@ -605,6 +736,8 @@ main() {
             echo ""
             install_settings
             echo ""
+            install_global_rules
+            echo ""
             log_success "セットアップが完了しました！"
             echo ""
             echo "確認するには: ./setup.sh status"
@@ -617,6 +750,9 @@ main() {
             ;;
         migrate)
             check_source_dirs
+            # CLAUDE.md が案内する他端末展開手順は `migrate && install` の順なので、
+            # migrate で警告しないと最初の警告機会を逃す
+            warn_if_worktree
             init_claude_dir
             migrate
             ;;

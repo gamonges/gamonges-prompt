@@ -1,10 +1,10 @@
 ---
 name: <skill-name>
-description: <150-200 字以内、動詞 + 目的 + 主要トリガー 2-3 個。「何 + どんな時に使うか」が分かる最小情報>
-# 起動制御フィールド（公式: https://code.claude.com/docs/en/skills）。両者は別物・両立可能:
-#   disable-model-invocation: true  → / メニューに表示するが、Claude 自動呼出は禁止（例: /commit のような副作用ある操作）
-#   user-invocable: false           → / メニューに表示しないが、Claude は呼出可能（例: バックグラウンド知識）
-# 両方とも省略すれば user / Claude 両方から呼出可能（デフォルト）
+description: <何をする skill か + いつ使うか。120 字以内（T7 / verify-skills.sh check 5 の閾値）>
+# 起動制御フィールドの選び方は claude/skills/skill-authoring/SKILL.md の判断表（正本）を見る。
+# 要点だけ: disable-model-invocation: true は Claude の自動起動に加えて Skill ツール呼び出し・
+# subagent preload・scheduled task 起動もブロックするので、どこからも呼ばれない終端 skill にのみ使う。
+# listing budget を空けたいだけなら settings.json の skillOverrides: "name-only" を選ぶ。
 ---
 
 > **新規 skill 作成時のテンプレート**。

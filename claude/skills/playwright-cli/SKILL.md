@@ -269,12 +269,7 @@ playwright-cli close
 
 ## Specific tasks
 
-* **Request mocking** [references/request-mocking.md](references/request-mocking.md)
-* **Running Playwright code** [references/running-code.md](references/running-code.md)
-* **Browser session management** [references/session-management.md](references/session-management.md)
-* **Storage state (cookies, localStorage)** [references/storage-state.md](references/storage-state.md)
-* **Test generation** [references/test-generation.md](references/test-generation.md)
-* **Tracing** [references/tracing.md](references/tracing.md)
-* **Video recording** [references/video-recording.md](references/video-recording.md)
 * **Integration test reliability patterns (fixtures, network capture, ID discovery, error mocking)** [references/integration-testing-patterns.md](references/integration-testing-patterns.md)
+
+> 上流 Playwright skill が持つ他の reference（request mocking / tracing / storage state 等）は本リポジトリに取り込んでいない。存在しないファイルへ誘導すると、読みに行って失敗する分のトークンを浪費するため、リンクは実在するものだけに保つ。必要になった時点で上流から取得して追加する。
 

@@ -100,7 +100,11 @@ extract_description() {
 
 ### 6. トリガー語の検査
 
-description 値（多行含む）に以下のいずれかのキーワードが含まれるか:
+**`disable-model-invocation: true` の skill は本検査を免除する**（`claude/scripts/hook-lint-skill-frontmatter.sh:L156-L165`）。description が listing に載らず Claude からも起動されないため、トリガー語（Claude の自動選択精度を上げるための記述）を強制する意味がない。
+
+`user-invocable: false` は**免除しない**。listing には載り Claude からも起動されうるので、トリガー語は依然として意味を持つ。
+
+免除されない skill について、description 値（多行含む）に以下のいずれかのキーワードが含まれるか:
 
 ```
 時に|する時|使用|呼び出|キーワード|トリガー|when |trigger|use this|use when

@@ -41,10 +41,13 @@ skill / subagent のプロンプトは Claude 5 世代の挙動に合わせる�
 
 `description` は skill 一覧に常駐するため、使わない skill を隠すと budget が空く。ただし**隠し方を誤ると呼び出しが壊れる**。
 
+**この表が起動制御の正本。** `_template/SKILL.md` と `_template/reference/skill-frontmatter-spec.md` は本表を参照し、説明を複製しない（複製すると必ず片方がずれる）。
+
 | 設定 | Claude から呼べる | `/` メニュー | listing の description |
 |------|------------------|-------------|----------------------|
 | （未指定） | 可 | 表示 | 載る |
 | `user-invocable: false` | **可** | 非表示 | **載る**（budget は減らない） |
+| `skillOverrides: "name-only"`（settings） | **可** | 表示 | **name のみ**（description 分が空く） |
 | `disable-model-invocation: true` | 不可 | 表示 | **載らない** |
 | 両方 | **不可** | 非表示 | 載らない |
 | `skillOverrides: "user-invocable-only"`（settings） | 不可 | 表示 | 載らない |
@@ -52,10 +55,11 @@ skill / subagent のプロンプトは Claude 5 世代の挙動に合わせる�
 
 判断の指針:
 
-- **budget を空けたいだけなら `disable-model-invocation: true`**。`/名前` は残るので可逆性が高い。
+- **budget 対策の第一選択は `skillOverrides: "name-only"`**。description 分が空くうえ、`Skill` ツール呼び出し・subagent preload・自然言語起動のすべてが生き残る。「budget を空ける」と「呼び出しを壊さない」を二者択一にしない。
+- **`disable-model-invocation: true` はどこからも呼ばれない終端 skill にのみ使う**。下記のとおり全起動経路をブロックするため、被呼び出し側に付けると連鎖が黙って壊れる。
 - **`user-invocable: false` は budget 対策にならない**。用途は「ユーザーが直接叩く意味がない背景知識」を `/` メニューから隠すことだけ。
 - **repo 管理外の skill は frontmatter を持てない**ため `settings.json` の `skillOverrides` を使う。
-- **plugin 由来の skill に `skillOverrides` は効かない**。`/plugin` で plugin ごと有効/無効を切り替える。
+- **plugin 由来の skill に `skillOverrides` は効かない**。`/plugin` で plugin ごと有効/無効を切り替える。`skillOverrides` に実在しない skill 名を書くと**黙って無効になる**ので、`verify-skills.sh` の check 5 が実在を照合する。
 
 ### `disable-model-invocation` を付けてはいけない skill
 
@@ -71,9 +75,9 @@ skill / subagent のプロンプトは Claude 5 世代の挙動に合わせる�
 新たに付与する前に、呼び出しグラフを再確認する:
 
 ```bash
-# リポジトリルートで実行する。バッククォート囲みだけを見ると
-# 「Skillツールで明示ロード」のような表記揺れと reference/ 配下を取りこぼす
-grep -rniE 'Skill[[:space:]]*(ツール|tool)' claude/skills/   # skill 間のプログラム的呼び出し
+# リポジトリルートで実行する。`Skill` ツール のようにバッククォートが挟まる表記が実際には
+# 多数派なので、パターン側で許容しないと被呼び出し skill を取りこぼす（実測 3 hit → 16 hit）
+grep -rniE '`?Skill`?[[:space:]]*(ツール|tool)' claude/skills/ claude/subagents/
 grep -rn '^skills:' claude/subagents/                        # subagent への preload
 ```
 

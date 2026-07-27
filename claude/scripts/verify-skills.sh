@@ -137,28 +137,40 @@ stale=()
 for script in "$REPO_SCRIPTS"/*.sh "$REPO_SCRIPTS"/*.py; do
     [ -f "$script" ] || continue
     name=$(basename "$script")
-    installed="$INSTALLED_SCRIPTS/$name"
+    # check 1 のカウンタ $installed と役割が違うので別名にする
+    installed_path="$INSTALLED_SCRIPTS/$name"
 
-    if [ -L "$installed" ]; then
+    if [ -L "$installed_path" ]; then
         stale+=("$name (旧形式の symlink)")
-    elif [ ! -f "$installed" ]; then
+    elif [ ! -f "$installed_path" ]; then
         stale+=("$name (未インストール)")
-    elif ! cmp -s "$script" "$installed"; then
+    elif ! cmp -s "$script" "$installed_path"; then
         stale+=("$name (repo と差分あり)")
+    elif [ ! -x "$installed_path" ]; then
+        # cmp は内容しか見ずモードを比較しない。実行ビットが落ちた hook は exit 126 になり、
+        # exit 127 と同じく non-blocking なのでガードレールが黙って開く
+        stale+=("$name (実行ビットなし — 実行すると exit 126)")
     fi
 done
 
 # 逆方向の走査。repo 起点のループだけでは「repo から削除されたのに残っているファイル」が
 # どこからも見えず、dangling symlink が exit 127 でガードレールを開ける状態を検出できない
-for installed in "$INSTALLED_SCRIPTS"/*.sh "$INSTALLED_SCRIPTS"/*.py; do
-    [ -e "$installed" ] || [ -L "$installed" ] || continue
-    name=$(basename "$installed")
+for installed_path in "$INSTALLED_SCRIPTS"/*.sh "$INSTALLED_SCRIPTS"/*.py; do
+    [ -e "$installed_path" ] || [ -L "$installed_path" ] || continue
+    name=$(basename "$installed_path")
     [ -f "$REPO_SCRIPTS/$name" ] && continue
-    if [ -L "$installed" ] && [ ! -e "$installed" ]; then
+    if [ -L "$installed_path" ] && [ ! -e "$installed_path" ]; then
         stale+=("$name (repo に存在しない orphan / dangling — 実行すると exit 127)")
     else
         stale+=("$name (repo に存在しない orphan)")
     fi
+done
+
+# install 時のバックアップ残存。*.sh.backup.<ts> は *.sh glob に当たらないため
+# 正走査・逆走査のどちらにも映らず、静かに蓄積する
+for backup in "$INSTALLED_SCRIPTS"/*.backup.*; do
+    [ -e "$backup" ] || continue
+    stale+=("$(basename "$backup") (install 時のバックアップが残存 — 内容を確認して削除する)")
 done
 
 if [ ${#stale[@]} -eq 0 ]; then
@@ -176,9 +188,20 @@ fi
 # 標準運用であり、通常作業で常時点灯する警告は無視されるようになるため
 if [ -f "$INSTALLED_SCRIPTS/.installed-from" ]; then
     IFS=$'\t' read -r from_dir from_branch from_sha < "$INSTALLED_SCRIPTS/.installed-from" || true
-    if [ "${from_dir:-}" != "$REPO_ROOT" ]; then
-        warn "scripts は別のチェックアウトから install されています: ${from_dir:-不明} (${from_branch:-?} ${from_sha:-?})"
+    if [ -z "${from_dir:-}" ]; then
+        # 空ファイルだと全フィールドが空になり、素通りさせると「出自を照合した」ことになってしまう。
+        # 末尾改行の欠落は read が値を返すので実害がなく、ここでは区別しない
+        warn ".installed-from が空です: $INSTALLED_SCRIPTS/.installed-from（./setup.sh install で再生成）"
+    elif [ ! -d "$from_dir" ]; then
+        # install 元の worktree が削除されると、skills の symlink も同時に dangling になる
+        warn ".installed-from が指すチェックアウトがありません: $from_dir（install 元が削除された可能性）"
+    elif [ "$from_dir" != "$REPO_ROOT" ]; then
+        warn "scripts は別のチェックアウトから install されています: $from_dir (${from_branch:-?} ${from_sha:-?})"
     fi
+elif ls "$INSTALLED_SCRIPTS"/*.sh >/dev/null 2>&1; then
+    # scripts はあるのに出自が無い＝旧版からの移行途中。初回 install 前（scripts 0 件）と
+    # 区別しないと、provenance 不明という検知したい状態が無警告で通る
+    warn "scripts の出自が不明です（.installed-from が無い）。メインチェックアウトで ./setup.sh install を実行してください"
 fi
 
 # 5. skill listing の description 総文字数 (budget 監視。閾値はモデル依存のため fail にしない)
@@ -214,10 +237,12 @@ def clean(raw):
 
 listed = hidden_fm = hidden_ov = chars = 0
 over = []
+seen = set()
 for f in sorted(glob.glob(os.path.join(root, "*", "SKILL.md"))):
     name = os.path.basename(os.path.dirname(f))
     if name.startswith("_"):
         continue
+    seen.add(name)
     # 不正な UTF-8 を含む SKILL.md 1 件で検証全体が止まらないよう置換して読む
     text = open(f, encoding="utf-8", errors="replace").read()
     m = re.search(r"^---\n(.*?)\n---", text, re.S)
@@ -236,7 +261,10 @@ for f in sorted(glob.glob(os.path.join(root, "*", "SKILL.md"))):
     chars += len(desc)
     if len(desc) > 120:
         over.append(f"{name}({len(desc)})")
-print(f"{listed}\t{hidden_fm}\t{hidden_ov}\t{chars}\t{' '.join(over)}")
+# skillOverrides のキーが実在する repo skill かを照合する。ディレクトリ名がキーなので、
+# 名前を間違えても plugin 由来 skill を指定しても、設定は黙って無効になるだけで気づけない
+unknown = sorted(set(overrides) - seen)
+print(f"{listed}\t{hidden_fm}\t{hidden_ov}\t{chars}\t{' '.join(over)}\t{' '.join(unknown)}")
 PY
 ); then
     listed_n=$(echo "$listing_report" | cut -f1)
@@ -244,15 +272,98 @@ PY
     hidden_ov=$(echo "$listing_report" | cut -f3)
     chars_n=$(echo "$listing_report" | cut -f4)
     over_list=$(echo "$listing_report" | cut -f5)
+    unknown_ov=$(echo "$listing_report" | cut -f6)
 
     # [INFO] は pass() と別色にする。GREEN だと「5 番目のチェックが通った」と読めてしまう
-    echo -e "${BLUE}[INFO]${NC} skill listing: ${listed_n} 件 / ${chars_n} 文字 (listing 対象外: frontmatter ${hidden_fm} 件 / skillOverrides ${hidden_ov} 件)"
+    # 「listing」と呼ぶと PR 本文の plugin 込みの値と混同されるため、何を数えたかを明示する。
+    # ここが数えているのは repo skill の description だけで、listing budget の実測ではない
+    echo -e "${BLUE}[INFO]${NC} repo skill の description 総和: ${listed_n} 件 / ${chars_n} 文字 (対象外: frontmatter ${hidden_fm} 件 / skillOverrides ${hidden_ov} 件)"
+    echo -e "        plugin を含む実際の listing budget は /context で確認する（本チェックでは測れない）"
     if [ -n "$over_list" ]; then
         warn "description が 120 字を超える skill: ${over_list}"
+    fi
+    if [ -n "$unknown_ov" ]; then
+        warn "skillOverrides に実在しない skill のキーがあります: ${unknown_ov}（設定が黙って無効になる。plugin 由来 skill には skillOverrides が効かないので /plugin を使う）"
     fi
 else
     warn "check 5 (listing budget) をスキップしました（python3 が利用できないか SKILL.md の読み込みに失敗）"
 fi
+
+# 6. settings.json に登録された hook の実体があるか
+#    hook 登録は settings.json の symlink 経由で即時反映されるが、scripts は実体コピーのため
+#    install まで配置されない。この非対称は exit 127 (non-blocking) として現れ、
+#    ガードレールが「止まる」のではなく「開く」。2 種類の失敗は性質が違うので分ける:
+#      repo 側の欠落 = 登録したがファイルを作り忘れた。install しても直らないので fail
+#      install 先の欠落 = install 待ちの過渡状態。./setup.sh install で解消するので warn
+if hook_cmds=$(python3 - "$REPO_CLAUDE/settings.json" <<'PY'
+import json, os, shlex, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as fp:
+        cfg = json.load(fp)
+except (OSError, ValueError):
+    sys.exit(1)
+out = []
+for matchers in (cfg.get("hooks") or {}).values():
+    for matcher in matchers or []:
+        for hook in matcher.get("hooks") or []:
+            raw = hook.get("command") or ""
+            if not raw:
+                continue
+            # 引数付きコマンドを想定して shlex で分割する。単純な split() はスペースを含む
+            # パスを途中で切り、存在しない別のパスを検査して「実行可能」と誤判定しうる
+            try:
+                parts = shlex.split(raw)
+            except ValueError:
+                continue
+            if parts:
+                out.append(os.path.expanduser(parts[0]))
+print("\n".join(out))
+PY
+); then
+    while IFS= read -r cmd; do
+        [ -n "$cmd" ] || continue
+        # repo が配布するスクリプトを指す hook だけを検査する。npx や jq のような外部コマンドは
+        # repo に無いのが当然で、対象に含めると hook を 1 つ足すたびに誤 fail する
+        case "$cmd" in
+            "$HOME/.claude/scripts/"*) ;;
+            *) continue ;;
+        esac
+        hook_name=$(basename "$cmd")
+        if [ ! -f "$REPO_SCRIPTS/$hook_name" ]; then
+            fail "登録済み hook が repo に存在しません: $hook_name (settings.json に登録済み / claude/scripts/ に無い)"
+        elif [ ! -x "$cmd" ]; then
+            warn "登録済み hook が未配置または実行不可: $cmd (./setup.sh install が必要)"
+        fi
+    done <<< "$hook_cmds"
+else
+    warn "check 6 (hook の実体) をスキップしました（python3 が利用できないか settings.json の解析に失敗）"
+fi
+
+# 7. 同期状態を見る 3 実装が逆走査 (orphan 検出) を持っているか
+#    repo 起点のループだけでは「repo から削除されたのに残っているファイル」が見えない。
+#    3 実装のどれかが欠けると「どの経路で見たかによって検出結果が変わる」非対称になり、
+#    自動で走る hook が最も検出力が低いという最悪の配分が起きる。
+#    setup.sh は逆走査を持つ install_scripts と持たない show_status が同居するため、
+#    ファイル全体ではなく関数本体を切り出して検査する。
+#    文字列の有無しか見ない粗い網であり、ロジックの同一性までは保証しない
+check_reverse_scan() {  # $1=表示名, $2=検査対象のテキスト
+    printf '%s' "$2" | grep -q 'orphan' \
+        || warn "$1 に orphan 検出がありません（同期状態を見る 3 実装の非対称）"
+}
+check_reverse_scan "hook-check-scripts-sync.sh" "$(cat "$REPO_CLAUDE/scripts/hook-check-scripts-sync.sh")"
+check_reverse_scan "verify-skills.sh (check 4)" "$(cat "$REPO_CLAUDE/scripts/verify-skills.sh")"
+check_reverse_scan "setup.sh:show_status()"     "$(sed -n '/^show_status()/,/^}/p' "$REPO_ROOT/setup.sh")"
+
+# scripts を走査する箇所は *.sh と *.py の glob を対で持つ。片方を書き忘れると
+# 「.py ファイルだけ処理されない」という静かな取りこぼしになり、出力からは気づけない
+check_glob_pair() {  # $1=表示名, $2=検査対象のテキスト
+    printf '%s' "$2" | grep -q '\*\.py' \
+        || warn "$1 に *.py の走査がありません（*.sh との glob 対の揃え忘れ）"
+}
+check_glob_pair "hook-check-scripts-sync.sh" "$(cat "$REPO_CLAUDE/scripts/hook-check-scripts-sync.sh")"
+check_glob_pair "verify-skills.sh (check 4)" "$(cat "$REPO_CLAUDE/scripts/verify-skills.sh")"
+check_glob_pair "setup.sh:install_scripts()" "$(sed -n '/^install_scripts()/,/^}/p' "$REPO_ROOT/setup.sh")"
+check_glob_pair "setup.sh:show_status()"     "$(sed -n '/^show_status()/,/^}/p' "$REPO_ROOT/setup.sh")"
 
 echo ""
 if [ "$fail_count" -gt 0 ]; then

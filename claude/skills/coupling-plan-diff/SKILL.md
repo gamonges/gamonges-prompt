@@ -51,7 +51,7 @@ description: 実装計画(plan.md)とgit diffを対象に、実装前後で結�
 
 ### フェーズ6: artifact生成（`--artifact` 指定時のみ）
 
-- [ ] `coupling-anatomy/reference/artifact-procedure.md` の手順に従う
+- [ ] `../coupling-anatomy/reference/artifact-procedure.md` の手順に従う
 - [ ] `artifact-design`、`dataviz` スキルを **Skillツールで明示ロードしてから作業する**（暗黙知で代用しない）
 
 ### フェーズ7: 完了報告

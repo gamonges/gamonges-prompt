@@ -44,8 +44,8 @@ ref DC-6050
 
 You must verify the following conditions before proceeding:
 
-- Current branch is not `develop` or `main`
-- Current branch has commits that are not in `develop`
+- Current branch is not the repository's default branch
+- Current branch has commits that are not in the default branch
 - There is no existing Pull Request for the current branch
 
 If any condition is not met:
@@ -64,14 +64,20 @@ When all conditions are met, execute these phases in order:
 # Get current branch
 current_branch=$(git branch --show-current)
 
-# Verify branch is not develop or main
-if [ "$current_branch" = "develop" ] || [ "$current_branch" = "main" ]; then
-    echo "Error: Cannot create PR from develop or main branch"
+# ベースブランチを 1 箇所で解決し、以降のフェーズはこの変数だけを使う。
+# リポジトリごとに main / develop が異なるため、ブランチ名をハードコードすると
+# 存在しないブランチを参照して `fatal: ambiguous argument` になる
+base_branch=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
+# ユーザーがベースブランチを明示した場合はその値で上書きする
+
+# Verify branch is not the default branch
+if [ "$current_branch" = "$base_branch" ]; then
+    echo "Error: Cannot create PR from the default branch ($base_branch)"
     exit 1
 fi
 
-# Check if there are commits ahead of develop
-commits_ahead=$(git rev-list --count develop..HEAD)
+# Check if there are commits ahead of the base branch
+commits_ahead=$(git rev-list --count "${base_branch}..HEAD")
 if [ "$commits_ahead" -eq 0 ]; then
     echo "Error: No commits to create PR"
     exit 1
@@ -123,14 +129,14 @@ modified_count=$(git status --porcelain | grep -c -E '^ [AMD]' || true)
 変更内容を分析して PR 本文を生成するための情報を収集します。
 
 ```bash
-# Get changed files
-changed_files=$(git diff --name-only develop...HEAD)
+# Get changed files（$base_branch は Phase 1 で解決済み）
+changed_files=$(git diff --name-only "${base_branch}...HEAD")
 
 # Get commit messages
-commit_messages=$(git log develop..HEAD --pretty=format:"%s")
+commit_messages=$(git log "${base_branch}..HEAD" --pretty=format:"%s")
 
 # Get diff stats
-diff_stats=$(git diff develop...HEAD --stat)
+diff_stats=$(git diff "${base_branch}...HEAD" --stat)
 ```
 
 ### Phase 4: Determine PR Purpose
@@ -165,7 +171,7 @@ PR 本文の構成と Notion Page ID の挿入位置は `./reference/pr-descript
 gh pr create \
   --title "$pr_title" \
   --body "$pr_description" \
-  --base develop \
+  --base "$base_branch" \
   --head "$current_branch" \
   --draft
 ```

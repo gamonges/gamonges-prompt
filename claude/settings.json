@@ -78,6 +78,16 @@
     "defaultMode": "bypassPermissions"
   },
   "model": "sonnet",
+  "skillOverrides": {
+    "find-skills": "user-invocable-only",
+    "coupling-anatomy": "name-only",
+    "coupling-audit": "name-only",
+    "coupling-gate": "name-only",
+    "coupling-plan-diff": "name-only",
+    "coupling-precheck": "name-only",
+    "fix-lgtm": "name-only",
+    "fix-lgtm-implement": "name-only"
+  },
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -145,7 +155,7 @@
   },
   "statusLine": {
     "type": "command",
-    "command": "~/.claude/scripts/statusline.py"
+    "command": "/Users/gamouhiroto/.claude/scripts/statusline.py"
   },
   "enabledPlugins": {
     "code-review@claude-plugins-official": false,
@@ -164,16 +174,6 @@
     "typescript-lsp@claude-plugins-official": true,
     "superpowers@claude-plugins-official": true,
     "slack@claude-plugins-official": false
-  },
-  "skillOverrides": {
-    "find-skills": "user-invocable-only",
-    "coupling-anatomy": "name-only",
-    "coupling-audit": "name-only",
-    "coupling-gate": "name-only",
-    "coupling-plan-diff": "name-only",
-    "coupling-precheck": "name-only",
-    "fix-lgtm": "name-only",
-    "fix-lgtm-implement": "name-only"
   },
   "language": "日本語",
   "effortLevel": "xhigh",
