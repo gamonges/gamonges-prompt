@@ -117,9 +117,15 @@ install_settings() {
     log_success "  ✓ settings.json → $source_file"
 }
 
-# Scripts のインストール
+# Scripts のインストール（実体コピー）
+#
+# skills は symlink のままだが scripts は実体をコピーする。symlink だとメインチェックアウトが
+# スクリプトを含まないブランチにある間に解決できなくなり、全 hook が exit 127 で失敗する。
+# exit 127 は non-blocking error でツール呼び出しは素通りするため、tmp/ コミット禁止・
+# 破壊的 git の確認・一括フォーマット禁止のガードレールが「止まる」のではなく「開く」。
+# scripts は skills と違って変更頻度が低いので、即時反映を捨てて確実性を取る。
 install_scripts() {
-    log_info "Scripts をインストールしています..."
+    log_info "Scripts をインストールしています（実体コピー）..."
     local scripts_dir="${SCRIPT_DIR}/claude/scripts"
     local target_dir="${CLAUDE_DIR}/scripts"
     mkdir -p "$target_dir"
@@ -128,18 +134,19 @@ install_scripts() {
     for script in "$scripts_dir"/*.sh "$scripts_dir"/*.py; do
         [ -f "$script" ] || continue
         local name=$(basename "$script")
-        local target_link="${target_dir}/${name}"
+        local target="${target_dir}/${name}"
 
-        if [[ -L "$target_link" ]]; then
-            rm "$target_link"
+        # 旧形式（symlink）が残っていれば除去してから実体を配置する
+        if [[ -L "$target" ]]; then
+            rm "$target"
         fi
 
-        ln -s "$script" "$target_link"
-        chmod +x "$script"
+        cp "$script" "$target"
+        chmod +x "$target"
         log_success "  ✓ ${name}"
         ((count++))
     done
-    log_info "Scripts: ${count} 件インストール完了"
+    log_info "Scripts: ${count} 件インストール完了（スクリプト編集後は ./setup.sh install の再実行が必要）"
 }
 
 # Skills のインストール
@@ -314,12 +321,18 @@ uninstall() {
         local target_link="${scripts_target_dir}/${name}"
 
         if [[ -L "$target_link" ]]; then
+            # 旧形式（symlink）: リンク先が本リポの場合のみ削除
             local link_target=$(readlink "$target_link")
             if [[ "$link_target" == "$script" ]]; then
                 rm "$target_link"
                 log_success "  ✓ 削除: ${name}"
                 ((scripts_count++))
             fi
+        elif [[ -f "$target_link" ]] && cmp -s "$script" "$target_link"; then
+            # 実体コピー: repo と同一内容のときだけ削除（ローカル改変は残す）
+            rm "$target_link"
+            log_success "  ✓ 削除: ${name}"
+            ((scripts_count++))
         fi
     done
 
@@ -375,15 +388,15 @@ show_status() {
             local target_link="${scripts_target_dir}/${name}"
 
             if [[ -L "$target_link" ]]; then
-                local link_target=$(readlink "$target_link")
-                if [[ "$link_target" == "$script" ]]; then
-                    echo -e "  ${GREEN}✓${NC} ${name} (リンク済み)"
-                    has_scripts=true
-                else
-                    echo -e "  ${YELLOW}!${NC} ${name} (別のリンク先)"
-                fi
+                echo -e "  ${YELLOW}!${NC} ${name} (旧形式の symlink — ./setup.sh install で実体コピーへ移行)"
+                has_scripts=true
             elif [[ -f "$target_link" ]]; then
-                echo -e "  ${YELLOW}!${NC} ${name} (実ファイルが存在)"
+                if cmp -s "$script" "$target_link"; then
+                    echo -e "  ${GREEN}✓${NC} ${name} (コピー済み)"
+                else
+                    echo -e "  ${YELLOW}!${NC} ${name} (repo と差分あり — ./setup.sh install で再コピー)"
+                fi
+                has_scripts=true
             else
                 echo -e "  ${RED}✗${NC} ${name} (未インストール)"
             fi

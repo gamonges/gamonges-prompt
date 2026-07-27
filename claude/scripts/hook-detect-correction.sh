@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# UserPromptSubmit hook: ユーザーの訂正表現を検知し、tmp/lessons.md への記録を促す
+# UserPromptSubmit hook: ユーザーの訂正表現を検知し、auto-memory への記録を促す
+# （旧 tmp/lessons.md 方式は SessionStart の無条件前渡しを伴うため廃止）
 # 公式: https://code.claude.com/docs/en/hooks
 # 出力: hookSpecificOutput.additionalContext で訂正の可能性を Claude に通知
 #
@@ -32,7 +33,7 @@ if echo "$PROMPT" | grep -qE "$TRIGGER_REGEX"; then
 {
   "hookSpecificOutput": {
     "hookEventName": "UserPromptSubmit",
-    "additionalContext": "🔁 [自己改善ループ] 訂正の可能性を検知。応答の最後に、訂正パターンを tmp/lessons.md に末尾追記すること（再現条件 + 回避ルール）。教訓が無ければ '記録なし' と明示。"
+    "additionalContext": "🔁 [自己改善ループ] 訂正の可能性を検知。応答の最後に、再現条件と回避ルールを auto-memory へ `type: feedback` として保存すること（既存の記憶に該当があれば新規作成せず更新する）。教訓が無ければ '記録なし' と明示。"
   }
 }
 EOF

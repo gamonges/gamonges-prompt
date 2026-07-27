@@ -46,7 +46,6 @@
       "Bash(sudo:*)",
       "Bash(wget:*)",
       "Read(**/*.env*)",
-      "Read(**/*aws*)",
       "Read(**/*key)",
       "Read(**/*token*)",
       "Read(**/*secrets*)",
@@ -54,7 +53,6 @@
       "Read(id_ed25519)",
       "Read(id_rsa)",
       "Edit(**/*.env*)",
-      "Edit(**/*aws*)",
       "Edit(**/*key)",
       "Edit(**/*production*)",
       "Edit(**/*secrets*)",
@@ -126,16 +124,6 @@
           {
             "type": "command",
             "command": "/Users/gamouhiroto/.claude/scripts/hook-prompt-retrospective.sh"
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/Users/gamouhiroto/.claude/scripts/hook-inject-recent-lessons.sh"
           }
         ]
       }

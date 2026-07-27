@@ -12,7 +12,7 @@ When invoked:
 1. Run `git diff --name-only` to identify changed files since last sync
 2. Identify related spec files in `openspec/specs/` based on changed modules
 3. Read the current implementation plan (`$ARGUMENTS` or `./tmp/plan.md`)
-4. Read existing lessons in `./tmp/lessons.md` (if present)
+4. Read existing lessons from auto-memory (`MEMORY.md` index, then the relevant entries)
 
 ## Core Responsibilities
 
@@ -43,10 +43,10 @@ Capture reusable patterns and lessons from the implementation session:
 - Document architectural decisions made during implementation
 - Record performance optimizations and their reasoning
 
-**Output to `./tmp/lessons.md`:**
-- Deduplicate against existing entries before appending
-- Use the format: `### [Category] Lesson Title` + description + example
-- Categories: `Architecture`, `Testing`, `Performance`, `Security`, `Process`
+**Output to auto-memory (`type: feedback`):**
+- Deduplicate against existing memories first; update an existing entry rather than creating a near-duplicate
+- One fact per file, with `**Why:**` and `**How to apply:**` lines in the body
+- Add a one-line pointer to `MEMORY.md`
 - If the same type of mistake appears 3+ times, propose a prevention rule
 
 ### 3. Knowledge Compression
@@ -79,7 +79,7 @@ Write results to `./tmp/doc-sync-report.md` (overwrite with latest):
 - [{category}] {lesson summary}
 
 ## Compression Applied
-- Merged {N} redundant entries in lessons.md
+- Merged {N} redundant memories in auto-memory
 - Removed {M} entries now covered by automated checks
 ```
 
