@@ -4,8 +4,8 @@
 # Claude Skills & SubAgents セットアップスクリプト
 # =============================================================================
 #
-# このスクリプトは、リポジトリ内の Skills, SubAgents を
-# ~/.claude/ 配下にシンボリックリンクとして配置します。
+# このスクリプトは、リポジトリ内の Skills, SubAgents, settings.json を ~/.claude/ 配下に
+# シンボリックリンクとして、Scripts を実体コピーとして配置します。
 # これにより、すべてのプロジェクトで共通して使用できるようになります。
 #
 # 使用方法:
@@ -117,6 +117,24 @@ install_settings() {
     log_success "  ✓ settings.json → $source_file"
 }
 
+# install 元が linked worktree なら警告する。
+#
+# settings.json と skills は symlink のままなので、install 元のチェックアウトを全プロジェクトの
+# ランタイムが参照する。worktree から install すると、その worktree を削除した瞬間に
+# deny リスト・hook 定義・全 skill がまとめて失われる。hook のように exit 127 がログに残る形ではなく
+# Claude Code がデフォルト設定で静かに起動するため、スクリプト側の失敗モードより気づきにくい。
+# 判定はパス非依存にする（メインチェックアウトの場所をハードコードしない）。
+warn_if_worktree() {
+    local git_dir git_common
+    git_dir=$(git -C "$SCRIPT_DIR" rev-parse --git-dir 2>/dev/null) || return 0
+    git_common=$(git -C "$SCRIPT_DIR" rev-parse --git-common-dir 2>/dev/null) || return 0
+    if [[ "$git_dir" != "$git_common" ]]; then
+        log_warning "  ! linked worktree から install しています: ${SCRIPT_DIR}"
+        log_warning "    settings.json / skills の symlink がこの worktree を指すため、削除すると設定が失われます"
+        log_warning "    可能ならメインチェックアウトから install してください"
+    fi
+}
+
 # Scripts のインストール（実体コピー）
 #
 # skills は symlink のままだが scripts は実体をコピーする。symlink だとメインチェックアウトが
@@ -125,6 +143,7 @@ install_settings() {
 # 破壊的 git の確認・一括フォーマット禁止のガードレールが「止まる」のではなく「開く」。
 # scripts は skills と違って変更頻度が低いので、即時反映を捨てて確実性を取る。
 install_scripts() {
+    local prune="${1:-false}"
     log_info "Scripts をインストールしています（実体コピー）..."
     local scripts_dir="${SCRIPT_DIR}/claude/scripts"
     local target_dir="${CLAUDE_DIR}/scripts"
@@ -139,13 +158,63 @@ install_scripts() {
         # 旧形式（symlink）が残っていれば除去してから実体を配置する
         if [[ -L "$target" ]]; then
             rm "$target"
+        elif [[ -d "$target" ]]; then
+            # ディレクトリのままだと cp が中に潜り込み chmod +x がディレクトリに当たる。
+            # その状態で hook が起動すると exit 126 = 本方式が排除したい失敗モードと同型
+            log_warning "  ! ${name} はディレクトリです。退避します"
+            mv "$target" "${target}.backup.$(date +%Y%m%d%H%M%S)"
+        elif [[ -f "$target" ]] && ! cmp -s "$script" "$target"; then
+            # 他の install 関数と同じくローカル改変を保護する。
+            # 内容が同じときは退避しない（毎回バックアップが増えるとノイズになるため）
+            cp "$target" "${target}.backup.$(date +%Y%m%d%H%M%S)"
+            log_warning "  ! ${name} はローカル改変あり。バックアップしました"
         fi
 
-        cp "$script" "$target"
-        chmod +x "$target"
+        # hook は常時発火するため、上書き中のファイルが別セッションから実行されうる。
+        # install_settings と同じく rename(2) によるアトミック置換にする
+        cp "$script" "${target}.new"
+        chmod +x "${target}.new"
+        mv -f "${target}.new" "$target"
         log_success "  ✓ ${name}"
-        ((count++))
+        count=$((count + 1))
     done
+
+    # 実体コピーでは symlink と違いリンク先から由来が読めない。
+    # 「どのチェックアウトから install したか」を verify-skills.sh の check 4 が照合できるよう記録する
+    printf '%s\t%s\t%s\n' "$SCRIPT_DIR" \
+        "$(git -C "$SCRIPT_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)" \
+        "$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)" \
+        > "${target_dir}/.installed-from"
+
+    # repo から削除されたスクリプトの検出。repo 起点のループでは見えないため逆方向に走査する。
+    # 既定を警告に留めるのは ~/.claude/scripts/ にユーザーが手で置いたスクリプトがありうるため
+    local orphans=()
+    for installed in "$target_dir"/*.sh "$target_dir"/*.py; do
+        [ -e "$installed" ] || [ -L "$installed" ] || continue
+        local n=$(basename "$installed")
+        [ -f "${scripts_dir}/${n}" ] && continue
+        orphans+=("$n")
+    done
+
+    if [ ${#orphans[@]} -gt 0 ]; then
+        if [[ "$prune" == true ]]; then
+            local backup_dir="${target_dir}/.orphan-backup.$(date +%Y%m%d%H%M%S)"
+            mkdir -p "$backup_dir"
+            local n
+            for n in "${orphans[@]}"; do
+                mv "${target_dir}/${n}" "${backup_dir}/${n}"
+                log_success "  ✓ 削除: ${n} (orphan)"
+            done
+            log_info "  orphan ${#orphans[@]} 件を ${backup_dir} へ退避しました"
+        else
+            local n
+            for n in "${orphans[@]}"; do
+                log_warning "  ! ${n} は repo に存在しません（orphan）"
+            done
+            log_warning "  削除するには: ./setup.sh install --prune-scripts"
+        fi
+    fi
+
     log_info "Scripts: ${count} 件インストール完了（スクリプト編集後は ./setup.sh install の再実行が必要）"
 }
 
@@ -161,16 +230,21 @@ install_skills() {
             [[ "$skill_name" == _* ]] && continue
             local target_link="${CLAUDE_SKILLS_DIR}/${skill_name}"
 
-            # 既存のリンクまたはディレクトリを処理
-            if [[ -L "$target_link" ]]; then
-                log_warning "既存のシンボリックリンクを更新: ${skill_name}"
-                rm "$target_link"
-            elif [[ -d "$target_link" ]]; then
-                log_warning "既存のディレクトリをバックアップ: ${skill_name}"
-                mv "$target_link" "${target_link}.backup.$(date +%Y%m%d%H%M%S)"
-            fi
+            # 既に正しい先を指しているなら触らない。変更が無いのに毎回 rm → ln -s すると
+            # symlink が存在しない窓が開き、併走セッションの skill ロードが失敗しうる
+            # （install は Claude Code セッション内から走り、複数 worktree が併走する）
+            if [[ ! -L "$target_link" || "$(readlink "$target_link")" != "$skill_dir" ]]; then
+                # 既存のリンクまたはディレクトリを処理
+                if [[ -L "$target_link" ]]; then
+                    log_warning "既存のシンボリックリンクを更新: ${skill_name}"
+                    rm "$target_link"
+                elif [[ -d "$target_link" ]]; then
+                    log_warning "既存のディレクトリをバックアップ: ${skill_name}"
+                    mv "$target_link" "${target_link}.backup.$(date +%Y%m%d%H%M%S)"
+                fi
 
-            ln -s "$skill_dir" "$target_link"
+                ln -s "$skill_dir" "$target_link"
+            fi
 
             # skill 内 scripts/*.sh に実行権限を付与（symlink 経由でも実行可能にする）
             # find 自体の exit code は -exec の最終結果を反映しないため、失敗を明示検知
@@ -232,16 +306,19 @@ install_subagents() {
 
         local target_link="${CLAUDE_SUBAGENTS_DIR}/${filename}"
 
-        # 既存のリンクまたはファイルを処理
-        if [[ -L "$target_link" ]]; then
-            log_warning "既存のシンボリックリンクを更新: ${filename}"
-            rm "$target_link"
-        elif [[ -f "$target_link" ]]; then
-            log_warning "既存のファイルをバックアップ: ${filename}"
-            mv "$target_link" "${target_link}.backup.$(date +%Y%m%d%H%M%S)"
-        fi
+        # install_skills と同じ理由で、既に正しい先を指していれば触らない
+        if [[ ! -L "$target_link" || "$(readlink "$target_link")" != "$md_file" ]]; then
+            # 既存のリンクまたはファイルを処理
+            if [[ -L "$target_link" ]]; then
+                log_warning "既存のシンボリックリンクを更新: ${filename}"
+                rm "$target_link"
+            elif [[ -f "$target_link" ]]; then
+                log_warning "既存のファイルをバックアップ: ${filename}"
+                mv "$target_link" "${target_link}.backup.$(date +%Y%m%d%H%M%S)"
+            fi
 
-        ln -s "$md_file" "$target_link"
+            ln -s "$md_file" "$target_link"
+        fi
         log_success "  ✓ ${filename}"
         ((count++))
     done < <(find "$REPO_SUBAGENTS_DIR" -name "*.md" -type f -print0)
@@ -333,8 +410,17 @@ uninstall() {
             rm "$target_link"
             log_success "  ✓ 削除: ${name}"
             ((scripts_count++))
+        elif [[ -e "$target_link" || -L "$target_link" ]]; then
+            # 無言でスキップすると「アンインストールしたのに hook が動く」という
+            # 調査困難な状態になる。件数だけ合わないより、残した理由を出す
+            log_warning "  ! スキップ: ${name}（repo と差分あり。手動で確認してください）"
         fi
     done
+
+    # install 出自の記録も併せて撤去する
+    if [[ -f "${scripts_target_dir}/.installed-from" ]]; then
+        rm "${scripts_target_dir}/.installed-from"
+    fi
 
     # Settings の削除
     local settings_source="${SCRIPT_DIR}/claude/settings.json"
@@ -388,13 +474,23 @@ show_status() {
             local target_link="${scripts_target_dir}/${name}"
 
             if [[ -L "$target_link" ]]; then
-                echo -e "  ${YELLOW}!${NC} ${name} (旧形式の symlink — ./setup.sh install で実体コピーへ移行)"
+                # リンク先を出す。install は symlink を上書きするため、表示しないと
+                # 「どこを指していたか」が復元不能なまま失われる
+                local link_dest=$(readlink "$target_link")
+                if [[ -e "$target_link" ]]; then
+                    echo -e "  ${YELLOW}!${NC} ${name} (旧形式の symlink → ${link_dest} — ./setup.sh install で実体コピーへ移行)"
+                else
+                    echo -e "  ${RED}✗${NC} ${name} (dangling symlink → ${link_dest} — 実行すると exit 127)"
+                fi
+                has_scripts=true
+            elif [[ -d "$target_link" ]]; then
+                echo -e "  ${RED}✗${NC} ${name} (ディレクトリ — 実行すると exit 126)"
                 has_scripts=true
             elif [[ -f "$target_link" ]]; then
                 if cmp -s "$script" "$target_link"; then
                     echo -e "  ${GREEN}✓${NC} ${name} (コピー済み)"
                 else
-                    echo -e "  ${YELLOW}!${NC} ${name} (repo と差分あり — ./setup.sh install で再コピー)"
+                    echo -e "  ${YELLOW}!${NC} ${name} (repo と差分あり — ./setup.sh install で再コピー。改変は .backup.* に退避される)"
                 fi
                 has_scripts=true
             else
@@ -482,12 +578,26 @@ main() {
     echo ""
 
     local command="${1:-install}"
+    local prune_scripts=false
+
+    # 未知のオプションはエラーにする。`--prune-script` のようなタイポを黙って無視すると
+    # 「prune したつもりで実行されていない」という静かな失敗になる
+    case "${2:-}" in
+        "") ;;
+        --prune-scripts) prune_scripts=true ;;
+        *)
+            echo "不明なオプション: $2"
+            echo "使用方法: $0 {install|uninstall|status|migrate} [--prune-scripts]"
+            exit 1
+            ;;
+    esac
 
     case "$command" in
         install)
             check_source_dirs
+            warn_if_worktree
             init_claude_dir
-            install_scripts
+            install_scripts "$prune_scripts"
             echo ""
             install_skills
             echo ""
@@ -511,7 +621,8 @@ main() {
             migrate
             ;;
         *)
-            echo "使用方法: $0 {install|uninstall|status|migrate}"
+            echo "使用方法: $0 {install|uninstall|status|migrate} [--prune-scripts]"
+            echo "  --prune-scripts : repo に存在しない ~/.claude/scripts/ の orphan を退避して削除する"
             exit 1
             ;;
     esac
