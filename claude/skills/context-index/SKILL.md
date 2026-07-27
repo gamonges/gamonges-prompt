@@ -1,6 +1,6 @@
 ---
 name: context-index
-description: claude-context にコードベースを index して semantic search を可能にする。個人定義の ignorePattern（repo 外・非コミット）を参照し不要ディレクトリを除外する。`/context-index` で起動。
+description: claude-context にコードベースを index して semantic search を可能にする。個人定義の ignorePattern で不要ディレクトリを除外。`/context-index` 呼び出しで使用。
 disable-model-invocation: true
 ---
 

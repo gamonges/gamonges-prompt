@@ -1,11 +1,21 @@
 ---
 name: create-pr
 description: 現在のブランチから develop ブランチへ Pull Request を作成する。実装完了後の PR 化、レビュー依頼の準備、`/create-pr` 呼び出しで使用。
+disable-model-invocation: true
 ---
 
 指定されたブランチ（または現在のブランチ）から develop ブランチ向けのプルリクエストを作成します。
 
 **規約**: CLAUDE.md の Skills 共通規約に従う
+
+## 補助ドキュメントへの参照
+
+| 補助ドキュメント | 読むタイミング |
+|------------------|----------------|
+| `./reference/pr-description-template.md` | Phase 5 で PR 本文を生成する時 |
+
+「念のため全部読む」は禁止。表のトリガー条件に該当する場合のみ読み込む。
+
 ## Notion Page ID によるリファレンス付与
 
 ユーザーがコマンド実行時にNotionのページID（例: `DC-6050`, `DC-1234 DC-5678`）を一緒に入力した場合、PR本文の**先頭**に `ref` 行を自動付与します。
@@ -126,42 +136,7 @@ diff_stats=$(git diff develop...HEAD --stat)
 
 `.github/PULL_REQUEST_TEMPLATE.md`のフォーマットに従って PR 本文を生成します。
 
-**Notion Page ID の処理**:
-
-ユーザー入力から `DC-` で始まるIDを抽出し、見つかった場合はPR本文の先頭に挿入します。
-
-```
-# IDが見つかった場合の本文構造:
-ref DC-6050
-
-## 📝 PR 概要 📝
-...
-
-# IDが見つからなかった場合の本文構造:
-## 📝 PR 概要 📝
-...
-```
-
-テンプレート構成:
-
-```markdown
-## 📝 PR 概要 📝
-
-- **目的**:
-  - [機能追加/仕様変更/バグ修正/リファクタリング]
-- **関連リンク**:
-  - [関連する Issue、Notion、Figma など]
-- **変更点の概要**:
-  - [主要な変更内容を箇条書き]
-
-## 👮‍♂️ 動作確認 👮‍♂️
-
-- [ ] API に破壊的な変更がない（エンドポイント削除やレスポンス変更など）
-- [ ] ローカルで動作確認済み
-- [ ] CI が正常に通過
-- [ ] ドキュメント（README, Swagger など）が更新済み
-- [ ] gemini のレビュー指摘をチェック
-```
+PR 本文の構成と Notion Page ID の挿入位置は `./reference/pr-description-template.md` を参照する。
 
 変更内容に基づいて、以下を自動的に埋めます：
 

@@ -146,22 +146,25 @@
     "command": "~/.claude/scripts/statusline.py"
   },
   "enabledPlugins": {
-    "code-review@claude-plugins-official": true,
+    "code-review@claude-plugins-official": false,
     "commit-commands@claude-plugins-official": true,
     "context7@claude-plugins-official": true,
     "explanatory-output-style@claude-plugins-official": true,
     "feature-dev@claude-plugins-official": true,
-    "figma@claude-plugins-official": true,
-    "frontend-design@claude-plugins-official": true,
-    "github@claude-plugins-official": true,
+    "figma@claude-plugins-official": false,
+    "frontend-design@claude-plugins-official": false,
+    "github@claude-plugins-official": false,
     "learning-output-style@claude-plugins-official": true,
-    "Notion@claude-plugins-official": true,
+    "Notion@claude-plugins-official": false,
     "playwright@claude-plugins-official": true,
     "pr-review-toolkit@claude-plugins-official": true,
     "serena@claude-plugins-official": true,
     "typescript-lsp@claude-plugins-official": true,
     "superpowers@claude-plugins-official": true,
-    "slack@claude-plugins-official": true
+    "slack@claude-plugins-official": false
+  },
+  "skillOverrides": {
+    "find-skills": "user-invocable-only"
   },
   "language": "日本語",
   "effortLevel": "xhigh",

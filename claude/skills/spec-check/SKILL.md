@@ -1,6 +1,7 @@
 ---
 name: spec-check
 description: plan.md と既存仕様 openspec/specs/ の整合性を網羅的に検証する。`/design` 後の仕様整合性チェック、`/review-plan` の前工程、`/spec-check` 呼び出しで使用。
+disable-model-invocation: true
 ---
 
 plan.md が既存仕様（`openspec/specs/`）と矛盾しないか網羅的に検証する。

@@ -1,11 +1,14 @@
 ---
 name: html-view
 description: |
-  Markdown ドキュメント (plan / fix-plan / review / research) を Claude 自身が読んで人間レビュア向けのデザイン HTML に変換する。
-  PdM/SRE への共有時、ブラウザでデザインプレビューを開きたい時、`/html-view <file.md>` のキーワードで使用。
+  Markdown (plan / fix-plan / review / research) をローカル完結の HTML に変換しブラウザで開く。
+  外部送信を避けたい時、`/html-view <file.md>` 呼び出しで使用。共有目的の既定は Artifact。
+disable-model-invocation: true
 ---
 
 **規約**: CLAUDE.md の Skills 共通規約に従う
+
+> **位置付け**: 成果物を人が読む形にする既定の手段は **Artifact**（CLAUDE.md の Skills 共通規約を参照）。本 skill は**ローカルに閉じたい場合の退避手段**で、内容が claude.ai に送信されない点が違い。本 skill の `reference/` にある style-guide・example・種別別 prompt は**ローカル HTML 専用**であり、Artifact 生成時には参照しない（Artifact 側は `artifact-design` skill に従う）。
 
 入力 Markdown を Claude (本セッション) 自身が読み込み、ドキュメント種別に応じた prompt + 参照 example HTML を文脈にして単体完結 HTML を組み立てる。生成 HTML は `tmp/` 配下に Write し、`--no-open` 指定がない限りブラウザで自動起動する。Python script は使わない (LLM 直接生成方式)。
 

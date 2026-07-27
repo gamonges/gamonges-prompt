@@ -3,6 +3,7 @@ name: blog
 description: |
   アウトラインからテックブログ記事ドラフトを生成する。
   「ブログ」「blog」「記事を書く」「テックブログ」等のキーワードで使用。
+disable-model-invocation: true
 ---
 
 アウトラインからテックブログ記事のドラフトを生成する。

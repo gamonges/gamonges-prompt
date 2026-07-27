@@ -1,6 +1,7 @@
 ---
 name: review-comments
-description: PRレビューコメントの妥当性チェック・返信・resolve（/review-comments <PR URL>）
+description: PR レビューコメントの妥当性チェック・返信・resolve を行う。レビュー指摘に対応する時、`/review-comments <PR URL>` 呼び出しで使用。
+disable-model-invocation: true
 ---
 
 # PR レビューコメント対応スキル

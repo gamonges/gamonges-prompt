@@ -4,6 +4,7 @@ description: |
   アウトラインから dresscode テーマ準拠の Marp スライドを生成する。
   「Marp」「スライド作成」「スライド生成」「プレゼン作成」等のキーワードで使用。
   dresscode-marp-template リポジトリ内での実行を前提とする。
+disable-model-invocation: true
 ---
 
 アウトラインから dresscode テーマ準拠の Marp スライドを生成する。

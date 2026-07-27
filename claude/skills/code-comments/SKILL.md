@@ -1,6 +1,6 @@
 ---
 name: code-comments
-description: コード内コメントの書き方の方針を定め適用するスキル。「経緯は VCS・判断と制約はコード」を原則に、残すべき 7 分類 / レビュー指摘の蒸留 / AI 向けコメントを集約。/code-comments で既存コメントを見直し、design・fix・implement から名指し参照。PR コメント運用の review-comments とは別物。
+description: コード内コメントの方針を定め適用する。「経緯は VCS・判断と制約はコード」が原則。既存コメントを見直す時、`/code-comments` 呼び出しで使用。design / fix / implement から参照される。
 ---
 
 **規約**: CLAUDE.md の Skills 共通規約に従う
