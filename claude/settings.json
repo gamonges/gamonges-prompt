@@ -46,6 +46,8 @@
       "Bash(sudo:*)",
       "Bash(wget:*)",
       "Read(**/*.env*)",
+      "Read(**/.aws/**)",
+      "Read(**/*credentials*)",
       "Read(**/*key)",
       "Read(**/*token*)",
       "Read(**/*secrets*)",
@@ -53,6 +55,8 @@
       "Read(id_ed25519)",
       "Read(id_rsa)",
       "Edit(**/*.env*)",
+      "Edit(**/.aws/**)",
+      "Edit(**/*credentials*)",
       "Edit(**/*key)",
       "Edit(**/*production*)",
       "Edit(**/*secrets*)",
@@ -80,7 +84,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/scripts/sync-claude-to-worktree.sh"
+            "command": "/Users/gamouhiroto/.claude/scripts/sync-claude-to-worktree.sh"
           },
           {
             "type": "command",
@@ -127,6 +131,16 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/gamouhiroto/.claude/scripts/hook-check-scripts-sync.sh"
+          }
+        ]
+      }
     ]
   },
   "statusLine": {
@@ -152,7 +166,14 @@
     "slack@claude-plugins-official": false
   },
   "skillOverrides": {
-    "find-skills": "user-invocable-only"
+    "find-skills": "user-invocable-only",
+    "coupling-anatomy": "name-only",
+    "coupling-audit": "name-only",
+    "coupling-gate": "name-only",
+    "coupling-plan-diff": "name-only",
+    "coupling-precheck": "name-only",
+    "fix-lgtm": "name-only",
+    "fix-lgtm-implement": "name-only"
   },
   "language": "日本語",
   "effortLevel": "xhigh",
