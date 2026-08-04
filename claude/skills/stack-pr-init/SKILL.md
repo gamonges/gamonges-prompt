@@ -5,9 +5,11 @@ description: 新規スタック PR を開始する。gh-stack 拡張の前提条
 
 現在の作業を新規のスタック PR として開始する。GitHub 公式拡張 `gh-stack` の薄いラッパーとして `gh stack init` を実行する。
 
-## 実行条件
+## 前提条件チェック（SSOT）
 
-以下を確認する。いずれか未達の場合は処理を即座に停止し、どの条件が満たされていないかをユーザーに報告する:
+他の `stack-pr-*` skill も本チェックを行うが、記述の正本は本 skill とする（詳細は `../stack-pr-init/SKILL.md` を参照、と 1 行で引用し再宣言しない）。以下をすべて確認する（他 stack-pr-* skill から共通参照される）。いずれか未達の場合は処理を即座に停止し、どの条件が満たされていないかをユーザーに報告する。
+
+### ブランチ・fork・gh CLI の確認
 
 ```bash
 current_branch=$(git branch --show-current)
@@ -30,9 +32,7 @@ fi
 gh auth status || { echo "Error: gh 未認証です。gh auth login を実行してください"; exit 1; }
 ```
 
-## 前提条件チェック（SSOT）
-
-他の `stack-pr-*` skill も本チェックを行うが、記述の正本は本 skill とする（詳細は `../stack-pr-init/SKILL.md` を参照、と 1 行で引用し再宣言しない）。
+### gh-stack 拡張の有無確認
 
 ```bash
 if ! gh extension list | grep -q "github/gh-stack"; then
@@ -42,6 +42,10 @@ fi
 ```
 
 無言実行はせず、インストール実行前に必ずその旨を表示する（透明性確保）。実行後の確認・停止は不要 — ユーザーはこの自動インストール方針を既に承認済み。
+
+### スタック未初期化時の案内（SSOT）
+
+`gh stack view` 等が「スタック未初期化」を示すエラーを返した場合、「まず `/stack-pr-init` でスタックを開始してください」と案内する。
 
 ## 実行プロセス
 

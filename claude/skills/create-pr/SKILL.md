@@ -42,7 +42,7 @@ ref DC-6050
 
 ## Execution Conditions
 
-You must verify the following conditions before proceeding:
+Phase 0 で「通常 PR」を選択し Phase 1 以降に進む場合にのみ、以下の条件を確認する。Phase 0 自体、および「スタック PR」を選択した場合はこれらの条件を確認しない。
 
 - Current branch is not the repository's default branch
 - Current branch has commits that are not in the default branch
@@ -56,7 +56,7 @@ If any condition is not met:
 
 ## Execution Process
 
-When all conditions are met, execute these phases in order:
+Phase 0 を実行した上で、通常 PR の場合は Execution Conditions を満たしてから Phase 1 以降を実行する。
 
 ### Phase 0: PR 種別選択
 
