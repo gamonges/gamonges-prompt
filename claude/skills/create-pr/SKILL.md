@@ -58,6 +58,16 @@ If any condition is not met:
 
 When all conditions are met, execute these phases in order:
 
+### Phase 0: PR 種別選択
+
+「通常 PR として作成しますか、スタック PR として作成しますか？」をユーザーに確認する。
+
+- **通常 PR** を選択した場合: 以降の Phase 1-8 をそのまま実行する（本 Phase 以外の変更はない）
+- **スタック PR** を選択した場合: 「新規スタック開始」か「既存スタックへの追加」かをさらに確認し、以下に委譲する。**Phase 1-8 は実行しない**
+  - 新規開始 → `Skill` ツールで `stack-pr-init` を呼び出す
+  - 既存追加 → `Skill` ツールで `stack-pr-add` を呼び出す
+  - いずれの場合も、レイヤー追加の完了後に自動連鎖させず「まとめて PR 化する場合は `/stack-pr-submit` を実行してください」と案内する（複数レイヤーを積んでからまとめて submit したいケースがあるため）
+
 ### Phase 1: Verify Branch Status
 
 ```bash
