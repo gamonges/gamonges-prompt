@@ -74,6 +74,7 @@ skill / subagent のプロンプトは Claude 5 世代の挙動に合わせる�
 | `review-plan` / `revise` | `plan-lgtm` |
 | `strategic-ddd` | `strategic-ddd-designer` subagent の `skills:` preload |
 | `stack-pr-init` / `stack-pr-add` | `create-pr`（Phase 0 の分岐） |
+| `verify-scenario` | `implement`（Phase 4 の条件付き実行） |
 
 新たに付与する前に、呼び出しグラフを再確認する:
 

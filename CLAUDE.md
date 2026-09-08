@@ -61,6 +61,15 @@ export OTEL_EXPORTER_OTLP_HEADERS="DD-API-KEY=$CLAUDE_CODE_TELEMETRY_DD_API_KEY"
 - **Bash 経路は塞いでいない**: `Bash(cat:*)` / `Bash(grep:*)` が allow のため `cat ~/.aws/credentials` は通る。deny は Read/Edit ツール経路の defense-in-depth であり、完全な封鎖ではない
 - **deny の実効性は未確認（2026-07-27 実測）**: scratchpad 配下に `.aws/credentials` を作って Read したところ **ブロックされずに読めた**（`Read(**/.aws/**)` が deny にあるにもかかわらず発火しない）。ただし scratchpad は権限チェックが緩和されている可能性があり、repo 内での再検証は permission により実施できなかったため、**「deny が機能していない」と断定はできない**。この前提が確認できるまで、deny パターンの調整（`**/*credentials*` が `credentials.ts` 等に誤爆する / `aws-exports.js` が保護外になる、という指摘）は**保留する** — 発火しないパターンを変えても保護は増えず、誤爆リスクだけが増えるため。実効性の確認が先
 
+### hook 登録の判断記録（settings.json にコメントを書けないため）
+
+`hook-block-local-contract-link.sh`（PreToolUse / Bash）: 依存宣言が `link:` / `file:` のままの `package.json` を staged にした `git commit` を `ask` にする。
+
+- **パッケージ名もリポジトリパスも持たない汎用パターン**にした。settings.json は PUBLIC リポジトリにコミットされるため引数にパスを書けず、Claude Code は settings.json `env` の `${VAR}` 展開を非サポートなので環境変数でも渡せない。汎用にすると適用範囲も広がる（pnpm workspace は `workspace:` を使うので、コミットされた `link:` / `file:` はほぼ常に事故）
+- **`deny` ではなく `ask`**。`file:` を正規に使うリポジトリでの誤爆に備える（`bypassPermissions` 下では deny は確認プロンプトなしでブロックされる）
+- **足切り（基点に `pnpm-lock.yaml` が無ければ素通し）を fail-closed より前に置く**。逆順だと変数展開を含む commit が pnpm 非使用リポジトリでも `ask` になり、**本リポジトリ自身が該当する**。日常的に出る ask は「中身を読まずに承認する習慣」を育て、fail-open とは別方向で同じくガードを無効化する
+- **第一ガードは hook ではない**。`link-contract.sh` が張る `git update-index --skip-worktree` が経路を問わず巻き込みを防ぎ、hook は 2 枚目（Claude Code の Bash 経路のみ / wrapper 経由の commit は素通し）
+
 ### portability 課題（F-7 で対応予定）
 
 `claude/settings.json` には個人固有絶対パス（mise の Node 絶対パス、`statusLine.command` の絶対パス等）が含まれる。別端末への展開は F-7 解決まで非対応。
