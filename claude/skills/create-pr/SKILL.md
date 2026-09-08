@@ -80,14 +80,23 @@ current_branch=$(git branch --show-current)
 base_branch=$(gh repo view --json defaultBranchRef --jq '.defaultBranchRef.name')
 # ユーザーがベースブランチを明示した場合はその値で上書きする
 
+# ローカルの $base_branch 参照は worktree ベースの作業では fetch/pull されずに
+# 古いまま固定されがちで、その状態で bare な "${base_branch}..HEAD" を使うと
+# 本来 base に取り込み済みのコミットまで大量に「差分」として出てくる（誤検知）。
+# 以降の差分計算はすべて origin/$base_branch を使う。
+# コロン無し fetch（refspec 無し）なら、$base_branch が別 worktree で
+# checkout 中でも "refused to fetch into branch checked out" エラーにならない
+git fetch origin "$base_branch"
+
 # Verify branch is not the default branch
 if [ "$current_branch" = "$base_branch" ]; then
     echo "Error: Cannot create PR from the default branch ($base_branch)"
     exit 1
 fi
 
-# Check if there are commits ahead of the base branch
-commits_ahead=$(git rev-list --count "${base_branch}..HEAD")
+# Check if there are commits ahead of the base branch（originの最新を基準にする。
+# ローカルの $base_branch 参照では判定しない）
+commits_ahead=$(git rev-list --count "origin/${base_branch}..HEAD")
 if [ "$commits_ahead" -eq 0 ]; then
     echo "Error: No commits to create PR"
     exit 1
@@ -139,14 +148,14 @@ modified_count=$(git status --porcelain | grep -c -E '^ [AMD]' || true)
 変更内容を分析して PR 本文を生成するための情報を収集します。
 
 ```bash
-# Get changed files（$base_branch は Phase 1 で解決済み）
-changed_files=$(git diff --name-only "${base_branch}...HEAD")
+# Get changed files（$base_branch は Phase 1 で解決・fetch 済み。origin/ を必ず付ける）
+changed_files=$(git diff --name-only "origin/${base_branch}...HEAD")
 
 # Get commit messages
-commit_messages=$(git log "${base_branch}..HEAD" --pretty=format:"%s")
+commit_messages=$(git log "origin/${base_branch}..HEAD" --pretty=format:"%s")
 
 # Get diff stats
-diff_stats=$(git diff "${base_branch}...HEAD" --stat)
+diff_stats=$(git diff "origin/${base_branch}...HEAD" --stat)
 ```
 
 ### Phase 4: Determine PR Purpose
