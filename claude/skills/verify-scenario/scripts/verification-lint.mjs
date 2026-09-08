@@ -77,21 +77,31 @@ function collectHeadings(lines) {
 /**
  * `## Driving it` セクション内のエントリを切り出す。
  * 1 エントリは複数行にまたがる（Side effect: と actual/expected は継続行に置く）ため、
- * 次のエントリ開始か次の `## ` 見出しまでを 1 件として扱う。
+ * 次のエントリ開始・**空行**・次の `## ` 見出しまでを 1 件として扱う。
+ *
+ * 空行を終端にするのは、そうしないとエントリに「その後の散文」が連結されるため。
+ * 最後のエントリは次の `##` 見出しまでを飲み込むので、「注: 実行したら actual: を転記する」
+ * という注記だけで actual: 欠落の error が消えていた（`draft:` で塞いだのと同じバグクラス）。
+ *
+ * 終端の後に現れた行は `strays` に集める。黙って無検査にすると、空行で区切って書いた
+ * 2 ブロック目の `Side effect:` がテナント検査から外れる — つまり境界を導入する修正が
+ * 別の fail-open を新設してしまう。書式違反として明示的に落とすことで、どちらも塞ぐ。
  *
  * 3 つの表現を持たせるのは、判定の粒度がそれぞれ違うため:
- *   text  — 全行を連結した文字列。折り返した SQL を繋ぐ用途と、エントリのどこかに 1 つあれば
- *           よい要素（expected: / actual:）の存在検査に使う。**行境界を失っている**ので、
+ *   text  — 全行を連結した文字列。折り返した SQL を繋ぐ用途に使う。**行境界を失っている**ので、
  *           「特定の行に置く」と決めたマーカーの判定には使ってはいけない
  *   head  — エントリの 1 行目。`draft:` のようなエントリ単位のマーカー判定に使う
- *   lines — 各行の配列（1 行目を含む）。`Side effect:` 行に置くマーカーのような行単位の判定に使う
+ *   lines — 各行の配列（1 行目を含む）。行単位の判定（`Side effect:` 行のマーカー、
+ *           `expected:` / `actual:` の存在）に使う
  *
- * この 3 者の取り違えが「注記に draft: と書いただけで実行済み行が未実行扱いになり、
- * actual: 欠落の error が消える」不具合の原因だった。用途を混ぜないこと。
+ * この 3 者の取り違えが「注記に書いた語だけで判定が反転する」不具合の原因だった。
+ * 用途を混ぜないこと。**`expected:` / `actual:` も `lines` 側**であり、`text` で見てはいけない。
  */
 function collectDrivingEntries(lines, drivingLine) {
   const entries = [];
+  const strays = [];
   let current = null;
+  let closed = false;
 
   for (let index = drivingLine; index < lines.length; index += 1) {
     const line = lines[index];
@@ -105,18 +115,32 @@ function collectDrivingEntries(lines, drivingLine) {
       // lines に 1 行目を含めるのは、単一行エントリ（Side effect: がチェックボックス行にある形）が
       // 実在するため。ここで初期値を与えないとその形で行単位のマーカーが一切効かない
       current = { line: index + 1, text: line, head: line, lines: [line] };
+      closed = false;
+      continue;
+    }
+    if (line.trim() === '') {
+      if (current) {
+        entries.push(current);
+        current = null;
+        closed = true;
+      }
       continue;
     }
     if (current) {
       // SQL が改行で折り返されるため、結合して 1 行として扱う
       current.text += ` ${line.trim()}`;
       current.lines.push(line);
+      continue;
+    }
+    // エントリが閉じた後、または最初のエントリより前に現れた非空行
+    if (closed || entries.length > 0) {
+      strays.push({ line: index + 1, text: line.trim() });
     }
   }
   if (current) {
     entries.push(current);
   }
-  return entries;
+  return { entries, strays };
 }
 
 /**
@@ -132,16 +156,27 @@ function hasTenantFilter(sql) {
 
 /**
  * 各 `Side effect:` に対応する opt-out マーカーの有無を、出現順に返す。
+ *
  * entry.text（連結済み）ではなく entry.lines を走査するのは、text が行境界を失っており、
  * エントリ末尾の注記に書かれた語に反応してしまうため（draft: と同型の誤り）。
+ *
+ * さらに、行全体でマーカーを判定してはいけない。1 行に `Side effect:` が 2 本あると
+ * 1 本目に付けたマーカーが 2 本目の検査まで外す — これは verification-format.md が
+ * 「エントリ単位にすると 1 本の逃げ道が同エントリの他の SQL の検査まで外す」として
+ * 明示的に退けた失敗モードそのもので、粒度を 1 段落としただけで再現する。
+ * `Side effect:` の直前で切り、各セグメント内のマーカーだけを対応させる。
+ *
+ * マーカーは `Side effect:` の**後ろ**に書く（記入例と同じ形）。前置きしたマーカーは
+ * 先頭セグメントに落ちて効かない。正典がその位置を定めている。
  */
 function collectNoTenantFlags(entry) {
   const flags = [];
   for (const line of entry.lines) {
-    const occurrences = [...line.matchAll(SIDE_EFFECT_ANY)].length;
-    const marked = NO_TENANT_MARKER.test(line);
-    for (let index = 0; index < occurrences; index += 1) {
-      flags.push(marked);
+    for (const segment of line.split(/(?=Side effect:)/)) {
+      if (!segment.includes('Side effect:')) {
+        continue;
+      }
+      flags.push(NO_TENANT_MARKER.test(segment));
     }
   }
   return flags;
@@ -191,19 +226,26 @@ function lintEntry(findings, entry) {
   }
 
   // flags は Side effect: の全出現に対応する。SQL がバッククォートで囲まれていない行があると
-  // sqls 側が短くなり対応がずれるが、その場合は上で既に error を出しているので実害はない
+  // sqls 側が短くなって対応がずれ、マーカーが**別の SQL** に適用される。
+  // 「上で既に error を出しているので実害はない」わけではない — 利用者に見えるのは
+  // 「バッククォートで囲まれていない」という別の error だけで、それを直すまで
+  // クロステナントの SQL が免除されたまま隠れる。揃わないときは免除しない（安全側）
   const noTenantFlags = collectNoTenantFlags(entry);
+  const aligned = sqls.length === sideEffectCount;
   sqls.forEach((sql, index) => {
-    lintSql(findings, entry, sql, noTenantFlags[index] === true);
+    lintSql(findings, entry, sql, aligned && noTenantFlags[index] === true);
   });
 
-  if (!/expected\s*:/.test(entry.text)) {
+  // entry.text ではなく lines で見る。text は行境界を失っており、最後のエントリには
+  // 次の `##` 見出しまでの散文が連結されるため、「注: 実行したら actual: を転記する」
+  // のような注記だけで検査が満たされてしまう（draft: と同型のバグクラス）
+  if (!entry.lines.some((line) => /expected\s*:/.test(line))) {
     findings.error(entry.line, 'Driving 行に expected: が無い（期待値の無い行は 3 工程のどこでも判定に使えない）');
   }
 
   // 未実行の行は actual を測っていないのが正常。draft: を外した行に actual が無い場合は
   // 「実行したつもりで測っていない」状態なので error にする
-  if (!isDraft && !/actual\s*:/.test(entry.text)) {
+  if (!isDraft && !entry.lines.some((line) => /actual\s*:/.test(line))) {
     findings.error(entry.line, 'draft: の無い Driving 行に actual: が無い（実行済みなら実測値を転記する）');
   }
 
@@ -304,10 +346,20 @@ function lintFile(file) {
     return findings;
   }
 
-  const entries = collectDrivingEntries(lines, drivingLine);
+  const { entries, strays } = collectDrivingEntries(lines, drivingLine);
   if (entries.length === 0) {
     findings.error(drivingLine, '`## Driving it` に Driving 行が 1 行も無い');
     return findings;
+  }
+
+  // エントリの外に置かれた行は書式違反として落とす。黙って無視すると、空行で区切って
+  // 書いた 2 ブロック目の Side effect: がテナント検査から外れ、エントリ境界を導入した
+  // 修正が別の fail-open を作ってしまう
+  for (const stray of strays) {
+    findings.error(
+      stray.line,
+      `\`## Driving it\` 内にエントリへ属さない行がある（注記は Gotchas へ移し、1 エントリを空行で分割しない）: \`${stray.text.slice(0, 60)}\``,
+    );
   }
 
   let draftCount = 0;

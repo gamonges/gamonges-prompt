@@ -28,6 +28,8 @@ Claude Code で使用する Skills、SubAgents のコレクション。すべて
 
 構造的検証は `./claude/scripts/verify-skills.sh`（fail があれば exit 1、warn のみなら exit 0。check 4 が scripts の同期・orphan・install 元を、check 5 が listing budget を見る）。
 
+**ガードレールの挙動検証は `bash claude/scripts/tests/test-guardrails.sh`（`claude/scripts/` を編集したら実行する）。** 対象はいずれも fail-open 型（ガードが黙って開く / error が黙って消える）で、壊れても何も起きないため通常の動作確認では検知できない。CI が無い本リポジトリでは、このテストが回帰を捉える唯一の手段になる。`./claude/scripts/verify-skills.sh --with-behavior-tests` からも呼べる。
+
 ### settings.json のリポジトリ管理
 
 `~/.claude/settings.json` は repo 内 `claude/settings.json` への symlink として管理する。Git 履歴で変更追跡 + `git restore` でロールバック可能。`./setup.sh install` が冪等に symlink を再構築する。

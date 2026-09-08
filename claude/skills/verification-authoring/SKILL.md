@@ -66,7 +66,9 @@ openspec の archive は `specs/<capability>/spec.md` のみをマージ対象�
 | 未コミットの変更 | 作業中の verification.md は「古い」と判定されるため、dirty ならスキップする設計にしてある（commit 前に lint を回す運用での偽陽性を避けるため） |
 | **spec.md を直さず実装だけ変えた** | 比較対象が 2 つのファイルの時刻しか無いため、コードの変更は観測できない |
 
-この 2 つは運用で埋まらない。追従が仕組みではなく手順である以上、**skill が起動されなければ追従しない**ことを弱点として引き受ける。恒久解は archive 処理そのものへ組み込むことだけで、それは対象リポジトリ側の skill を編集できる段階（チーム展開時）の作業になる。
+この 2 つは運用で埋まらない。追従が仕組みではなく手順である以上、**skill が起動されなければ追従しない**ことを弱点として引き受ける。
+
+ただし「spec を変えたのに verification.md を直さない」経路のうち、`/spec-archive` を通るものは仕組みで塞いである。archive 処理は upstream の CLI ではなく本リポジトリが所有する `spec-archive` skill が実装しているため、そのフェーズ 2 に「MODIFIED / REMOVED / RENAMED を適用した Requirement の Driving 行に `draft:` を戻す」を組み込んだ。残る穴は archive を通らない変更（直接 `specs/` を編集する等）に限られる。
 
 ## PUBLIC リポジトリの制約
 
