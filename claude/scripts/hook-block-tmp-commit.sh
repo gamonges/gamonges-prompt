@@ -23,10 +23,22 @@ if [[ -z "$COMMAND" ]]; then
   exit 0
 fi
 
+# パターン照合はすべてここを通す。grep -q / head -1 のように読み手が早期終了すると、
+# 書き手（echo）がまだ書いている途中なら SIGPIPE で死んで 141 を返し、set -o pipefail (:L12)
+# がパイプライン全体を 141 にする。マッチしているのに if が偽になり、ガードが黙って開く。
+# 実測では改行を含む 120 KB の COMMAND で tmp/ の git add が素通しした（パイプバッファは 64 KB）。
+#
+# 「echo は builtin だから SIGPIPE を受けない」は成立しない。bash はパイプラインの builtin も
+# サブシェルとして fork するため、外部コマンドと同じく死ぬ。
+# grep -c は入力を読み切るので SIGPIPE が起きず、|| true で「マッチ 0 件 = exit 1」も吸収する
+matches() {  # $1=入力, $2=拡張正規表現
+  [[ "$(printf '%s\n' "$1" | grep -cE "$2" || true)" -gt 0 ]]
+}
+
 # (1) wrapper コマンド かつ git add を含む → ask 昇格 (内部に隠れた git add を人間判断に委ねる)
 #     git add を運ばない探索系 wrapper (find | xargs grep 等) は次の段へ素通し
-if echo "$COMMAND" | grep -qE '(^|[[:space:]]|;|&&|\|\|)[[:space:]]*(bash[[:space:]]+-c|eval[[:space:]]|xargs[[:space:]])' \
-   && echo "$COMMAND" | grep -qE 'git[[:space:]]+add'; then
+if matches "$COMMAND" '(^|[[:space:]]|;|&&|\|\|)[[:space:]]*(bash[[:space:]]+-c|eval[[:space:]]|xargs[[:space:]])' \
+   && matches "$COMMAND" 'git[[:space:]]+add'; then
   cat <<EOF
 {
   "hookSpecificOutput": {
@@ -40,12 +52,15 @@ EOF
 fi
 
 # (2) 直接 git add コマンドかどうか確認 (コマンド境界考慮: 先頭 or `;` `&&` `||` `|` の後)
-if ! echo "$COMMAND" | grep -qE '(^|[;&|]|&&|\|\|)[[:space:]]*git[[:space:]]+add([[:space:]]|$)'; then
+if ! matches "$COMMAND" '(^|[;&|]|&&|\|\|)[[:space:]]*git[[:space:]]+add([[:space:]]|$)'; then
   exit 0
 fi
 
 # git add の引数部分を取り出す (`&&` / `;` / `|` 境界で打ち切り、前後にスペースを付けて引数境界を統一)
-ARGS=$(echo "$COMMAND" | grep -oE '(^|[;&|]|&&|\|\|)[[:space:]]*git[[:space:]]+add[^;&|]*' | head -1)
+# head -1 を挟まず bash 側で先頭行を取る。head は最初の改行で早期終了するため、マッチが複数あると
+# 書き手が SIGPIPE で死に、代入が 141 で失敗して set -e がスクリプトごと落とす（= ガードが開く）
+ARGS=$(echo "$COMMAND" | grep -oE '(^|[;&|]|&&|\|\|)[[:space:]]*git[[:space:]]+add[^;&|]*' || true)
+ARGS="${ARGS%%$'\n'*}"
 ARGS=" $(echo "$ARGS" | sed -E 's/^.*git[[:space:]]+add[[:space:]]*//') "
 
 # 以下のいずれかに該当すれば block:
@@ -54,13 +69,13 @@ ARGS=" $(echo "$ARGS" | sed -E 's/^.*git[[:space:]]+add[[:space:]]*//') "
 #   - 引数に単独の -A (全変更追加)
 #   - 引数に単独の --all
 block=0
-if echo "$ARGS" | grep -qE '(^|[[:space:]])tmp/' && ! echo "$ARGS" | grep -qE ':!tmp/'; then
+if matches "$ARGS" '(^|[[:space:]])tmp/' && ! matches "$ARGS" ':!tmp/'; then
   block=1
-elif echo "$ARGS" | grep -qE '[[:space:]]\.[[:space:]]'; then
+elif matches "$ARGS" '[[:space:]]\.[[:space:]]'; then
   block=1
-elif echo "$ARGS" | grep -qE '[[:space:]]-A[[:space:]]'; then
+elif matches "$ARGS" '[[:space:]]-A[[:space:]]'; then
   block=1
-elif echo "$ARGS" | grep -qE '[[:space:]]--all[[:space:]]'; then
+elif matches "$ARGS" '[[:space:]]--all[[:space:]]'; then
   block=1
 fi
 

@@ -7,6 +7,8 @@ description: PR・実装変更から統合テストのシナリオ手順書を�
 
 `$ARGUMENTS` で検証対象の変更内容（PR の説明・diff の要約・自由記述）を指定できる。省略時は現在のブランチの `git diff <デフォルトブランチ>...HEAD` を変更内容として使用する。
 
+変更した capability に `openspec/specs/<capability>/verification.md` が存在する場合は、それを一次資料として読む（下記「verification.md の引き継ぎ」）。
+
 ## ワークフロー上の位置付け
 
 | 前工程 | 本コマンド | 後工程 |
@@ -18,6 +20,22 @@ description: PR・実装変更から統合テストのシナリオ手順書を�
 - `$ARGUMENTS`（省略時 `git diff <デフォルトブランチ>...HEAD`）
 - 対象アプリケーションの dev 環境が起動していること（フェーズ 3 の疎通確認で検出する）
 - playwright-cli が利用可能であること（`claude/skills/playwright-cli/SKILL.md` 参照）
+
+## verification.md の引き継ぎ（存在する場合）
+
+① 実装直後の検証（`verify-scenario`）で使った Driving 行は、② の観点をゼロから起こす代わりの素材になる。書式の正典は `claude/skills/verify-scenario/reference/verification-format.md`。
+
+| verification.md | 本 skill の出力（`./reference/scenario-template.md`） |
+|---|---|
+| `Driving it` の各行 | ① 観点一覧の 1 観点 |
+| `How to get to it` | ③ 各経路の UI 操作手順 |
+| `Side effect:` | 判定の裏取り（network 実測に加えて DB の読み戻し） |
+| ① の判定 `<確度> / <合否>` | **確度はそのまま引き継ぐ**（同じ 4 区分を共有）。合否は ② で取り直す |
+| 確度が `—` の行（`— / blocked` / `— / draft`） | **引き継がない** — 確認そのものが成立しておらず、観点にもならない |
+
+確度を引き継げるのは、`claude/skills/integration-test-run/reference/report-template.md` の「実機live」の証拠に `Side effect:` SQL の読み戻しが含まれているため。証拠の定義が揃っていない状態で引き継ぐと「実機live と書いてあるのに network ログが無い」という不整合が出る。
+
+**フェーズ 3 の疎通確認は省略しない。** verification.md があっても、そこに書かれた ID やデータがこの環境に存在する保証は無い。
 
 ## 実行プロセス
 

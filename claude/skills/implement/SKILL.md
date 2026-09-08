@@ -97,6 +97,8 @@ skill 詳細は同ディレクトリの `reference/*.md` に分離してある�
 - typecheck は自動実行しない（L-2）。ユーザーに手動実行を促すか CI に委ねる
 - ドメイン層・複雑ロジックの追加箇所は新規テストが緑になることを確認し、必要に応じて回帰テストも走らせる
 - plan.md の確信度サマリまたはステップ詳細で実機検証（staging 環境実行・EXPLAIN・実データ抽出等）が明記されている場合、`/review` に出す前に本ステップで実施する
+- **変更した capability に `openspec/specs/<capability>/verification.md` が存在する場合、`verify-scenario` skill で実行する**（openspec を持たないリポジトリ、および verification.md を持たない変更では発火させない — 無条件に走らせると Phase 4 の所要時間が理由なく伸びる）
+- 実行後に `draft:` が残る Driving 行がある場合、Phase 7 の完了報告で**未検証として件数を明示する**（未実行の行は成果物ではないため、「検証済み」と書かない）
 - 受入基準が満たされていることを確認する
 
 ### Phase 5: コメントの整理
@@ -144,4 +146,5 @@ UI 変更がある場合は Phase 6.1 のチェック項目に「WCAG 2.1 AA 準
 - TDD チェックポイント実施記録（ユーザー確認回数、再作成回数）
 - 品質確認結果（lint / format / typecheck / test の各チェックリスト）
 - レビューで発見・修正した主な問題
+- verification.md の実行結果（該当時）: 実行した Driving 行数と、`draft:` が残る未検証行の件数
 - 残存課題（あれば）
