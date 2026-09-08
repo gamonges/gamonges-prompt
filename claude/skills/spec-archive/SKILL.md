@@ -64,6 +64,10 @@ changes/ の変更提案を specs/ にマージし archive/ に移動する（�
 - [ ] **RENAMED**: 対象 Requirement のセクション名を変更する
   - 対象 Requirement が specs/ に存在しない場合はエラーとして報告する
 - [ ] `openspec/specs/{domain}/spec.md` の先頭に `最終更新: YYYY-MM-DD` を更新する
+- [ ] **MODIFIED / REMOVED / RENAMED を適用した Requirement について、同 domain の `verification.md` の該当 Driving 行に `draft:` を戻す**（存在する場合）
+  - 仕様が変わった行は「一度も実行していない」状態に戻ったので、検証済みとして扱わない
+  - `verification.md` が無い domain では何もしない
+  - 対応する Driving 行が判別できない場合は、その旨をユーザーに報告する（機械的に判断せず人に委ねる）
 
 ### フェーズ 3: アーカイブと整理
 

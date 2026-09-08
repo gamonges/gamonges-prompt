@@ -10,15 +10,37 @@
 # 3. 各 ~/.claude/skills/<name> が本リポを指す symlink であること
 # 4. claude/scripts/ と ~/.claude/scripts/ の同期状態 (実体コピー方式のため。warn 止まり)
 # 5. skill listing の description 総文字数 (budget 監視。warn 止まり)
+# 6. settings.json に登録された hook の実体が存在すること
+# 7. ガードレール系 hook が grep -q へ直接パイプしていないこと (SIGPIPE + pipefail の fail-open)
 #
 # 依存: check 5 のみ python3 を使う。利用できない場合は check 5 をスキップして続行する。
 #
 # 終了コード: fail が 1 件でもあれば 1、それ以外は 0 (warn があっても 0)
 #
 # 使い方:
-#   ./claude/scripts/verify-skills.sh
+#   ./claude/scripts/verify-skills.sh                        構造検証のみ
+#   ./claude/scripts/verify-skills.sh --with-behavior-tests   挙動テストも実行する
 #
+# 挙動テスト (tests/test-guardrails.sh) を既定で走らせないのは、fixture 生成に数秒かかり
+# 構造検証の即応性を損なうため。ただし fail-open は挙動テストしか捉えられないので、
+# claude/scripts/ を編集したときはフラグ付きで実行する。
 set -euo pipefail
+
+WITH_BEHAVIOR_TESTS=0
+for arg in "$@"; do
+    case "$arg" in
+        --with-behavior-tests) WITH_BEHAVIOR_TESTS=1 ;;
+        -h|--help)
+            sed -n '/^# 使い方:/,/^#$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+            exit 0
+            ;;
+        *)
+            echo "verify-skills.sh: 不明な引数: $arg" >&2
+            echo "  使える引数: --with-behavior-tests / --help" >&2
+            exit 2
+            ;;
+    esac
+done
 
 # 自スクリプトの所在から派生させる。$0 と ${BASH_SOURCE[0]} を混在させず 1 箇所で算出する
 REPO_CLAUDE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -370,6 +392,44 @@ check_glob_pair "hook-check-scripts-sync.sh" "$(cat "$REPO_CLAUDE/scripts/hook-c
 check_glob_pair "verify-skills.sh (check 4)" "$(cat "$REPO_CLAUDE/scripts/verify-skills.sh")"
 check_glob_pair "setup.sh:install_scripts()" "$(sed -n '/^install_scripts()/,/^}/p' "$REPO_ROOT/setup.sh")"
 check_glob_pair "setup.sh:show_status()"     "$(sed -n '/^show_status()/,/^}/p' "$REPO_ROOT/setup.sh")"
+
+# --- check 7: ガードレール系 hook の grep -q パイプ ---
+# grep -q は最初のマッチで終了するため、書き手 (git / echo) がまだ書いている途中なら
+# SIGPIPE で死んで 141 を返し、set -o pipefail がパイプライン全体を 141 にする。
+# マッチしているのに if が偽になり、ガードが黙って開く (実測: 入力が 64 KB を超えた時点)。
+#
+# 対象を 2 本に絞るのは、repo 全体では 31 箇所あり全件を warn にするとノイズになるため。
+# この 2 本は matches() ヘルパーへ移行済みで該当 0 件なので、増えたときだけ警告が出る。
+# 残る hook は matches() 化してから対象に加える。
+#
+# コメント行は除く。matches() の由来を説明するコメントに「printf | grep -q では塞がらない」
+# という記述が入るため、除かないと原理を説明した行そのものが warn になる。
+echo -e "${BLUE}== check 7: ガードレール hook の grep -q パイプ ==${NC}"
+grep_q_guarded=0
+for hook_name in hook-block-local-contract-link.sh hook-block-tmp-commit.sh; do
+    hook_path="${REPO_CLAUDE}/scripts/${hook_name}"
+    [ -f "$hook_path" ] || continue
+    hits=$(grep -v '^[[:space:]]*#' "$hook_path" | grep -cE '\|[[:space:]]*grep -[a-zA-Z]*q' || true)
+    if [ "${hits:-0}" -gt 0 ]; then
+        warn "$hook_name に grep -q へのパイプが ${hits} 件ある（SIGPIPE + pipefail で fail-open する。matches() を使う）"
+        grep_q_guarded=$((grep_q_guarded + hits))
+    fi
+done
+if [ "$grep_q_guarded" -eq 0 ]; then
+    pass "ガードレール hook に grep -q への直接パイプはありません"
+fi
+
+# --- 挙動テスト (任意) ---
+# 構造検証では捉えられない fail-open を捕まえる唯一の手段。既定では走らせない (数秒かかる)
+if [ "$WITH_BEHAVIOR_TESTS" -eq 1 ]; then
+    echo ""
+    echo -e "${BLUE}== 挙動テスト: tests/test-guardrails.sh ==${NC}"
+    if bash "${REPO_CLAUDE}/scripts/tests/test-guardrails.sh"; then
+        pass "挙動テストがすべて通りました"
+    else
+        fail "挙動テストに失敗があります (上記の [FAIL] を参照)"
+    fi
+fi
 
 echo ""
 if [ "$fail_count" -gt 0 ]; then
