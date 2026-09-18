@@ -169,6 +169,19 @@ diff_stats=$(git diff "origin/${base_branch}...HEAD" --stat)
 
 複数該当する場合は、主要な目的を選択します。
 
+#### `tmp/` の確定事項との照合
+
+`./tmp/grill.md` / `./tmp/scenario.md` に照合対象がある場合（`./tmp/scenario.md` が `## 判定: シナリオ不要` だけなら照合対象は無い）、diff がそれらの「確定事項」と食い違っていないかを照合します。食い違いがあれば:
+
+1. `tmp/` 側を更新する（ローカルのみ。コミットしない）
+2. **PR 本文の『grill 決定からの変更』欄に記載する**（欄の定義は `./reference/pr-description-template.md`）
+
+`tmp/` は共有されないため、決定を変えたことを他者が知る経路は PR 本文だけになります。
+
+#### マージ後 TODO の転記
+
+`./tmp/plan.md` に**マージ後に実施するフォローアップ**がある場合、PR 本文の `## マージ後 TODO` へ転記します。転記対象は「マージ後の実施が必要」または「他者への依頼を含む」もの。`./tmp/plan.md` はコミットされないため、**転記されて初めてマージ後に残ります**。
+
 ### Phase 5: Generate PR Description
 
 `.github/PULL_REQUEST_TEMPLATE.md`のフォーマットに従って PR 本文を生成します。
@@ -179,6 +192,7 @@ PR 本文の構成と Notion Page ID の挿入位置は `./reference/pr-descript
 
 - 目的（複数該当する場合はすべてチェック）
 - 変更点の概要（コミットメッセージと変更ファイルから生成）
+- Phase 4 で検出した『grill 決定からの変更』と `## マージ後 TODO`（該当時のみ）
 - Notion Page IDが指定されていた場合、関連リンクにも記載する
 
 関連リンクは手動で追加する必要があることをユーザーに通知します。
