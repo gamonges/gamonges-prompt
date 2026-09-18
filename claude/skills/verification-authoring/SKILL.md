@@ -38,10 +38,11 @@ disable-model-invocation: true
    - 観測可能な結果 = Scenario に書かれた期待値
    - `Side effect:` = 対応する読み戻し SQL
 
-   出口が `THEN` / `AND` に分かれた Scenario は業務シナリオ由来（`claude/skills/grill/reference/business-scenario.md` の書式を `/spec-propose` が出口ごとの `AND` として昇格させたもの）。エントリ数が増えるだけで **3 点セットの枠内に収まる**ため、書式の正典と lint は無変更のまま足りる。
+   出口が `THEN` / `AND` に分かれた Scenario は業務シナリオ由来（`../grill/reference/business-scenario.md` の書式を `/spec-propose` が出口ごとの `AND` として昇格させたもの。**出口と期待値の対応を確認する必要があれば、この時点で正典の「記述書式」節を読む**）。エントリ数が増えるだけで **3 点セットの枠内に収まる**ため、書式の正典と lint は無変更のまま足りる。
 3. **WHEN と `How to get to it` の扱いは Scenario によって分かれる**:
    - **画面名を含まない Scenario**（既存の大多数）→ 従来どおり**手書きに残す**（自動生成しない）。spec の WHEN は「どの操作をしたか」を抽象化していることが多く、実際のユーザー経路（画面名・URL）は spec からは導けない
-   - **画面名を含む Scenario**（業務シナリオ由来）→ `How to get to it` を**下書きしてよい**。経路が spec に書かれているため、上の「導けない」理由が当たらない
+   - **画面名を含む Scenario**（業務シナリオ由来）→ `How to get to it` を**下書きしてよい**。経路が spec に書かれているため、上の「導けない」理由が当たらない。
+     **元の WHEN（業務シナリオの「操作」）は捨てない** — 手順 2 で `Driving it` の操作を「出口画面を開く」に置き換えるため、WHEN が指す操作は**その前に実行しておく前提**にあたる。`Preconditions` に「〈WHEN の操作〉が完了していること」として残す（出口を開くだけでは、何の結果を見ているのかが verification.md から読めなくなる）
 4. ユーザー経路に露出しない Scenario は verification.md から除外する。除外の判断は人に促す（内部イベントや backfill は ① の対象外）
 5. **生成した行にはすべて `draft:` を付ける** — 一度も実行していないので成果物ではない
 
