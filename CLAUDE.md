@@ -78,19 +78,19 @@ export OTEL_EXPORTER_OTLP_HEADERS="DD-API-KEY=$CLAUDE_CODE_TELEMETRY_DD_API_KEY"
 
 ## 主要ワークフロー（Skills）
 
-Skills は開発ワークフローの各ステップを担う。**下図の矢印は手順の順序であり、自動で流れるパイプラインではない** — 各ステップは `/<skill-name>` で明示的に呼び出す:
+Skills は開発ワークフローの各ステップを担う。**下図の矢印は手順の順序であり、自動で流れるパイプラインではない** — 各ステップは `/<skill-name>` で明示的に呼び出す。`/grill` が Phase 0 で業務シナリオ（`tmp/scenario.md`）を確立し、`/design` フェーズ 1.2 はそれが無かった場合のフォールバックとして働く:
 
 ### 簡易フロー（新規仕様の追加）
 
 ```
-/ask → /design → /spec-check → /review-plan ⇄ /revise → /implement
+/ask → /grill → /design → /spec-check → /review-plan ⇄ /revise → /implement
   → /review → /fix → /implement fix-plan → /spec-archive → /create-pr
 ```
 
 ### 完全フロー（既存仕様の修正）
 
 ```
-/ask → /design → /spec-check → /review-plan ⇄ /revise → /implement
+/ask → /grill → /design → /spec-check → /review-plan ⇄ /revise → /implement
   → /review → /fix → /implement fix-plan → /spec-propose → (レビュー) → /spec-archive {change-name} → /create-pr
 ```
 
@@ -111,6 +111,7 @@ Skills は開発ワークフローの各ステップを担う。**下図の矢�
 - レビュー指摘・コード参照は `file_path:L{number}` 形式
 - ソースコードを変更しない skill は、出力先を skill 本文に明記する（例: `./tmp/research.md`）
 - 成果物を人が読む形にする場合、完了報告に続けて **Artifact 化を提案する（既定）**。提案は**完了報告時に 1 回だけ**行い、同一実行内で再提案しない。実行時は `artifact-design` skill に従い、`html-view` の reference は参照しない（設計指針を二重管理しないため）。ローカルに閉じたい場合のみ `/html-view <file>` を案内する
+  - **例外: `grill`** — 進行中の全体感を共有することが目的のため、**Phase 0 の完了時に 1 回提案し、以後は決定が入るたびに同一 URL へ再 publish する**（提案は 1 回で、再 publish は提案ではない）。Phase 0 完了時点の表示対象は `tmp/scenario.md` の業務シナリオで、`tmp/grill.md` の 4 ブロックは以後の手順で埋まる
 
 > skill / subagent を書くときのプロンプト規約（Claude 5 向けの変換ルール T1–T8、維持リスト K、起動制御フィールドの選び方、追加手順）は `claude/skills/skill-authoring/SKILL.md` に集約している。
 
