@@ -27,6 +27,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 HOOK="$REPO_ROOT/claude/scripts/hook-block-local-contract-link.sh"
 TMP_HOOK="$REPO_ROOT/claude/scripts/hook-block-tmp-commit.sh"
 LINT="$REPO_ROOT/claude/skills/verify-scenario/scripts/verification-lint.mjs"
+ORPHAN="$REPO_ROOT/claude/skills/worktree-cleanup/scripts/find-orphan-collections.mjs"
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -38,7 +39,7 @@ fail_count=0
 pass() { echo -e "${GREEN}[PASS]${NC} $1"; pass_count=$((pass_count + 1)); }
 fail() { echo -e "${RED}[FAIL]${NC} $1"; fail_count=$((fail_count + 1)); }
 
-for required in "$HOOK" "$TMP_HOOK" "$LINT"; do
+for required in "$HOOK" "$TMP_HOOK" "$LINT" "$ORPHAN"; do
     if [[ ! -f "$required" ]]; then
         echo "test-guardrails.sh: 検査対象が見つからない: $required" >&2
         exit 2
@@ -46,7 +47,18 @@ for required in "$HOOK" "$TMP_HOOK" "$LINT"; do
 done
 
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+# trap … EXIT は追加ではなく置き換えなので、後始末は 1 つの関数にまとめる。
+# 別々に張ると、一時ディレクトリの削除か Milvus スタブの kill のどちらかが黙って消える
+STUB_PID=""
+cleanup() {
+    if [[ -n "$STUB_PID" ]]; then
+        kill "$STUB_PID" 2>/dev/null
+    fi
+    # W-17 が権限を落としたディレクトリが残っていると rm -rf が黙って失敗する
+    chmod -R u+rwx "$WORK" 2>/dev/null
+    rm -rf "$WORK"
+}
+trap cleanup EXIT
 
 # fixture の git は利用者の設定に依存させない（署名要求やテンプレートで落ちないように）
 git_init() {
@@ -910,6 +922,301 @@ rm -f "$h7/frontend/pnpm-workspace.yaml"
 h7_out="$(run_contract_sh "$LINK_SH" "$h7" "PNPM_MODEL=nothing")"
 assert_contains "H-7 保護対象が 1 つも tracked でないとき第一ガードを張れないと警告する" \
     "$h7_out" "第一ガードを張れなかった"
+
+# =====================================================================
+# find-orphan-collections.mjs の挙動テスト（W-1〜W-16）
+# =====================================================================
+# 孤児判定が黙って開くと、生きている collection を drop する事故になる（非可逆）。
+# Milvus は node のスタブで置き換える。スタブは 1 回だけ起動し、要求ごとに fixture JSON を
+# 読み直すので、ケースの切り替えは fixture の書き換えで行う（起動待ちと後始末を 1 回に抑える）
+
+# collection 名のハッシュは実装と同じ式で算出する。ハードコードすると $WORK の
+# /var と /private/var の差で壊れるため、パスは pwd -P で実体化してから渡す
+md5_8() {
+    node -e 'const c=require("node:crypto"),p=require("node:path");process.stdout.write(c.createHash("md5").update(p.resolve(process.argv[1])).digest("hex").slice(0,8))' "$1"
+}
+
+w="$(cd "$WORK" && pwd -P)/orphan"
+mkdir -p "$w/live-dir" "$w/live-snap" "$w/home"
+
+cat > "$w/milvus-stub.mjs" <<'EOF'
+import { createServer } from 'node:http';
+import { appendFileSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+
+const [fixturePath, dropLog, portFile] = process.argv.slice(2);
+
+const server = createServer((req, res) => {
+  let body = '';
+  req.on('data', (chunk) => { body += chunk; });
+  req.on('end', () => {
+    const fx = JSON.parse(readFileSync(fixturePath, 'utf8'));
+    const name = body ? JSON.parse(body).collectionName : undefined;
+    const col = fx.collections[name];
+    const op = req.url.replace(/^\/v2\/vectordb\/collections\//, '');
+    let out;
+    if (op === 'list') {
+      out = fx.listCode === 0
+        ? { code: 0, data: Object.keys(fx.collections) }
+        : { code: fx.listCode, message: 'stub list error' };
+    } else if (op === 'drop') {
+      appendFileSync(dropLog, `${name}\n`);
+      out = { code: 0, data: {} };
+    } else if (!col) {
+      out = { code: 100, message: 'collection not found' };
+    } else if (op === 'describe' && col.hangup) {
+      // list の後に Milvus が落ちた状況の再現
+      req.socket.destroy();
+      return;
+    } else if (op === 'describe') {
+      out = col.describeCode
+        ? { code: col.describeCode, message: 'stub describe error' }
+        : { code: 0, data: { collectionName: name, description: col.description } };
+    } else if (op === 'get_stats') {
+      out = { code: 0, data: { rowCount: col.rowCount } };
+    } else {
+      out = { code: 404, message: `unknown op: ${op}` };
+    }
+    // 実 Milvus と同じく、エラーも HTTP 200 のまま body の code で返す
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(out));
+  });
+});
+
+server.listen(0, '127.0.0.1', () => {
+  writeFileSync(`${portFile}.tmp`, String(server.address().port));
+  renameSync(`${portFile}.tmp`, portFile);
+});
+EOF
+
+W_FIXTURE="$w/fixture.json"
+W_DROPS="$w/drops.log"
+W_SNAPSHOT="$w/snapshot.json"
+
+w_n1="hybrid_code_chunks_$(md5_8 "$w/gone-dir")"      # description あり・元パス無し → orphan
+w_n2="code_chunks_$(md5_8 "$w/live-dir")"             # description あり・元パス有り → live
+w_n3="hybrid_code_chunks_$(md5_8 "$w/live-snap")"     # description 無し・snapshot で live
+w_n4="hybrid_code_chunks_$(md5_8 "$w/gone-snap")"     # description 無し・snapshot で orphan
+w_n5="hybrid_code_chunks_$(md5_8 "$w/gone-nosnap")"   # description 無し・snapshot にも無い
+w_n6="hybrid_code_chunks_$(md5_8 "$w/describe-fail")" # describe が code≠0
+w_n7="hybrid_code_chunks_$(md5_8 "$w/other-path")"    # description の元パスとハッシュが不一致
+w_n8="some_other_collection"                          # 対象外の接頭辞
+
+write_w_fixture() {  # $1=list の code
+    jq -n --argjson lc "$1" \
+        --arg n1 "$w_n1" --arg n2 "$w_n2" --arg n3 "$w_n3" --arg n4 "$w_n4" \
+        --arg n5 "$w_n5" --arg n6 "$w_n6" --arg n7 "$w_n7" --arg n8 "$w_n8" \
+        --arg w "$w" '{
+            listCode: $lc,
+            collections: {
+                ($n1): {description: ("codebasePath:" + $w + "/gone-dir"), rowCount: 12},
+                ($n2): {description: ("codebasePath:" + $w + "/live-dir"), rowCount: 5},
+                ($n3): {description: "", rowCount: 7},
+                ($n4): {description: "", rowCount: 9},
+                ($n5): {description: "", rowCount: 3},
+                ($n6): {describeCode: 1100, rowCount: 1},
+                ($n7): {description: ("codebasePath:" + $w + "/gone-dir7"), rowCount: 4},
+                ($n8): {description: ("codebasePath:" + $w + "/gone-dir"), rowCount: 2}
+            }
+        }' > "$W_FIXTURE"
+}
+write_w_fixture 0
+
+jq -n --arg w "$w" '{
+    formatVersion: "v2",
+    codebases: {
+        ($w + "/live-snap"): {status: "indexed"},
+        ($w + "/gone-snap"): {status: "indexed"}
+    }
+}' > "$W_SNAPSHOT"
+
+node "$w/milvus-stub.mjs" "$W_FIXTURE" "$W_DROPS" "$w/port" >/dev/null 2>&1 &
+STUB_PID=$!
+# job から外す。外さないと trap での kill 時に「Terminated: 15」がテスト出力へ混ざる
+disown "$STUB_PID"
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+    [[ -s "$w/port" ]] && break
+    sleep 0.2
+done
+if [[ -s "$w/port" ]]; then
+    W_STUB="127.0.0.1:$(cat "$w/port")"
+else
+    fail "W-0 Milvus スタブが 2 秒以内に起動しない（以降の W ケースは接続できずに FAIL する）"
+    W_STUB="127.0.0.1:1"
+fi
+# 何も listen していないポート。1 番は特権ポートで、通常の環境では接続拒否になる
+W_CLOSED="127.0.0.1:1"
+
+# node の実体は HOME を差し替える前に解決しておく。mise 等のバージョン管理の shim は
+# HOME 配下の設定を読むため、差し替えた HOME で起動すると node 自体が立ち上がらない
+NODE_BIN="$(node -e 'process.stdout.write(process.execPath)')"
+
+# 利用者の実設定（~/.claude.json・~/.context/.env・シェルの MILVUS_*）を読ませない。
+# stdout だけを JSON として返し、stderr は捨てずにファイルへ残す（失敗時の手がかり）
+run_orphan() {  # $1=HOME, $2=MILVUS_ADDRESS（空なら未設定）, 以降 script の引数
+    local home="$1" addr="$2"; shift 2
+    if [[ -n "$addr" ]]; then
+        env -u MILVUS_TOKEN HOME="$home" MILVUS_ADDRESS="$addr" "$NODE_BIN" "$ORPHAN" "$@" 2>"$w/stderr"
+    else
+        env -u MILVUS_TOKEN -u MILVUS_ADDRESS HOME="$home" "$NODE_BIN" "$ORPHAN" "$@" 2>"$w/stderr"
+    fi
+    echo "$?" > "$RC_FILE"
+}
+
+# 終了コードと JSON の形を先に固定する。否定形の期待（「orphans に入らない」等）は、
+# script が存在せず何も出力しなくても成立してしまうため、前提が崩れたら中身を見ずに FAIL にする
+w_check_rc() {  # $1=期待する exit code。一致しなければ理由を出して 1 を返す
+    local rc
+    rc=$(cat "$RC_FILE" 2>/dev/null || echo "?")
+    if [[ "$rc" == "$1" ]]; then
+        return 0
+    fi
+    echo "       exit code: 期待 $1 / 実際 ${rc}（stderr: $(head -c 300 "$w/stderr" 2>/dev/null)）" >&2
+    return 1
+}
+
+assert_orphan() {  # $1=ラベル, $2=stdout, $3=期待する exit code, $4=必須のトップレベルキー, $5=jq 式, 以降 jq の引数
+    local label="$1" out="$2" rc="$3" key="$4" expr="$5"; shift 5
+    if ! w_check_rc "$rc"; then
+        fail "$label"; return
+    fi
+    if ! jq -e --arg k "$key" 'has($k)' <<<"$out" >/dev/null 2>&1; then
+        fail "$label"
+        echo "       stdout が JSON でないか、キー $key が無い: ${out:-（出力なし）}" >&2
+        return
+    fi
+    if jq -e "$@" "$expr" <<<"$out" >/dev/null 2>&1; then
+        pass "$label"
+    else
+        fail "$label"
+        echo "       条件 $expr を満たさない: $out" >&2
+    fi
+}
+
+# 異常終了時は stdout に orphans を出さない（「孤児 0 件」と区別できなくなるため）。
+# exit 1 は node 自体のクラッシュ（script 不在の Cannot find module 等）とも一致するので、
+# その場合は stderr に原因が出ていることまで見ないと偽陽性になる
+assert_orphan_aborted() {  # $1=ラベル, $2=stdout, $3=期待する exit code, $4=stderr に期待する部分文字列（省略可）
+    if ! w_check_rc "$3"; then
+        fail "$1"; return
+    fi
+    if [[ "$2" == *'"orphans"'* ]]; then
+        fail "$1"
+        echo "       異常終了なのに stdout に orphans がある: $2" >&2
+    elif [[ -n "${4:-}" ]] && [[ "$(cat "$w/stderr" 2>/dev/null)" != *"$4"* ]]; then
+        fail "$1"
+        echo "       stderr に「$4」が無い: $(head -c 300 "$w/stderr" 2>/dev/null)" >&2
+    else
+        pass "$1"
+    fi
+}
+
+in_orphans='any(.orphans[]; .name == $n)'
+in_unknown='any(.unknown[]; .name == $n)'
+
+# --- W-1〜W-8: list モードの分類 ---
+w_out="$(run_orphan "$w/home" "$W_STUB" --snapshot "$W_SNAPSHOT")"
+assert_orphan "W-1 元パスが無い collection は orphans に入り、行数が付く" \
+    "$w_out" 0 orphans "any(.orphans[]; .name == \$n and .rowCount == 12 and .pathSource == \"description\")" --arg n "$w_n1"
+assert_orphan "W-2 元パスが有る collection は orphans にも unknown にも入らず live に数える" \
+    "$w_out" 0 orphans "($in_orphans or $in_unknown | not) and .liveCount == 2" --arg n "$w_n2"
+assert_orphan "W-3 description が無くても snapshot で元パスが有れば live" \
+    "$w_out" 0 orphans "($in_orphans or $in_unknown) | not" --arg n "$w_n3"
+assert_orphan "W-4 description が無く snapshot の元パスが無ければ orphans（pathSource: snapshot）" \
+    "$w_out" 0 orphans "any(.orphans[]; .name == \$n and .pathSource == \"snapshot\")" --arg n "$w_n4"
+assert_orphan "W-5 元パスが特定できない collection は unknown に倒す（orphans に入れない）" \
+    "$w_out" 0 orphans "$in_unknown and ($in_orphans | not)" --arg n "$w_n5"
+assert_orphan "W-6 describe が code≠0 なら unknown に倒す" \
+    "$w_out" 0 orphans "$in_unknown and ($in_orphans | not)" --arg n "$w_n6"
+assert_orphan "W-7 description の元パスと名前のハッシュが一致しなければ unknown" \
+    "$w_out" 0 orphans "$in_unknown and ($in_orphans | not)" --arg n "$w_n7"
+assert_orphan "W-8 対象外の接頭辞の collection はどの配列にも現れない" \
+    "$w_out" 0 orphans "($in_orphans or $in_unknown) | not" --arg n "$w_n8"
+
+# --- W-9: snapshot が無くても live を orphan と誤判定しない ---
+w9_out="$(run_orphan "$w/home" "$W_STUB" --snapshot "$w/no-such-snapshot.json")"
+assert_orphan "W-9a snapshot 不在でも description で判定できるものは orphans のまま" \
+    "$w9_out" 0 orphans "$in_orphans" --arg n "$w_n1"
+assert_orphan "W-9b snapshot 不在で元パスが特定できない live は unknown に落ちる（orphans に入れない）" \
+    "$w9_out" 0 orphans "$in_unknown and ($in_orphans | not)" --arg n "$w_n3"
+
+# --- W-17: 元パスの実在を確認できない（権限エラー）ものは unknown に倒す ---
+# macOS の TCC 保護下（~/Documents 等）では、生きているディレクトリでも stat が EPERM を返す。
+# ENOENT 以外のエラーを「存在しない」と扱うと live を orphan と誤判定する。
+# root では権限が効かず fixture が成立しないため skip する
+if [[ "$(id -u)" == "0" ]]; then
+    echo "[SKIP] W-17 root では権限エラーを再現できない"
+else
+    w_n9="hybrid_code_chunks_$(md5_8 "$w/locked/inner")"
+    mkdir -p "$w/locked/inner"
+    cp "$W_FIXTURE" "$w/fixture.bak"
+    jq --arg n "$w_n9" --arg p "codebasePath:$w/locked/inner" \
+        '.collections[$n] = {description: $p, rowCount: 1}' "$w/fixture.bak" > "$W_FIXTURE"
+    chmod 000 "$w/locked"
+    w17_out="$(run_orphan "$w/home" "$W_STUB" --snapshot "$W_SNAPSHOT")"
+    chmod 755 "$w/locked"
+    mv "$w/fixture.bak" "$W_FIXTURE"
+    assert_orphan "W-17 元パスの stat が権限エラーなら unknown に倒す（orphans に入れない）" \
+        "$w17_out" 0 orphans "$in_unknown and ($in_orphans | not)" --arg n "$w_n9"
+fi
+
+# --- W-10: Milvus に到達できないときは「0 件」と区別できる形で止まる ---
+assert_orphan_aborted "W-10 Milvus に到達できなければ exit 2 で orphans を出さない" \
+    "$(run_orphan "$w/home" "$W_CLOSED" --snapshot "$W_SNAPSHOT")" 2
+
+# list の後で到達できなくなった場合も同じ。describe の失敗を unknown に紛れさせると、
+# 全件が unknown の「孤児 0 件」として報告される
+cp "$W_FIXTURE" "$w/fixture.bak"
+jq --arg n "$w_n1" '.collections[$n].hangup = true' "$w/fixture.bak" > "$W_FIXTURE"
+assert_orphan_aborted "W-10b list の後に Milvus が応答しなくなっても exit 2 で orphans を出さない" \
+    "$(run_orphan "$w/home" "$W_STUB" --snapshot "$W_SNAPSHOT")" 2
+mv "$w/fixture.bak" "$W_FIXTURE"
+
+# --- W-11 / W-12: drop モードは drop 直前に再判定する ---
+rm -f "$W_DROPS"
+w11_out="$(run_orphan "$w/home" "$W_STUB" --snapshot "$W_SNAPSHOT" --drop "$w_n2")"
+assert_orphan "W-11a live の collection の drop は refused になる" \
+    "$w11_out" 1 results "any(.results[]; .name == \$n and .status == \"refused\")" --arg n "$w_n2"
+w11_label="W-11b refused のときスタブへ drop 要求を送らない"
+if w_check_rc 1 && [[ "$w11_out" == *'"results"'* ]] && [[ ! -s "$W_DROPS" ]]; then
+    pass "$w11_label"
+else
+    fail "$w11_label"
+    echo "       drop 記録: $(cat "$W_DROPS" 2>/dev/null || echo '（なし）')" >&2
+fi
+
+rm -f "$W_DROPS"
+w12_out="$(run_orphan "$w/home" "$W_STUB" --snapshot "$W_SNAPSHOT" --drop "$w_n1")"
+assert_orphan "W-12a 孤児の collection の drop は dropped になる" \
+    "$w12_out" 0 results "any(.results[]; .name == \$n and .status == \"dropped\")" --arg n "$w_n1"
+w12_label="W-12b スタブへの drop 要求は承認した 1 件だけ"
+if w_check_rc 0 && [[ "$(cat "$W_DROPS" 2>/dev/null)" == "$w_n1" ]]; then
+    pass "$w12_label"
+else
+    fail "$w12_label"
+    echo "       drop 記録: $(cat "$W_DROPS" 2>/dev/null || echo '（なし）')" >&2
+fi
+
+# --- W-13: list が code≠0 なら「0 件」と報告しない ---
+write_w_fixture 1
+assert_orphan_aborted "W-13 list が code≠0 なら exit 1 で orphans を出さず、Milvus のエラー本文を stderr に出す" \
+    "$(run_orphan "$w/home" "$W_STUB" --snapshot "$W_SNAPSHOT")" 1 "stub list error"
+write_w_fixture 0
+
+# --- W-14〜W-16: 接続設定は MCP と同じ解決順で決める ---
+# MCP の設定は ~/.claude.json にあり、シェルには無い。シェルの環境変数を優先すると、
+# MCP とは別の Milvus を点検して「孤児 0 件」と報告しうる
+mkdir -p "$w/home14" "$w/home15" "$w/home16/.context"
+jq -n --arg a "$W_STUB" '{mcpServers: {"claude-context": {env: {MILVUS_ADDRESS: $a}}}}' > "$w/home14/.claude.json"
+assert_orphan "W-14 ~/.claude.json の MCP env をシェルの環境変数より優先する" \
+    "$(run_orphan "$w/home14" "$W_CLOSED" --snapshot "$W_SNAPSHOT")" 0 orphans '.milvusSource == "claude.json"'
+
+jq -n '{mcpServers: {"claude-context": {env: {MILVUS_ADDRESS: ""}}}}' > "$w/home15/.claude.json"
+assert_orphan "W-15 ~/.claude.json の空文字は未設定として扱い、環境変数へ進む" \
+    "$(run_orphan "$w/home15" "$W_STUB" --snapshot "$W_SNAPSHOT")" 0 orphans '.milvusSource == "env"'
+
+printf 'MILVUS_ADDRESS=%s\n' "$W_STUB" > "$w/home16/.context/.env"
+assert_orphan "W-16 ~/.claude.json も環境変数も無ければ ~/.context/.env を使う" \
+    "$(run_orphan "$w/home16" "" --snapshot "$W_SNAPSHOT")" 0 orphans '.milvusSource == "dotenv"'
 
 echo
 echo "${pass_count} passed / ${fail_count} failed"

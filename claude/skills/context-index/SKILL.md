@@ -86,5 +86,5 @@ index は background で進む。`get_indexing_status(index_target)` を 1〜数
 ## 注意事項
 
 - worktree ごとに個別 index する運用では、worktree 数だけ埋め込みコスト（Ollama 計算 + Milvus storage）が増える。大規模・短命の worktree は index をスキップする判断も検討する。
-- index した collection は worktree 削除時に孤児化しうる。`/worktree-cleanup` が削除時に `clear_index` で回収する。
+- index した collection は worktree 削除時に孤児化しうる。`/worktree-cleanup` が削除前に `clear_index` で回収する。skill 外で削除した worktree の collection は `/worktree-cleanup` の孤児点検（Step 6）で回収する。
 - ignore パターンの簡易 glob の癖（真の `**`/`?` 非対応、dotfile/dotdir 常時除外、否定 `!` 非対応）は `./reference/personal-ignore.md` を参照。

@@ -113,7 +113,7 @@ git pull
 | `notion-adr` / `notion-qa-progress` | Notion 連携 |
 | `playwright-cli` | ブラウザ自動操作 |
 | `context-index` | claude-context にコードベースを index（個人定義の ignore で不要ディレクトリ除外、`disable-model-invocation`） |
-| `worktree-cleanup` | マージ済み PR の worktree 一括削除（削除時に claude-context index も回収） |
+| `worktree-cleanup` | マージ済み PR の worktree 一括削除（削除時に claude-context index を回収、孤児 collection の点検も行う） |
 | `strategic-ddd` / `review-strategic-ddd` | 戦略的 DDD 設計と そのレビュー |
 | `skill-authoring` | skill / subagent を書くときの規約（Claude 5 向け変換ルール T1–T8、起動制御フィールドの判断表、追加手順）。**起動制御の正本** |
 
