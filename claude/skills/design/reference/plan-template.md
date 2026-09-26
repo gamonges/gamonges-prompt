@@ -7,6 +7,9 @@
 ````markdown
 # 実装計画: [機能名]
 
+モード: [concept | implement | refactor | bug]
+<!-- [該当時] コンテキストファイルの mode: が既知のモードに解決した時だけ置く（未知の値は置かない）。H1 は変えない（spec-propose がタイトルから change-name を推定するため）。frontmatter にしないのは、plan.md の先頭行を読む既存の処理に影響させないため -->
+
 ## TL;DR
 <!-- [任意] 1〜3 行で全体像を要約。/status や PR 本文への転用を意識 -->
 
