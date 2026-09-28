@@ -86,6 +86,7 @@ git pull
 ### 開発ワークフロー系
 | スキル名 | 説明 |
 |---------|------|
+| `/brief` | 用途別テンプレート（concept / implement / refactor / bug）で質問ファイル tmp/context.md を作成（任意の前工程） |
 | `/ask` | コードベースや技術的質問への調査回答 |
 | `/design` | 要件・コンテキストから実装計画 (plan.md) を生成 |
 | `/review-plan` | plan.md のスタッフエンジニアレビュー |

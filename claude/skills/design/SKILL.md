@@ -25,6 +25,8 @@ description: 要件・コンテキストから実装計画 plan.md を新規作�
 | 補助ドキュメント | 読むタイミング |
 |------------------|----------------|
 | `./reference/acceptance-criteria.md` | 受入条件を Given/When/Then 形式で書く時 |
+| `../brief/reference/modes.md` | コンテキストファイルの frontmatter に `mode:` がある時 |
+| `../brief/reference/modes/<mode>.md` の `## design の観点` | 上記で既知のモードに解決した時 |
 
 「念のため全部読む」は禁止。条件付きの表はトリガー条件に該当する場合のみ読み込む。
 
@@ -55,7 +57,7 @@ description: 要件・コンテキストから実装計画 plan.md を新規作�
 
 ### フェーズ 1: コンテキスト読み込み
 
-要件を「機能要件」「非機能要件」「制約事項」に分類し、`./tmp/research.md` / `openspec/specs/` / `openspec/config.yaml` を参照する。`./tmp/coupling-precheck.md` が存在する場合はあわせて参照する。詳細は `./reference/phase-details.md`。
+要件を「機能要件」「非機能要件」「制約事項」に分類し、`./tmp/research.md` / `openspec/specs/` / `openspec/config.yaml` を参照する。`./tmp/coupling-precheck.md` が存在する場合はあわせて参照する。モードの解決と適用範囲は正典（`../brief/reference/modes.md`）に従う。詳細は `./reference/phase-details.md`。
 
 ### フェーズ 1.2: 業務シナリオの確認
 
