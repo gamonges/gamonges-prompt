@@ -101,6 +101,16 @@
             "command": "/Users/gamouhiroto/.claude/scripts/hook-detect-correction.sh"
           }
         ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/Users/gamouhiroto/Library/Application Support/Muxy/hooks/muxy-claude-hook.sh' user-prompt-submit # muxy-notification-hook",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PreToolUse": [
@@ -133,6 +143,16 @@
             "command": "/Users/gamouhiroto/.claude/scripts/hook-lint-skill-frontmatter.sh"
           }
         ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/Users/gamouhiroto/Library/Application Support/Muxy/hooks/muxy-claude-hook.sh' pre-tool-use # muxy-notification-hook",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -152,6 +172,66 @@
           {
             "type": "command",
             "command": "/Users/gamouhiroto/.claude/scripts/hook-check-scripts-sync.sh"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/Users/gamouhiroto/Library/Application Support/Muxy/hooks/muxy-claude-hook.sh' notification # muxy-notification-hook",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/Users/gamouhiroto/Library/Application Support/Muxy/hooks/muxy-claude-hook.sh' permission-request # muxy-notification-hook",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/Users/gamouhiroto/Library/Application Support/Muxy/hooks/muxy-claude-hook.sh' stop # muxy-notification-hook",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/Users/gamouhiroto/Library/Application Support/Muxy/hooks/muxy-claude-hook.sh' stop-failure # muxy-notification-hook",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/Users/gamouhiroto/Library/Application Support/Muxy/hooks/muxy-claude-hook.sh' session-end # muxy-notification-hook",
+            "timeout": 10
           }
         ]
       }
