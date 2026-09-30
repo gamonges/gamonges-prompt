@@ -4,7 +4,7 @@
 # Claude Skills & SubAgents セットアップスクリプト
 # =============================================================================
 #
-# このスクリプトは、リポジトリ内の Skills, SubAgents, settings.json を ~/.claude/ 配下に
+# このスクリプトは、リポジトリ内の Skills, Agents (subagent 定義), settings.json を ~/.claude/ 配下に
 # シンボリックリンクとして、Scripts を実体コピーとして配置します。
 # これにより、すべてのプロジェクトで共通して使用できるようになります。
 #
@@ -13,7 +13,7 @@
 #   ./setup.sh install  # インストール
 #   ./setup.sh uninstall # アンインストール
 #   ./setup.sh status   # 現在の状態を表示
-#   ./setup.sh migrate  # 旧形式 (commands→skill 化されたディレクトリ) を撤去して新形式へ移行
+#   ./setup.sh migrate  # 旧形式 (commands→skill 化されたディレクトリ・旧配置先の subagent リンク) を撤去して新形式へ移行
 #
 # 注: 過去に commands/ から疑似的に skill 化していた構造は廃止されました。
 #     旧バージョンで install したユーザーは migrate サブコマンドで一括移行できます。
@@ -33,10 +33,11 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_SKILLS_DIR="${SCRIPT_DIR}/claude/skills"
 REPO_COMMANDS_DIR="${SCRIPT_DIR}/claude/commands"
-REPO_SUBAGENTS_DIR="${SCRIPT_DIR}/claude/subagents"
+# Claude Code がユーザーレベルの subagent を読み込むのは ~/.claude/agents/ だけ（サブフォルダも再帰的に読む）
+REPO_AGENTS_DIR="${SCRIPT_DIR}/claude/agents"
 CLAUDE_DIR="${HOME}/.claude"
 CLAUDE_SKILLS_DIR="${CLAUDE_DIR}/skills"
-CLAUDE_SUBAGENTS_DIR="${CLAUDE_DIR}/sub-agents"
+CLAUDE_AGENTS_DIR="${CLAUDE_DIR}/agents"
 
 # ヘルパー関数
 log_info() {
@@ -61,10 +62,6 @@ check_source_dirs() {
         log_error "Skills ディレクトリが見つかりません: $REPO_SKILLS_DIR"
         exit 1
     fi
-    if [[ ! -d "$REPO_SUBAGENTS_DIR" ]]; then
-        log_error "SubAgents ディレクトリが見つかりません: $REPO_SUBAGENTS_DIR"
-        exit 1
-    fi
 }
 
 # ~/.claude ディレクトリの初期化
@@ -76,8 +73,8 @@ init_claude_dir() {
     if [[ ! -d "$CLAUDE_SKILLS_DIR" ]]; then
         mkdir -p "$CLAUDE_SKILLS_DIR"
     fi
-    if [[ ! -d "$CLAUDE_SUBAGENTS_DIR" ]]; then
-        mkdir -p "$CLAUDE_SUBAGENTS_DIR"
+    if [[ ! -d "$CLAUDE_AGENTS_DIR" ]]; then
+        mkdir -p "$CLAUDE_AGENTS_DIR"
     fi
 }
 
@@ -325,8 +322,8 @@ install_skills() {
     log_info "Skills: ${count} 件インストール完了"
 }
 
-# Migrate: 旧形式 (commands→skill 化されたディレクトリ) を撤去
-# 過去の install_commands で作られた dead symlink + ディレクトリを安全に削除する
+# Migrate: 旧形式 (commands→skill 化されたディレクトリ・旧配置先の subagent リンク) を撤去
+# 過去の install_commands で作られた dead symlink + ディレクトリと、過去の install が張った subagent のリンクを安全に削除する
 migrate() {
     log_info "旧形式 (commands→skill 化されたディレクトリ) を撤去しています..."
 
@@ -348,26 +345,52 @@ migrate() {
     done
 
     log_info "旧形式の撤去: ${count} 件"
+
+    # ~/.claude/sub-agents/ は Claude Code が読み込まない旧配置先。repo の claude/subagents/ を指すリンクだけを消し、
+    # ユーザーの実ファイルと repo 外を指すリンクは残す。旧リンクはメインチェックアウトを指しているので、
+    # worktree から実行しても一致するよう、リンク先をチェックアウトのパスではなく */claude/subagents/* で判定する
+    local legacy_dir="${CLAUDE_DIR}/sub-agents"
+    local legacy_count=0
+    for legacy_link in "$legacy_dir"/*.md; do
+        [[ -L "$legacy_link" ]] || continue
+        if [[ "$(readlink "$legacy_link")" == */claude/subagents/* ]]; then
+            rm "$legacy_link"
+            log_success "  ✓ 撤去: sub-agents/$(basename "$legacy_link")"
+            legacy_count=$((legacy_count + 1))
+        fi
+    done
+    # 実ファイルが残っていると rmdir は失敗する。set -e で後続の install_skills まで止めないよう吸収する
+    if [[ -d "$legacy_dir" ]]; then
+        rmdir "$legacy_dir" 2>/dev/null || true
+    fi
+    log_info "旧配置先 (~/.claude/sub-agents/) のリンクの撤去: ${legacy_count} 件"
+
     echo ""
     install_skills
 }
 
-# SubAgents のインストール
-install_subagents() {
-    log_info "SubAgents をインストールしています..."
+# subagent 定義（.md）の symlink を張る・外す・状態を表示する（claude/agents/ → ~/.claude/agents/）。
+# src 配下を再帰的に探し、dst には basename で平置きする。そのため name とファイル名を一致させ、ツリー全体で一意にする。
+# README.md はドキュメント用なのでスキップする。
+# show_status() の外に置くのは、verify-skills.sh が show_status() の本文を切り出して文字列検査するため。
+# src が無いチェックアウト（claude/agents/ を持たない古いブランチ）では warning を出してスキップする。
+# check_source_dirs のように exit すると skills / settings の install まで止まるため
+
+install_md_links() {
+    local label="$1" src_dir="$2" dst_dir="$3"
+    log_info "${label} をインストールしています..."
+
+    if [[ ! -d "$src_dir" ]]; then
+        log_warning "  ! ${src_dir} がありません。${label} の配置をスキップします"
+        return 0
+    fi
 
     local count=0
-    # サブディレクトリ内の .md ファイルを再帰的に検索
     while IFS= read -r -d '' md_file; do
-        local relative_path="${md_file#$REPO_SUBAGENTS_DIR/}"
         local filename=$(basename "$md_file")
+        [[ "$filename" == "README.md" ]] && continue
 
-        # README.md はスキップ
-        if [[ "$filename" == "README.md" ]]; then
-            continue
-        fi
-
-        local target_link="${CLAUDE_SUBAGENTS_DIR}/${filename}"
+        local target_link="${dst_dir}/${filename}"
 
         # install_skills と同じ理由で、既に正しい先を指していれば触らない
         if [[ ! -L "$target_link" || "$(readlink "$target_link")" != "$md_file" ]]; then
@@ -383,15 +406,76 @@ install_subagents() {
             ln -s "$md_file" "$target_link"
         fi
         log_success "  ✓ ${filename}"
-        ((count++))
-    done < <(find "$REPO_SUBAGENTS_DIR" -name "*.md" -type f -print0)
+        count=$((count + 1))
+    done < <(find "$src_dir" -name "*.md" -type f -print0)
 
-    log_info "SubAgents: ${count} 件インストール完了"
+    log_info "${label}: ${count} 件インストール完了"
+}
+
+# 削除した件数は MD_LINKS_REMOVED に入れる（件数を stdout で返すとログと混ざるため）
+uninstall_md_links() {
+    local label="$1" src_dir="$2" dst_dir="$3"
+    MD_LINKS_REMOVED=0
+
+    if [[ ! -d "$src_dir" ]]; then
+        log_warning "  ! ${src_dir} がありません。${label} の削除をスキップします"
+        return 0
+    fi
+
+    while IFS= read -r -d '' md_file; do
+        local filename=$(basename "$md_file")
+        [[ "$filename" == "README.md" ]] && continue
+
+        local target_link="${dst_dir}/${filename}"
+
+        if [[ -L "$target_link" ]]; then
+            local link_target=$(readlink "$target_link")
+            if [[ "$link_target" == "$md_file" ]]; then
+                rm "$target_link"
+                log_success "  ✓ 削除: ${filename}"
+                MD_LINKS_REMOVED=$((MD_LINKS_REMOVED + 1))
+            fi
+        fi
+    done < <(find "$src_dir" -name "*.md" -type f -print0)
+}
+
+show_md_links_status() {
+    local label="$1" src_dir="$2" dst_dir="$3"
+    echo -e "${BLUE}[${label}]${NC} (${dst_dir})"
+
+    if [[ ! -d "$src_dir" ]]; then
+        echo "  (repo に ${src_dir} がありません)"
+        return 0
+    fi
+    if [[ ! -d "$dst_dir" ]]; then
+        echo "  (ディレクトリが存在しません)"
+        return 0
+    fi
+
+    while IFS= read -r -d '' md_file; do
+        local filename=$(basename "$md_file")
+        [[ "$filename" == "README.md" ]] && continue
+
+        local target_link="${dst_dir}/${filename}"
+
+        if [[ -L "$target_link" ]]; then
+            local link_target=$(readlink "$target_link")
+            if [[ "$link_target" == "$md_file" ]]; then
+                echo -e "  ${GREEN}✓${NC} ${filename} (リンク済み)"
+            else
+                echo -e "  ${YELLOW}!${NC} ${filename} (別のリンク先)"
+            fi
+        elif [[ -f "$target_link" ]]; then
+            echo -e "  ${YELLOW}!${NC} ${filename} (実ファイルが存在)"
+        else
+            echo -e "  ${RED}✗${NC} ${filename} (未インストール)"
+        fi
+    done < <(find "$src_dir" -name "*.md" -type f -print0)
 }
 
 # アンインストール
 uninstall() {
-    log_info "インストールされた Scripts, Skills, Commands, SubAgents を削除しています..."
+    log_info "インストールされた Scripts, Skills, Commands, Agents を削除しています..."
 
     # Commands の削除
     local commands_count=0
@@ -430,26 +514,9 @@ uninstall() {
         fi
     done
 
-    # SubAgents の削除
-    local subagents_count=0
-    while IFS= read -r -d '' md_file; do
-        local filename=$(basename "$md_file")
-
-        if [[ "$filename" == "README.md" ]]; then
-            continue
-        fi
-
-        local target_link="${CLAUDE_SUBAGENTS_DIR}/${filename}"
-
-        if [[ -L "$target_link" ]]; then
-            local link_target=$(readlink "$target_link")
-            if [[ "$link_target" == "$md_file" ]]; then
-                rm "$target_link"
-                log_success "  ✓ 削除: ${filename}"
-                ((subagents_count++))
-            fi
-        fi
-    done < <(find "$REPO_SUBAGENTS_DIR" -name "*.md" -type f -print0)
+    # Agents の削除
+    uninstall_md_links "Agents" "$REPO_AGENTS_DIR" "$CLAUDE_AGENTS_DIR"
+    local agents_count=$MD_LINKS_REMOVED
 
     # Scripts の削除
     local scripts_dir="${SCRIPT_DIR}/claude/scripts"
@@ -511,14 +578,14 @@ uninstall() {
         log_success "  ✓ 削除: CLAUDE.md の共通規約ブロック（ブロック外の記述は保持）"
     fi
 
-    log_info "削除完了 - Scripts: ${scripts_count} 件, Skills: ${skills_count} 件, Commands: ${commands_count} 件, SubAgents: ${subagents_count} 件, Settings: ${settings_count} 件"
+    log_info "削除完了 - Scripts: ${scripts_count} 件, Skills: ${skills_count} 件, Commands: ${commands_count} 件, Agents: ${agents_count} 件, Settings: ${settings_count} 件"
 }
 
 # 状態表示
 show_status() {
     echo ""
     echo "=========================================="
-    echo "  Claude Scripts, Skills, SubAgents 状態"
+    echo "  Claude Scripts, Skills, Agents 状態"
     echo "=========================================="
     echo ""
 
@@ -657,35 +724,7 @@ show_status() {
     fi
 
     echo ""
-    echo -e "${BLUE}[SubAgents]${NC} (${CLAUDE_SUBAGENTS_DIR})"
-    if [[ -d "$CLAUDE_SUBAGENTS_DIR" ]]; then
-        local has_subagents=false
-        while IFS= read -r -d '' md_file; do
-            local filename=$(basename "$md_file")
-
-            if [[ "$filename" == "README.md" ]]; then
-                continue
-            fi
-
-            local target_link="${CLAUDE_SUBAGENTS_DIR}/${filename}"
-
-            if [[ -L "$target_link" ]]; then
-                local link_target=$(readlink "$target_link")
-                if [[ "$link_target" == "$md_file" ]]; then
-                    echo -e "  ${GREEN}✓${NC} ${filename} (リンク済み)"
-                    has_subagents=true
-                else
-                    echo -e "  ${YELLOW}!${NC} ${filename} (別のリンク先)"
-                fi
-            elif [[ -f "$target_link" ]]; then
-                echo -e "  ${YELLOW}!${NC} ${filename} (実ファイルが存在)"
-            else
-                echo -e "  ${RED}✗${NC} ${filename} (未インストール)"
-            fi
-        done < <(find "$REPO_SUBAGENTS_DIR" -name "*.md" -type f -print0)
-    else
-        echo "  (ディレクトリが存在しません)"
-    fi
+    show_md_links_status "Agents" "$REPO_AGENTS_DIR" "$CLAUDE_AGENTS_DIR"
 
     echo ""
 }
@@ -732,7 +771,7 @@ main() {
             echo ""
             install_skills
             echo ""
-            install_subagents
+            install_md_links "Agents" "$REPO_AGENTS_DIR" "$CLAUDE_AGENTS_DIR"
             echo ""
             install_settings
             echo ""

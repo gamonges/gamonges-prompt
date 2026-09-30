@@ -10,21 +10,24 @@ Claude Code で使用する Skills、SubAgents のコレクション。すべて
 ## セットアップ
 
 ```bash
-./setup.sh install                  # Scripts は実体コピー、Skills・SubAgents・settings.json は symlink
+./setup.sh install                  # Scripts は実体コピー、Skills・Agents・settings.json は symlink
 ./setup.sh install --prune-scripts  # 上記に加え、repo に無い ~/.claude/scripts/ の orphan を退避して削除
 ./setup.sh status                   # インストール状態の確認
 ./setup.sh uninstall                # インストールしたものを撤去
-./setup.sh migrate                  # 旧形式 (commands→skill 化されたディレクトリ) を撤去して新形式へ移行
+./setup.sh migrate                  # 旧形式 (commands→skill 化されたディレクトリ・旧配置先の subagent リンク) を撤去して新形式へ移行
 ```
 
 **他端末への展開時の手順**: `git pull && ./setup.sh migrate && ./setup.sh install`
 
 配置方式は 2 通り:
 
-- **skills / subagents / settings.json**: symlink。repo の更新が即座に反映される
+- **skills / agents / settings.json**: symlink。repo の更新が即座に反映される
+  - **subagent 定義は `claude/agents/<カテゴリ>/` に一本化している。** Claude Code がユーザーレベルの subagent を読み込むのは `~/.claude/agents/` だけで、サブフォルダも再帰的に読み、識別子は frontmatter の `name` で決まる
+  - setup.sh はファイルを basename で `~/.claude/agents/` に平置きの symlink にするので、`name` とファイル名を一致させ、ツリー全体で一意にする
+  - `~/.claude/agents/` を初めて作った install の後は、セッションを開き直すまで読み込まれない。旧配置先 `~/.claude/sub-agents/`（読み込まれない）のリンクは `./setup.sh migrate` が撤去する
 - **scripts**: 実体コピー。**`claude/scripts/` を編集・pull したら `./setup.sh install` を再実行する。** 忘れても hook は「失敗」せず**古いスクリプトで静かに動き続ける**。symlink をやめたのは、メインチェックアウトがスクリプトを含まないブランチにある間に解決できず全 hook が exit 127 になるため。exit 127 は non-blocking なのでガードレールは「止まる」のではなく**開く**
 
-**install はメインチェックアウトから実行する。** settings.json と skills は symlink のままなので install 元のチェックアウトを全プロジェクトのランタイムが参照する。worktree から install すると、その worktree を削除した瞬間に deny リスト・hook 定義・全 skill がまとめて失われる（hook と違って何も失敗しないので気づけない）。linked worktree から実行すると `./setup.sh install` が警告する。
+**install はメインチェックアウトから実行する。** settings.json と skills は symlink のままなので install 元のチェックアウトを全プロジェクトのランタイムが参照する。worktree から install すると、その worktree を削除した瞬間に deny リスト・hook 定義・全 skill・`~/.claude/agents/` の subagent がまとめて失われる（hook と違って何も失敗しないので気づけない）。linked worktree から実行すると `./setup.sh install` が警告する。
 
 構造的検証は `./claude/scripts/verify-skills.sh`（fail があれば exit 1、warn のみなら exit 0。check 4 が scripts の同期・orphan・install 元を、check 5 が listing budget を見る）。
 
@@ -60,6 +63,7 @@ export OTEL_EXPORTER_OTLP_HEADERS="DD-API-KEY=$CLAUDE_CODE_TELEMETRY_DD_API_KEY"
 
 - **AWS 資格情報**: `Read/Edit(**/.aws/**)` と `Read/Edit(**/*credentials*)` で保護する。`*aws*` の全面 deny は `aws-cdk-lib` / `aws-sdk` 等の通常のソースファイルに誤爆するため採らない。`~/` 表記は permission パターンで展開されるかを実測していないため、パス基準の `**/.aws/**` を使う
 - **誤爆したとき**: `bypassPermissions` 下では deny にマッチした操作は確認プロンプトなしでブロックされる（ask へのフォールバックがない）。`~/.claude/settings.local.json` で一時的に上書きするか、`claude/settings.json` の該当パターンを外す
+- **subagent の誤委譲**: 有効な subagent の description は常時コンテキストに載り、自動委譲の候補になる。事前に機械的に止める手段は無いので、誤委譲や意図しない書き換えを観測したら `Agent(<name>)`（plugin は `Agent(<plugin>:<name>)`）を deny に足して止める。現時点では足していない
 - **Bash 経路は塞いでいない**: `Bash(cat:*)` / `Bash(grep:*)` が allow のため `cat ~/.aws/credentials` は通る。deny は Read/Edit ツール経路の defense-in-depth であり、完全な封鎖ではない
 - **deny の実効性は未確認（2026-07-27 実測）**: scratchpad 配下に `.aws/credentials` を作って Read したところ **ブロックされずに読めた**（`Read(**/.aws/**)` が deny にあるにもかかわらず発火しない）。ただし scratchpad は権限チェックが緩和されている可能性があり、repo 内での再検証は permission により実施できなかったため、**「deny が機能していない」と断定はできない**。この前提が確認できるまで、deny パターンの調整（`**/*credentials*` が `credentials.ts` 等に誤爆する / `aws-exports.js` が保護外になる、という指摘）は**保留する** — 発火しないパターンを変えても保護は増えず、誤爆リスクだけが増えるため。実効性の確認が先
 

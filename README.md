@@ -10,21 +10,23 @@ Claude Code で使用するための Skills と SubAgents のコレクション�
 
 ```
 claude/
+├── agents/              # subagent 定義（~/.claude/agents/ へ配置。Claude Code はサブフォルダも再帰的に読む）
+│   ├── 01-core-development/     # コア開発
+│   ├── 02-language-specialists/ # 言語スペシャリスト
+│   ├── 03-infrastructure/       # インフラ
+│   ├── 04-quality-security/     # 品質・セキュリティ
+│   ├── 05-business-analysis/    # 業務分析
+│   └── 06-architecture/         # アーキテクチャ
 ├── skills/              # エージェント スキル（SKILL.md 必須、frontmatter に name と description 必須）
 │   ├── ask/
 │   ├── design/
 │   ├── implement/
 │   ├── review/
 │   └── ...
-├── scripts/             # ユーティリティスクリプト
-│   ├── statusline.py
-│   ├── sync-cursor-skills.sh
-│   └── verify-skills.sh
-└── subagents/           # サブエージェント
-    ├── 01-core-development/     # コア開発
-    ├── 02-language-specialists/ # 言語スペシャリスト
-    ├── 03-infrastructure/       # インフラ
-    └── 04-quality-security/     # 品質・セキュリティ
+└── scripts/             # ユーティリティスクリプト
+    ├── statusline.py
+    ├── sync-cursor-skills.sh
+    └── verify-skills.sh
 ```
 
 > **注**: Anthropic 公式により Custom Commands は Skills に統合されました（出典: https://code.claude.com/docs/en/custom-skills.md ）。本リポジトリでも旧 `claude/commands/` を廃止し、すべて `claude/skills/<name>/SKILL.md` 形式に統一しています。
@@ -43,7 +45,7 @@ cd gamonges-prompt
 
 これにより、以下の場所に配置されます：
 - Skills → `~/.claude/skills/`（シンボリックリンク）
-- SubAgents → `~/.claude/sub-agents/`（シンボリックリンク）
+- Agents → `~/.claude/agents/`（シンボリックリンク。`claude/agents/<カテゴリ>/` の定義を basename で平置きにする。Claude Code がユーザーレベルの subagent を読み込む場所）
 - settings.json → `~/.claude/settings.json`（シンボリックリンク）
 - Scripts → `~/.claude/scripts/`（**実体コピー**。編集・pull したら `./setup.sh install` を再実行する）
 
@@ -71,7 +73,7 @@ cd gamonges-prompt
 
 ```bash
 git pull
-./setup.sh migrate    # 旧形式 (commands→skill 化されたディレクトリ) を撤去
+./setup.sh migrate    # 旧形式 (commands→skill 化されたディレクトリ・旧配置先 ~/.claude/sub-agents/ のリンク) を撤去
 ./setup.sh install    # 新形式で再インストール
 ```
 
@@ -91,7 +93,7 @@ git pull
 | `/design` | 要件・コンテキストから実装計画 (plan.md) を生成 |
 | `/review-plan` | plan.md のスタッフエンジニアレビュー |
 | `/revise` | フィードバックに基づき計画ファイルを修正 |
-| `/implement` | 計画に基づき TDD で実装 |
+| `/implement` | 計画に基づき TDD で実装（テストの価値は基盤 skill `test-audit` と判定役 `test-auditor` で監査する） |
 | `/review` | PR レビュー（並列サブエージェント） |
 | `/fix` | 修正項目から fix-plan.md を生成 |
 | `/create-pr` | 既定ブランチ向けドラフト PR を作成（ベースは `gh repo view` から取得） |
@@ -120,9 +122,13 @@ git pull
 
 ## 🤖 SubAgents 一覧
 
+すべて `claude/agents/<カテゴリ>/` にあり、`~/.claude/agents/` に配置される。code-reviewer と qa-expert は、pr-review-toolkit の `code-reviewer` / `pr-test-analyzer` と比べて plugin 版を採用し、削除した（2026-09-30）。
+
 ### Core Development
 - `api-designer.md` - API 設計
 - `backend-developer.md` - バックエンド開発
+- `ddd-expert.md` - 戦術的 DDD（Entity / Value Object の分類・集約の設計）
+- `documenter.md` - 仕様・計画とコードの同期（`/implement` Phase 5.5）
 - `frontend-developer.md` - フロントエンド開発
 - `fullstack-developer.md` - フルスタック開発
 - `ui-designer.md` - UI デザイン
@@ -144,16 +150,26 @@ git pull
 - `ad-security-reviewer.md` - AD セキュリティレビュー
 - `architect-reviewer.md` - アーキテクチャレビュー
 - `chaos-engineer.md` - カオスエンジニアリング
-- `code-reviewer.md` - コードレビュー
 - `compliance-auditor.md` - コンプライアンス監査
 - `debugger.md` - デバッグ
 - `error-detective.md` - エラー調査
 - `penetration-tester.md` - ペネトレーションテスト
 - `performance-engineer.md` - パフォーマンスエンジニアリング
 - `powershell-security-hardening.md` - PowerShell セキュリティ強化
-- `qa-expert.md` - QA エキスパート
 - `security-auditor.md` - セキュリティ監査
+- `test-auditor.md` - テストの価値の読み取り専用判定役（`/implement` の主担当表・変更監査。`test-audit` を preload）
 - `test-automator.md` - テスト自動化
+
+### Business Analysis
+- `bpmn-expert.md` - BPMN 2.0 と BPM の実装設計
+- `process-modeler.md` - 業務プロセスの分析・モデリング
+
+### Architecture
+- `design-system-architect.md` - デザインシステム・UI 基盤
+- `frontend-architect.md` - フロントエンドアーキテクチャ
+- `react-architect.md` - React エコシステムのアーキテクチャ
+- `senior-architect.md` - 設計フェーズの非機能要件の評価・技術選定
+- `strategic-ddd-designer.md` - 戦略的 DDD（`strategic-ddd` を preload）
 
 ## 🔗 参考リンク
 
@@ -182,12 +198,12 @@ description: Brief description of what this Skill does
 
 ### SubAgents の追加
 
-1. `claude/subagents/` 配下の適切なカテゴリに `.md` ファイルを作成
-2. `./setup.sh install` を再実行
+1. `claude/agents/<カテゴリ>/` に `.md` ファイルを作成する。frontmatter の `name` はファイル名と一致させ、`claude/agents/` 全体で一意にする（書き方の規約は `claude/skills/skill-authoring/SKILL.md` の「SubAgents の追加」）
+2. `./setup.sh install` を再実行（`~/.claude/agents/` を初めて作った場合は、Claude Code のセッションを開き直す）
 
 ## ⚠️ 注意事項
 
-- Skills / SubAgents / settings.json はシンボリックリンクのため、リポジトリ内のファイルを更新すると自動的に反映されます
+- Skills / Agents / settings.json はシンボリックリンクのため、リポジトリ内のファイルを更新すると自動的に反映されます
 - **Scripts は実体コピーのため即時反映されません。** `claude/scripts/` を編集・pull したら `./setup.sh install` を再実行してください。忘れても hook は失敗せず古いスクリプトで静かに動き続けます（同期状態は `./setup.sh status` か `verify-skills.sh` で確認）
 - リポジトリを削除すると、リンクが壊れます（アンインストールを先に実行してください）
 - 既存の同名ファイルは、内容が異なる場合に `.backup.YYYYMMDDHHMMSS` としてバックアップされます
