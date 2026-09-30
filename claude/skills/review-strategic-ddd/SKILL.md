@@ -49,7 +49,7 @@ disable-model-invocation: true
 
 プロジェクトによっては、ドメイン固有の知識を持つサブエージェントが用意されている場合がある（例: `hr-domain-expert`, `billing-reviewer` 等）。以下の手順で検出・活用する:
 
-1. `.claude/agents/` および `.claude/subagents/` を Glob で走査し、description に DDD・ドメイン関連のキーワード（`domain`, `aggregate`, `bounded context`, `event`, `ubiquitous language` 等）を含むエージェントを検出する
+1. `.claude/agents/`（サブフォルダを含む）を Glob で走査し、description に DDD・ドメイン関連のキーワード（`domain`, `aggregate`, `bounded context`, `event`, `ubiquitous language` 等）を含むエージェントを検出する
 2. 検出されたエージェントの description を読み、5 つのレビュー観点のどれに関連するかを判定する
 3. デフォルトのエージェントに**追加で**並列起動する（デフォルトを置き換えない）
 4. 統合レビュー（観点 5）で、デフォルトエージェントとプロジェクト固有エージェントの指摘を統合する
@@ -87,7 +87,7 @@ Finding Format は `./reference/review-checklist.md` を参照。
 ### 2. 前調査とサブエージェント検出
 
 - [ ] 既存コードの主要な命名・パターンを収集する（後続のサブエージェントに渡すコンテキスト）
-- [ ] `.claude/agents/` / `.claude/subagents/` を Glob で走査し、ドメイン関連のサブエージェントを検出
+- [ ] `.claude/agents/`（サブフォルダを含む）を Glob で走査し、ドメイン関連のサブエージェントを検出
 - [ ] 検出されたエージェントの description を読み、5 つの観点への関連度を判定
 - [ ] 検出結果をユーザーに報告: 「プロジェクト固有エージェント X, Y を検出。観点 N のレビューに追加で活用します」
 

@@ -75,14 +75,15 @@ skill / subagent のプロンプトは Claude 5 世代の挙動に合わせる�
 | `strategic-ddd` | `strategic-ddd-designer` subagent の `skills:` preload |
 | `stack-pr-init` / `stack-pr-add` | `create-pr`（Phase 0 の分岐） |
 | `verify-scenario` | `implement`（Phase 4 の条件付き実行） |
+| `test-audit` | `test-auditor` subagent の `skills:` preload / `implement`（`reference/test-audit-flow.md` の作用点） |
 
 新たに付与する前に、呼び出しグラフを再確認する:
 
 ```bash
 # リポジトリルートで実行する。`Skill` ツール のようにバッククォートが挟まる表記が実際には
 # 多数派なので、パターン側で許容しないと被呼び出し skill を取りこぼす（実測 3 hit → 16 hit）
-grep -rniE '`?Skill`?[[:space:]]*(ツール|tool)' claude/skills/ claude/subagents/
-grep -rn '^skills:' claude/subagents/                        # subagent への preload
+grep -rniE '`?Skill`?[[:space:]]*(ツール|tool)' claude/skills/ claude/agents/
+grep -rn '^skills:' -A3 claude/agents/     # subagent への preload（skill 名は次の行以降）
 ```
 
 scheduled task から repo skill を回している場合は `/schedule` の一覧も確認する（`disable-model-invocation` は scheduled task 起動もブロックする）。
@@ -108,6 +109,12 @@ scheduled task から repo skill を回している場合は `/schedule` の一�
 
 ### SubAgents の追加
 
-1. `claude/subagents/<category>/` 配下に `.md` ファイルを作成
+1. `claude/agents/<category>/` に `.md` ファイルを作成する（配置と再起動の要否は `CLAUDE.md` のセットアップ節）
 2. `./setup.sh install` を再実行
 3. `README.md` はセットアップスクリプトがスキップするため、ドキュメント用に使用可
+
+注意点:
+
+- **frontmatter の `name` をファイル名と一致させ、`claude/agents/` 全体で一意にする。** Claude Code は `name` で識別し、setup.sh は basename で平置きの symlink を張る。どちらかが重複すると、片方が黙って読まれなくなる
+- **判定役（`name` が `-reviewer` / `-auditor` / `-tester` で終わるもの）は、`tools` に Write / Edit を持たせない。** main が `bypassPermissions` のとき subagent も同じモードで動くので、判定役が確認なしでファイルを書き換えられてしまう
+- **外部の subagent 集から取り込むときは、存在しない agent への照会・通知の手順を持ち込まない**（`context-manager` への問い合わせ、エージェント間の状態通知の JSON、他 agent との連携の列挙など）。subagent は Agent ツールを持たないので他の agent を呼べず、手順が空振りするだけになる
