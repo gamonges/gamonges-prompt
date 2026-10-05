@@ -8,12 +8,18 @@
 # シンボリックリンクとして、Scripts を実体コピーとして配置します。
 # これにより、すべてのプロジェクトで共通して使用できるようになります。
 #
+# ~/.codex が在れば、Codex にも同じ資産を展開します（無ければ省略。~/.codex は作りません）:
+#   - skills  ~/.agents/skills/<name> への symlink（衝突する他者の実体・リンクは触らず warn）
+#   - agents  agents の .md から TOML を生成して ~/.codex/agents/ へ（手書きの TOML は触らない）
+#   - 規約    ~/.codex/AGENTS.md のマーカーブロック 2 つ（共通規約と、Codex 専用の読み替え表）
+#   - hook    ~/.codex/hooks.json の自前エントリだけ（Muxy・Orca 等の位置を動かさない）
+#
 # 使用方法:
 #   ./setup.sh          # インストール（デフォルト）
 #   ./setup.sh install  # インストール
 #   ./setup.sh uninstall # アンインストール
 #   ./setup.sh status   # 現在の状態を表示
-#   ./setup.sh migrate  # 旧形式 (commands→skill 化されたディレクトリ・旧配置先の subagent リンク) を撤去して新形式へ移行
+#   ./setup.sh migrate  # 旧形式 (commands→skill 化されたディレクトリ・旧配置先の subagent リンク) を撤去し、旧 claude/ を指す skills・agents のリンクを shared/ へ張り替える
 #
 # 注: 過去に commands/ から疑似的に skill 化していた構造は廃止されました。
 #     旧バージョンで install したユーザーは migrate サブコマンドで一括移行できます。
@@ -31,13 +37,33 @@ NC='\033[0m' # No Color
 
 # パス定義
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_SKILLS_DIR="${SCRIPT_DIR}/claude/skills"
+# 共通資産（Claude Code・Codex の両方が使うもの）は shared/ に置く。claude/ に残るのは settings.json と、
+# 旧パスを解決するための互換 symlink（claude/{skills,agents,scripts} → ../shared/…）だけ
+REPO_SKILLS_DIR="${SCRIPT_DIR}/shared/skills"
+REPO_SCRIPTS_DIR="${SCRIPT_DIR}/shared/scripts"
+REPO_GLOBAL_RULES="${SCRIPT_DIR}/shared/global-rules.md"
 REPO_COMMANDS_DIR="${SCRIPT_DIR}/claude/commands"
 # Claude Code がユーザーレベルの subagent を読み込むのは ~/.claude/agents/ だけ（サブフォルダも再帰的に読む）
-REPO_AGENTS_DIR="${SCRIPT_DIR}/claude/agents"
+REPO_AGENTS_DIR="${SCRIPT_DIR}/shared/agents"
 CLAUDE_DIR="${HOME}/.claude"
 CLAUDE_SKILLS_DIR="${CLAUDE_DIR}/skills"
 CLAUDE_AGENTS_DIR="${CLAUDE_DIR}/agents"
+
+# Codex の配置先。skill は Claude Code と別の ~/.agents/skills（他のツールも書き込む共有の場所）を読み、
+# custom agent は ~/.codex/agents/*.toml、グローバルの指示は ~/.codex/AGENTS.md、hook は ~/.codex/hooks.json
+CODEX_DIR="${HOME}/.codex"
+CODEX_SKILLS_DIR="${HOME}/.agents/skills"
+CODEX_AGENTS_DIR="${CODEX_DIR}/agents"
+CODEX_AGENTS_MD="${CODEX_DIR}/AGENTS.md"
+CODEX_HOOKS_JSON="${CODEX_DIR}/hooks.json"
+REPO_CODEX_RULES="${SCRIPT_DIR}/codex/codex-rules.md"
+REPO_GEN_AGENTS="${SCRIPT_DIR}/codex/gen-agents.py"
+# gen-agents.py が出力する TOML の 1 行目の先頭。「自分が置いたもの」の目印（uninstall・orphan 判定）
+GEN_HEADER_PREFIX="# generated-by: gamonges-prompt setup.sh"
+# install_scripts が更新した（内容が変わった・新規の）スクリプトの本数
+SCRIPTS_UPDATED=0
+CODEX_RULES_BEGIN="<!-- BEGIN gamonges-prompt: codex 読み替え表 -->"
+CODEX_RULES_END="<!-- END gamonges-prompt: codex 読み替え表 -->"
 
 # ヘルパー関数
 log_info() {
@@ -129,34 +155,78 @@ install_settings() {
 GLOBAL_RULES_BEGIN="<!-- BEGIN gamonges-prompt: skills 共通規約 -->"
 GLOBAL_RULES_END="<!-- END gamonges-prompt: skills 共通規約 -->"
 
-install_global_rules() {
-    local src="${SCRIPT_DIR}/claude/global-rules.md"
-    local dest="${CLAUDE_DIR}/CLAUDE.md"
+# 一時ファイルで置き換え先を差し替える。置き換え先が symlink のときは、リンクを通常ファイルに
+# 置き換えて壊さないよう、リンク先へ書き込む（dotfiles への symlink にしている場合）
+replace_file() {  # $1=一時ファイル, $2=置き換え先
+    if [[ -L "$2" ]]; then
+        cat "$1" > "$2"
+        rm -f "$1"
+    else
+        mv -f "$1" "$2"
+    fi
+}
+
+# マーカーで囲んだブロックだけを冪等に追記・差し替える（ブロック外の記述には触れない）。
+#   $1=表示名, $2=ブロックの中身のファイル, $3=書き込み先, $4=BEGIN 行, $5=END 行
+# BEGIN があって END が無い場合は、書き込まずに失敗する。差し替えの awk は BEGIN から END までを
+# 読み飛ばすので、END が無いと BEGIN 以降（ユーザーが書いた記述を含む）がすべて消える
+install_marker_block() {
+    local label="$1" src="$2" dest="$3" begin="$4" end="$5"
 
     if [[ ! -f "$src" ]]; then
-        log_warning "  ! ${src} がありません。共通規約の配置をスキップします"
+        log_warning "  ! ${src} がありません。${label}の配置をスキップします"
         return 0
     fi
 
-    if [[ -f "$dest" ]] && grep -qF "$GLOBAL_RULES_BEGIN" "$dest"; then
+    if [[ -f "$dest" ]] && grep -qF "$begin" "$dest"; then
+        if ! grep -qF "$end" "$dest"; then
+            log_error "  ✗ ${dest} に ${begin} はあるが ${end} がありません。BEGIN 以降を消さないよう、書き込まずに中断します。手で確認してください"
+            return 1
+        fi
         # 既存ブロックの中身だけを差し替える
         local tmp="${dest}.new.$$"
-        awk -v b="$GLOBAL_RULES_BEGIN" -v e="$GLOBAL_RULES_END" -v f="$src" '
+        awk -v b="$begin" -v e="$end" -v f="$src" '
             $0 == b { print; while ((getline line < f) > 0) print line; skip = 1; next }
             $0 == e { skip = 0 }
             !skip
         ' "$dest" > "$tmp"
-        mv -f "$tmp" "$dest"
-        log_success "  ✓ CLAUDE.md の共通規約ブロックを更新しました"
+        replace_file "$tmp" "$dest"
+        log_success "  ✓ ${label}を更新しました"
     else
+        mkdir -p "$(dirname "$dest")"
         {
             [[ -f "$dest" ]] && echo ""
-            echo "$GLOBAL_RULES_BEGIN"
+            echo "$begin"
             cat "$src"
-            echo "$GLOBAL_RULES_END"
+            echo "$end"
         } >> "$dest"
-        log_success "  ✓ CLAUDE.md に共通規約ブロックを追記しました"
+        log_success "  ✓ ${label}を追記しました"
     fi
+}
+
+# マーカーで囲んだブロックだけを撤去する。END が無ければ撤去せずに残す（awk が BEGIN 以降を全部消すため）
+uninstall_marker_block() {  # $1=表示名, $2=対象ファイル, $3=BEGIN 行, $4=END 行
+    local label="$1" dest="$2" begin="$3" end="$4"
+    if [[ ! -f "$dest" ]] || ! grep -qF "$begin" "$dest"; then
+        return 0
+    fi
+    if ! grep -qF "$end" "$dest"; then
+        log_warning "  ! ${dest} に ${end} がありません。${label}は撤去せずに残します（BEGIN 以降を消さないため）"
+        return 0
+    fi
+    local tmp="${dest}.new.$$"
+    awk -v b="$begin" -v e="$end" '
+        $0 == b { skip = 1 }
+        !skip
+        $0 == e { skip = 0 }
+    ' "$dest" > "$tmp"
+    replace_file "$tmp" "$dest"
+    log_success "  ✓ 削除: ${label}（ブロック外の記述は保持）"
+}
+
+install_global_rules() {
+    install_marker_block "CLAUDE.md の共通規約ブロック" "$REPO_GLOBAL_RULES" "${CLAUDE_DIR}/CLAUDE.md" \
+        "$GLOBAL_RULES_BEGIN" "$GLOBAL_RULES_END"
 }
 
 warn_if_worktree() {
@@ -170,6 +240,22 @@ warn_if_worktree() {
     fi
 }
 
+# 前回 install 時の commit の中で scripts/<name> がどこにあるかを返す（見つからなければ非 0）。
+# claude/ から shared/ への移行をまたぐと、前回 sha には旧パス claude/scripts/ しか無く、逆に
+# 移行後の sha には新パス shared/scripts/ しか無い。片方だけを探すと「ファイルが無い = 初回」と
+# 誤判定し、ローカル改変を退避せずに上書きする（黙って失われる）。旧パスの探索は移行期間用で、
+# 互換 symlink と同時に外す（後続の PR）
+prev_tree_path() {  # $1=sha, $2=スクリプト名
+    local p
+    for p in "shared/scripts/$2" "claude/scripts/$2"; do
+        if git -C "$SCRIPT_DIR" cat-file -e "$1:$p" 2>/dev/null; then
+            printf '%s\n' "$p"
+            return 0
+        fi
+    done
+    return 1
+}
+
 # Scripts のインストール（実体コピー）
 #
 # skills は symlink のままだが scripts は実体をコピーする。symlink だとメインチェックアウトが
@@ -180,7 +266,7 @@ warn_if_worktree() {
 install_scripts() {
     local prune="${1:-false}"
     log_info "Scripts をインストールしています（実体コピー）..."
-    local scripts_dir="${SCRIPT_DIR}/claude/scripts"
+    local scripts_dir="$REPO_SCRIPTS_DIR"
     local target_dir="${CLAUDE_DIR}/scripts"
     mkdir -p "$target_dir"
 
@@ -209,18 +295,27 @@ install_scripts() {
         elif [[ -f "$target" ]] && ! cmp -s "$script" "$target"; then
             # repo 側と差分がある。ただし cmp だけでは「repo が更新された」と
             # 「インストール先が手で改変された」を区別できず、CLAUDE.md が推奨する標準運用
-            # （claude/scripts/ を編集 → ./setup.sh install）そのものが毎回警告を出して
+            # （shared/scripts/ を編集 → ./setup.sh install）そのものが毎回警告を出して
             # .backup.* を積み上げる。常時点灯する警告は無視されるようになるため、
             # .installed-from の sha から前回 install 時の内容を復元して突き合わせ、
             # そこから変わっているものだけを「ローカル改変」と判定する。
             # 前回 sha が無い / その sha にファイルが無い（新規追加スクリプト）場合は初回と
             # みなす。初回に守るべきローカル改変は定義上存在しないので退避しない
-            if [[ -n "$prev_sha" ]] \
-                && git -C "$SCRIPT_DIR" cat-file -e "${prev_sha}:claude/scripts/${name}" 2>/dev/null \
-                && ! git -C "$SCRIPT_DIR" show "${prev_sha}:claude/scripts/${name}" 2>/dev/null | cmp -s - "$target"; then
+            local prev_path=""
+            if [[ -n "$prev_sha" ]]; then
+                prev_path=$(prev_tree_path "$prev_sha" "$name" || true)
+            fi
+            if [[ -n "$prev_path" ]] \
+                && ! git -C "$SCRIPT_DIR" show "${prev_sha}:${prev_path}" 2>/dev/null | cmp -s - "$target"; then
                 cp "$target" "${target}.backup.$(date +%Y%m%d%H%M%S).$$"
                 log_warning "  ! ${name} はローカル改変あり。バックアップしました"
             fi
+        fi
+
+        # 内容が変わる（または新規の）ものを数える。Codex は hook の信頼を定義に紐づけるので、
+        # 更新したら /hooks の確認を案内する（install_codex）
+        if [[ ! -f "$target" ]] || ! cmp -s "$script" "$target"; then
+            SCRIPTS_UPDATED=$((SCRIPTS_UPDATED + 1))
         fi
 
         # hook は常時発火するため、上書き中のファイルが別セッションから実行されうる。
@@ -278,29 +373,61 @@ install_scripts() {
     log_info "Scripts: ${count} 件インストール完了（スクリプト編集後は ./setup.sh install の再実行が必要）"
 }
 
-# Skills のインストール
-install_skills() {
-    log_info "Skills をインストールしています..."
+# 「自分のリンク」か。Codex 側の install・uninstall と verify-skills.sh の check 8 で同じパターンを使う。
+# 今のチェックアウトとの完全一致にはしない: 同じ repo の別 worktree を指すリンク（worktree からの一時
+# install で生じる）を他者のものと誤判定すると、worktree を消した後に install は skip・uninstall は
+# 対象外・verify は warn のままになり、誰も直さない切れたリンクが残る。
+# 前例は旧 sub-agents のリンクを */claude/subagents/* で判定する migrate()
+is_own_skill_link() {  # $1=リンク, $2=skill 名
+    local target
+    target=$(readlink "$1" 2>/dev/null) || return 1
+    case "$target" in
+        */shared/skills/"$2"|*/shared/skills/"$2"/|*/claude/skills/"$2"|*/claude/skills/"$2"/) return 0 ;;
+    esac
+    return 1
+}
 
-    local count=0
+# Skills のインストール
+#   $1=表示名, $2=配置先, $3=衝突時の扱い（既存の実ディレクトリ・自分のリンクでない symlink に当たったとき）
+#     backup = 実ディレクトリは <name>.backup.* へ退避し、symlink はリンク先を問わず張り替える（Claude 側の従来の挙動）
+#     skip   = 上書きも退避もせず warn して次へ（Codex 側）。~/.agents/skills は skills CLI や他のツールも
+#              書き込む共有の場所で、他者の実体を動かさない。退避は走査対象の中に <name>.backup.* を作り、
+#              退避先の SKILL.md も読まれて同名の skill が 2 つになる
+install_skills() {
+    local label="${1:-Skills}" dst_dir="${2:-$CLAUDE_SKILLS_DIR}" collision="${3:-backup}"
+    log_info "${label} をインストールしています..."
+    mkdir -p "$dst_dir"
+
+    local count=0 skipped=0
     for skill_dir in "$REPO_SKILLS_DIR"/*/; do
         if [[ -d "$skill_dir" ]]; then
             local skill_name=$(basename "$skill_dir")
             # _ プレフィックスは雛形 / プライベート用としてスキップ
             [[ "$skill_name" == _* ]] && continue
-            local target_link="${CLAUDE_SKILLS_DIR}/${skill_name}"
+            local target_link="${dst_dir}/${skill_name}"
 
             # 既に正しい先を指しているなら触らない。変更が無いのに毎回 rm → ln -s すると
             # symlink が存在しない窓が開き、併走セッションの skill ロードが失敗しうる
             # （install は Claude Code セッション内から走り、複数 worktree が併走する）
             if [[ ! -L "$target_link" || "$(readlink "$target_link")" != "$skill_dir" ]]; then
-                # 既存のリンクまたはディレクトリを処理
-                if [[ -L "$target_link" ]]; then
-                    log_warning "既存のシンボリックリンクを更新: ${skill_name}"
-                    rm "$target_link"
-                elif [[ -d "$target_link" ]]; then
-                    log_warning "既存のディレクトリをバックアップ: ${skill_name}"
-                    mv "$target_link" "${target_link}.backup.$(date +%Y%m%d%H%M%S).$$"
+                if [[ "$collision" == skip ]]; then
+                    if [[ -L "$target_link" ]] && is_own_skill_link "$target_link" "$skill_name"; then
+                        log_warning "既存のシンボリックリンクを更新: ${skill_name}"
+                        rm "$target_link"
+                    elif [[ -e "$target_link" || -L "$target_link" ]]; then
+                        log_warning "  ! ${target_link} は repo の skill ではありません（他のツールの実体・リンク）。上書きせず配置をスキップします（${label} では repo の ${skill_name} が使えません）"
+                        skipped=$((skipped + 1))
+                        continue
+                    fi
+                else
+                    # 既存のリンクまたはディレクトリを処理
+                    if [[ -L "$target_link" ]]; then
+                        log_warning "既存のシンボリックリンクを更新: ${skill_name}"
+                        rm "$target_link"
+                    elif [[ -d "$target_link" ]]; then
+                        log_warning "既存のディレクトリをバックアップ: ${skill_name}"
+                        mv "$target_link" "${target_link}.backup.$(date +%Y%m%d%H%M%S).$$"
+                    fi
                 fi
 
                 ln -s "$skill_dir" "$target_link"
@@ -315,14 +442,17 @@ install_skills() {
             fi
 
             log_success "  ✓ ${skill_name}"
-            ((count++))
+            count=$((count + 1))
         fi
     done
 
-    log_info "Skills: ${count} 件インストール完了"
+    log_info "${label}: ${count} 件インストール完了"
+    if [[ "$skipped" -gt 0 ]]; then
+        log_warning "${label}: ${skipped} 件は衝突のためスキップしました（上の ! の行）"
+    fi
 }
 
-# Migrate: 旧形式 (commands→skill 化されたディレクトリ・旧配置先の subagent リンク) を撤去
+# Migrate: 旧形式 (commands→skill 化されたディレクトリ・旧配置先の subagent リンク) を撤去し、skills・agents のリンクを今の配置元（shared/）へ張り替える
 # 過去の install_commands で作られた dead symlink + ディレクトリと、過去の install が張った subagent のリンクを安全に削除する
 migrate() {
     log_info "旧形式 (commands→skill 化されたディレクトリ) を撤去しています..."
@@ -367,13 +497,17 @@ migrate() {
 
     echo ""
     install_skills
+    # 旧 claude/agents/ を指す agents のリンクも shared/agents/ に張り替える。skills だけだと、
+    # 互換 symlink が消えた時点で agents のリンクだけが切れる
+    echo ""
+    install_md_links "Agents" "$REPO_AGENTS_DIR" "$CLAUDE_AGENTS_DIR"
 }
 
-# subagent 定義（.md）の symlink を張る・外す・状態を表示する（claude/agents/ → ~/.claude/agents/）。
+# subagent 定義（.md）の symlink を張る・外す・状態を表示する（shared/agents/ → ~/.claude/agents/）。
 # src 配下を再帰的に探し、dst には basename で平置きする。そのため name とファイル名を一致させ、ツリー全体で一意にする。
 # README.md はドキュメント用なのでスキップする。
 # show_status() の外に置くのは、verify-skills.sh が show_status() の本文を切り出して文字列検査するため。
-# src が無いチェックアウト（claude/agents/ を持たない古いブランチ）では warning を出してスキップする。
+# src が無いチェックアウト（shared/agents/ を持たない古いブランチ）では warning を出してスキップする。
 # check_source_dirs のように exit すると skills / settings の install まで止まるため
 
 install_md_links() {
@@ -473,6 +607,329 @@ show_md_links_status() {
     done < <(find "$src_dir" -name "*.md" -type f -print0)
 }
 
+# =============================================================================
+# Codex への展開（~/.codex が在るときだけ）
+#
+# 共通資産（shared/）は Claude Code と Codex の両方が使う。Codex には次の 4 つを置く:
+#   - skills        ~/.agents/skills/<name>      symlink（Codex は ~/.claude/skills を読まない）
+#   - agents        ~/.codex/agents/<name>.toml  agents の .md から生成（Codex は .md の定義を読まない）
+#   - 規約          ~/.codex/AGENTS.md           マーカーブロック 2 つ（共通規約と、Codex 専用の読み替え表）
+#   - hook          ~/.codex/hooks.json          自前の hook だけ（Muxy・Orca・他の主体の定義には触れない）
+# どれも「自分が置いたもの」だけを作り直し・撤去する。
+# =============================================================================
+
+# 生成ヘッダを持つ TOML か（setup.sh が置いたもの）
+is_generated_toml() {  # $1=ファイル
+    [[ "$(head -n 1 "$1" 2>/dev/null)" == "$GEN_HEADER_PREFIX"* ]]
+}
+
+# agents の .md から Codex 用の TOML を生成して ~/.codex/agents/ に置く。
+# 手書きの TOML（生成ヘッダが無いもの）は上書きも削除もしない。生成元に無くなった生成物は削除する。
+# 生成に失敗したら何も書き込まない（古い物と新しい物が混ざった状態を残さない）
+install_codex_agents() {
+    log_info "Codex の agents (TOML) を生成して配置しています..."
+    local work err
+    work=$(mktemp -d)
+    if ! python3 "$REPO_GEN_AGENTS" --repo-root "$SCRIPT_DIR" --out "$work/out" 2>"$work/err"; then
+        err=$(cat "$work/err")
+        rm -rf "$work"
+        log_error "  ✗ agents の TOML 生成に失敗しました（何も書き込んでいません）: ${err}"
+        return 1
+    fi
+
+    mkdir -p "$CODEX_AGENTS_DIR"
+    local count=0 skipped=0 removed=0 gen name dst existing
+    for gen in "$work"/out/*.toml; do
+        [[ -f "$gen" ]] || continue
+        name=$(basename "$gen")
+        dst="${CODEX_AGENTS_DIR}/${name}"
+        if [[ -e "$dst" || -L "$dst" ]]; then
+            if ! is_generated_toml "$dst"; then
+                log_warning "  ! ${dst} は手書きの TOML です。上書きせず配置をスキップします（Codex では repo の agent ${name%.toml} が使えません）"
+                skipped=$((skipped + 1))
+                continue
+            fi
+            if cmp -s "$gen" "$dst"; then
+                count=$((count + 1))
+                continue
+            fi
+        fi
+        cp "$gen" "${dst}.new.$$"
+        mv -f "${dst}.new.$$" "$dst"
+        log_success "  ✓ ${name}"
+        count=$((count + 1))
+    done
+
+    # 生成元に無くなった生成物（agent の削除・改名）。生成物なので退避せずに削除する
+    for existing in "$CODEX_AGENTS_DIR"/*.toml; do
+        [[ -f "$existing" ]] || continue
+        is_generated_toml "$existing" || continue
+        [[ -f "$work/out/$(basename "$existing")" ]] && continue
+        rm "$existing"
+        log_warning "  ! 削除: $(basename "$existing")（repo に対応する agent が無い生成物）"
+        removed=$((removed + 1))
+    done
+    rm -rf "$work"
+    log_info "Codex agents: ${count} 件が最新（手書きと衝突してスキップ ${skipped} 件・生成元が無く削除 ${removed} 件）"
+}
+
+# hooks.json の自前 hook を、位置を保ったまま差し替える jq プログラム。
+#
+# Codex の hook の信頼は配列上の位置をキーにする（~/.codex/config.toml の
+# [hooks.state."<hooks.json の絶対パス>:<event の snake_case>:<グループ index>:<hook index>"]）。
+# 中身が同じでも並べ替えると位置キーが変わり、その hook は「要レビュー」としてスキップされる。
+# そのため他者（Orca・Muxy 等）のグループの位置を動かさない:
+#   - 自前の hook = command が /.claude/scripts/ を含むもの（ホームを問わない。settings.json の command は
+#     リテラルの絶対パスなので、$HOME での前方一致にすると sandbox の HOME で 0 件になる）
+#   - 自前グループ = 自前の hook だけから成るグループ。各イベントの先頭から連続して置く
+#   - 先頭の自前グループの列を、settings.json から作った列で置き換える（数が同じなら位置は 1 つもずれない）
+#   - 先頭以外に自前の hook がある（他者のグループに混ざる・途中にある）場合は、推測で並べ替えず失敗する
+# イベントの並びは元のファイルのまま保つ（keys / unique はソートするので使わない。信頼キーには影響しないが、
+# ユーザーのファイルの差分を最小にする）。settings.json にだけあるイベントは後ろに足す。
+# 入力は hooks.json の中身、変数 $s は settings.json の中身を 1 要素に持つ配列。
+# 出力は {doc: 新しい hooks.json, changed: 自前グループの数が変わったイベント}
+read -r -d '' CODEX_HOOKS_JQ <<'JQ' || true
+def selfhook: ((.command // "") | contains("/.claude/scripts/"));
+def solely: ((.hooks // []) | ((length > 0) and all(.[]; selfhook)));
+def hasself: ((.hooks // []) | any(.[]; selfhook));
+def gen($settings):
+  ($settings.hooks // {})
+  | with_entries(.value |= [ .[] | (.hooks // []) as $hs | select($hs | any(.[]; selfhook)) | .hooks = [ $hs[] | select(selfhook) ] ])
+  | with_entries(select(.value | length > 0));
+def lead($arr): ([ range(0; ($arr | length)) | select(($arr[.] | solely) | not) ] | first) // ($arr | length);
+
+. as $doc
+| ($doc.hooks // {}) as $cur
+| gen($s[0]) as $gen
+| (($cur | keys_unsorted) as $ck | $ck + (($gen | keys_unsorted) - $ck)) as $events
+| (reduce $events[] as $ev ({hooks: {}, changed: []};
+    ($cur[$ev] // []) as $arr
+    | lead($arr) as $k
+    | ([ range($k; ($arr | length)) | select($arr[.] | hasself) ]) as $bad
+    | (if ($bad | length) > 0
+         then error("\($ev): 先頭の自前グループの後ろに自前の hook があります（グループ index \($bad | map(tostring) | join(","))）。他者の位置を動かさないよう、手で整理してください")
+         else . end)
+    | ($gen[$ev] // []) as $g
+    | .hooks[$ev] = ($g + $arr[$k:])
+    | (if ($g | length) != $k then .changed += [$ev] else . end)
+  )) as $r
+| ($r.hooks | with_entries(select(.value | length > 0))) as $new
+| { doc: (if ($new | length) == 0 and ($doc | has("hooks") | not) then $doc else ($doc | .hooks = $new) end),
+    changed: $r.changed }
+JQ
+
+# hooks.json の中身と settings.json の中身（配列に包んだ JSON）から {doc, changed} を作る
+codex_hooks_transform() {  # $1=hooks.json の中身, $2=[settings.json の中身]
+    printf '%s' "$1" | jq -c --argjson s "$2" "$CODEX_HOOKS_JQ"
+}
+
+codex_self_hook_count() {  # $1=hooks.json の中身 → 自前の hook の数
+    printf '%s' "$1" | jq '[.hooks[]?[]? | .hooks[]? | (.command // "") | select(contains("/.claude/scripts/"))] | length'
+}
+
+install_codex_hooks() {
+    log_info "Codex の hooks.json に自前の hook を登録しています..."
+    local settings="${SCRIPT_DIR}/claude/settings.json"
+    if [[ ! -f "$settings" ]]; then
+        log_warning "  ! ${settings} がありません。hooks.json の更新をスキップします"
+        return 0
+    fi
+    if ! command -v jq >/dev/null 2>&1; then
+        log_error "  ✗ jq が見つかりません。hooks.json の更新には jq が必要です（hook も jq に依存しています）"
+        return 1
+    fi
+
+    local doc="{}" result new_doc changed self_n err
+    if [[ -f "$CODEX_HOOKS_JSON" ]]; then
+        doc=$(cat "$CODEX_HOOKS_JSON")
+    fi
+    err=$(mktemp)
+    if ! result=$(codex_hooks_transform "$doc" "[$(jq -c . "$settings")]" 2>"$err"); then
+        log_error "  ✗ hooks.json を更新できません（何も書き込んでいません）: $(cat "$err")"
+        rm -f "$err"
+        return 1
+    fi
+    rm -f "$err"
+    new_doc=$(printf '%s' "$result" | jq '.doc')
+    changed=$(printf '%s' "$result" | jq -r '.changed[]')
+    self_n=$(codex_self_hook_count "$new_doc")
+
+    if [[ -f "$CODEX_HOOKS_JSON" ]]; then
+        # 書式の違い（インデント・キー順）で書き換えないよう、正規化して比べる。
+        # 実機と同じ並びなら初回の install から書き込まない（書けば位置キーの検証が要る）
+        if [[ "$(jq -S . "$CODEX_HOOKS_JSON")" == "$(printf '%s' "$new_doc" | jq -S .)" ]]; then
+            log_success "  ✓ hooks.json は最新です（自前 hook ${self_n} 本は各イベントの先頭に登録済み。書き込みなし）"
+            return 0
+        fi
+    elif [[ "$self_n" -eq 0 ]]; then
+        log_info "  自前の hook が無いので hooks.json を作りません"
+        return 0
+    fi
+
+    mkdir -p "$CODEX_DIR"
+    if [[ -f "$CODEX_HOOKS_JSON" ]]; then
+        local backup="${CODEX_HOOKS_JSON}.pre-install.$(date +%Y%m%d%H%M%S)-$$"
+        cp -p "$CODEX_HOOKS_JSON" "$backup"
+        log_warning "  ! 既存の hooks.json を退避: $backup"
+    fi
+    local tmp="${CODEX_HOOKS_JSON}.new.$$"
+    printf '%s\n' "$new_doc" > "$tmp"
+    replace_file "$tmp" "$CODEX_HOOKS_JSON"
+    log_success "  ✓ hooks.json（自前 hook ${self_n} 本を登録）"
+    log_warning "  ! Codex で /hooks を開き、変わった定義を信頼し直してください。信頼は hook の位置と定義に紐づくため、そのままでは hook がスキップされます"
+    local ev
+    # イベント名は hooks.json 由来なので、未クォートの for（単語分割・glob 展開）には渡さない
+    while IFS= read -r ev; do
+        [[ -n "$ev" ]] || continue
+        log_warning "  ! ${ev}: 自前グループの数が変わったため、このイベントの Orca・Muxy を含む全件の位置がずれます。/hooks で全件を信頼し直してください"
+    done <<< "$changed"
+}
+
+# 自前の hook（先頭の自前グループ）だけを撤去する。先頭のグループを取り除くと後ろの位置が 1 つずつずれ、
+# Orca・Muxy を含むそのイベントの hook の信頼が外れる。撤去しても位置を保つ方法は無いので、案内を出す
+uninstall_codex_hooks() {
+    [[ -f "$CODEX_HOOKS_JSON" ]] || return 0
+    local doc result new_doc self_before
+    doc=$(cat "$CODEX_HOOKS_JSON")
+    if ! result=$(codex_hooks_transform "$doc" '[{}]' 2>/dev/null); then
+        log_warning "  ! hooks.json を解釈できない（先頭以外に自前の hook がある等）ため、自前 hook の撤去をスキップします。手で確認してください"
+        return 0
+    fi
+    self_before=$(codex_self_hook_count "$doc")
+    if [[ "$self_before" -eq 0 ]]; then
+        return 0
+    fi
+    new_doc=$(printf '%s' "$result" | jq '.doc')
+    local backup="${CODEX_HOOKS_JSON}.pre-uninstall.$(date +%Y%m%d%H%M%S)-$$"
+    cp -p "$CODEX_HOOKS_JSON" "$backup"
+    local tmp="${CODEX_HOOKS_JSON}.new.$$"
+    printf '%s\n' "$new_doc" > "$tmp"
+    replace_file "$tmp" "$CODEX_HOOKS_JSON"
+    log_success "  ✓ 削除: hooks.json の自前 hook ${self_before} 本（退避: ${backup}）"
+    log_warning "  ! 先頭の自前グループを取り除いたため、そのイベントの Orca・Muxy を含む hook の位置がずれ、信頼が外れます。Codex の /hooks で全件を信頼し直すか、退避した hooks.json と config.toml を戻してください"
+}
+
+install_codex() {
+    log_info "Codex への展開を行います（~/.codex が在るため）..."
+    install_skills "Codex Skills (~/.agents/skills)" "$CODEX_SKILLS_DIR" skip
+    echo ""
+    install_codex_agents
+    echo ""
+    install_marker_block "~/.codex/AGENTS.md の共通規約ブロック" "$REPO_GLOBAL_RULES" "$CODEX_AGENTS_MD" \
+        "$GLOBAL_RULES_BEGIN" "$GLOBAL_RULES_END"
+    install_marker_block "~/.codex/AGENTS.md の読み替え表ブロック" "$REPO_CODEX_RULES" "$CODEX_AGENTS_MD" \
+        "$CODEX_RULES_BEGIN" "$CODEX_RULES_END"
+    echo ""
+    install_codex_hooks
+    if [[ "$SCRIPTS_UPDATED" -gt 0 ]]; then
+        echo ""
+        log_warning "scripts を ${SCRIPTS_UPDATED} 本更新しました。Codex は ~/.claude/scripts/ の hook を実行します。Codex の /hooks で「要レビュー」が出ていないか確認してください（信頼がスクリプトの中身に紐づく場合、更新した hook はスキップされます）"
+    fi
+}
+
+# Skills の symlink を外す。$2 は exact（今のチェックアウトへの完全一致。Claude 側の従来の挙動）か
+# own（自分のリンク。別 worktree を指すものを含む。Codex 側）。件数は SKILL_LINKS_REMOVED に入れる
+uninstall_skill_links() {  # $1=配置先, $2=exact | own
+    local dst_dir="$1" mode="$2" skill_dir skill_name target_link
+    SKILL_LINKS_REMOVED=0
+    for skill_dir in "$REPO_SKILLS_DIR"/*/; do
+        [[ -d "$skill_dir" ]] || continue
+        skill_name=$(basename "$skill_dir")
+        [[ "$skill_name" == _* ]] && continue
+        target_link="${dst_dir}/${skill_name}"
+        [[ -L "$target_link" ]] || continue
+        if [[ "$mode" == own ]]; then
+            is_own_skill_link "$target_link" "$skill_name" || continue
+        else
+            [[ "$(readlink "$target_link")" == "$skill_dir" ]] || continue
+        fi
+        rm "$target_link"
+        log_success "  ✓ 削除: ${skill_name}"
+        SKILL_LINKS_REMOVED=$((SKILL_LINKS_REMOVED + 1))
+    done
+}
+
+uninstall_codex() {
+    if [[ ! -d "$CODEX_DIR" && ! -d "$CODEX_SKILLS_DIR" ]]; then
+        return 0
+    fi
+    log_info "Codex 側の自分が置いたものを削除しています..."
+    uninstall_skill_links "$CODEX_SKILLS_DIR" own
+    local codex_skills_count=$SKILL_LINKS_REMOVED
+
+    local f codex_agents_count=0
+    for f in "$CODEX_AGENTS_DIR"/*.toml; do
+        [[ -f "$f" ]] || continue
+        is_generated_toml "$f" || continue
+        rm "$f"
+        log_success "  ✓ 削除: $(basename "$f")"
+        codex_agents_count=$((codex_agents_count + 1))
+    done
+
+    uninstall_marker_block "~/.codex/AGENTS.md の読み替え表ブロック" "$CODEX_AGENTS_MD" "$CODEX_RULES_BEGIN" "$CODEX_RULES_END"
+    uninstall_marker_block "~/.codex/AGENTS.md の共通規約ブロック" "$CODEX_AGENTS_MD" "$GLOBAL_RULES_BEGIN" "$GLOBAL_RULES_END"
+    uninstall_codex_hooks
+    log_info "Codex 側の削除完了 - Skills: ${codex_skills_count} 件, Agents: ${codex_agents_count} 件"
+}
+
+# status の [Codex] 節。配置先ごとの件数と、ずれの有無を 1 行ずつ出す
+show_codex_status() {
+    echo -e "${BLUE}[Codex]${NC} (${CODEX_DIR}, ${CODEX_SKILLS_DIR})"
+    if [[ ! -d "$CODEX_DIR" ]]; then
+        echo "  (~/.codex が存在しません。Codex への展開は行われません)"
+        return 0
+    fi
+
+    local skill_dir skill_name total=0 linked=0 foreign=0 target_link
+    for skill_dir in "$REPO_SKILLS_DIR"/*/; do
+        [[ -d "$skill_dir" ]] || continue
+        skill_name=$(basename "$skill_dir")
+        [[ "$skill_name" == _* ]] && continue
+        total=$((total + 1))
+        target_link="${CODEX_SKILLS_DIR}/${skill_name}"
+        if [[ -L "$target_link" && "$(readlink "$target_link")" == "$skill_dir" ]]; then
+            linked=$((linked + 1))
+        elif [[ -e "$target_link" || -L "$target_link" ]]; then
+            foreign=$((foreign + 1))
+        fi
+    done
+    if [[ "$linked" -eq "$total" ]]; then
+        echo -e "  ${GREEN}✓${NC} Skills: ${linked}/${total} 件リンク済み"
+    else
+        echo -e "  ${YELLOW}!${NC} Skills: ${linked}/${total} 件リンク済み（衝突・他者のリンク ${foreign} 件。./setup.sh install で張り直し、衝突は verify-skills.sh が知らせる）"
+    fi
+
+    local agent_total=0 agent_gen=0 f
+    agent_total=$(find "$REPO_AGENTS_DIR" -name '*.md' -type f ! -name README.md 2>/dev/null | wc -l | tr -d ' ')
+    for f in "$CODEX_AGENTS_DIR"/*.toml; do
+        [[ -f "$f" ]] && is_generated_toml "$f" && agent_gen=$((agent_gen + 1))
+    done
+    if [[ "$agent_gen" -eq "$agent_total" ]]; then
+        echo -e "  ${GREEN}✓${NC} Agents: ${agent_gen}/${agent_total} 件の TOML を生成済み"
+    else
+        echo -e "  ${YELLOW}!${NC} Agents: ${agent_gen}/${agent_total} 件の TOML を生成済み（./setup.sh install で再生成）"
+    fi
+
+    local blocks=0
+    if [[ -f "$CODEX_AGENTS_MD" ]]; then
+        grep -qF "$GLOBAL_RULES_BEGIN" "$CODEX_AGENTS_MD" && blocks=$((blocks + 1))
+        grep -qF "$CODEX_RULES_BEGIN" "$CODEX_AGENTS_MD" && blocks=$((blocks + 1))
+    fi
+    if [[ "$blocks" -eq 2 ]]; then
+        echo -e "  ${GREEN}✓${NC} AGENTS.md: 共通規約と読み替え表のブロックが入っている"
+    else
+        echo -e "  ${YELLOW}!${NC} AGENTS.md: ブロックが ${blocks}/2 個（./setup.sh install で追記）"
+    fi
+
+    if [[ -f "$CODEX_HOOKS_JSON" ]] && command -v jq >/dev/null 2>&1; then
+        local self_now
+        self_now=$(codex_self_hook_count "$(cat "$CODEX_HOOKS_JSON")" 2>/dev/null || echo "?")
+        echo -e "  ${BLUE}·${NC} hooks.json: 自前の hook ${self_now} 本（位置と信頼の検査は verify-skills.sh の check 12）"
+    else
+        echo -e "  ${YELLOW}!${NC} hooks.json: 無いか、jq が使えない"
+    fi
+}
+
 # アンインストール
 uninstall() {
     log_info "インストールされた Scripts, Skills, Commands, Agents を削除しています..."
@@ -495,31 +952,16 @@ uninstall() {
         fi
     done
 
-    # Skills の削除
-    local skills_count=0
-    for skill_dir in "$REPO_SKILLS_DIR"/*/; do
-        if [[ -d "$skill_dir" ]]; then
-            local skill_name=$(basename "$skill_dir")
-            local target_link="${CLAUDE_SKILLS_DIR}/${skill_name}"
-
-            if [[ -L "$target_link" ]]; then
-                # リンク先がこのリポジトリを指しているか確認
-                local link_target=$(readlink "$target_link")
-                if [[ "$link_target" == "$skill_dir" ]]; then
-                    rm "$target_link"
-                    log_success "  ✓ 削除: ${skill_name}"
-                    ((skills_count++))
-                fi
-            fi
-        fi
-    done
+    # Skills の削除（Claude 側は今のチェックアウトへの完全一致。従来の挙動）
+    uninstall_skill_links "$CLAUDE_SKILLS_DIR" exact
+    local skills_count=$SKILL_LINKS_REMOVED
 
     # Agents の削除
     uninstall_md_links "Agents" "$REPO_AGENTS_DIR" "$CLAUDE_AGENTS_DIR"
     local agents_count=$MD_LINKS_REMOVED
 
     # Scripts の削除
-    local scripts_dir="${SCRIPT_DIR}/claude/scripts"
+    local scripts_dir="$REPO_SCRIPTS_DIR"
     local scripts_target_dir="${CLAUDE_DIR}/scripts"
     local scripts_count=0
     for script in "$scripts_dir"/*.sh "$scripts_dir"/*.py; do
@@ -566,17 +1008,10 @@ uninstall() {
     fi
 
     # 共通規約ブロックの除去。ユーザーがブロック外に書いた内容には触れない
-    local global_md="${CLAUDE_DIR}/CLAUDE.md"
-    if [[ -f "$global_md" ]] && grep -qF "$GLOBAL_RULES_BEGIN" "$global_md"; then
-        local tmp="${global_md}.new.$$"
-        awk -v b="$GLOBAL_RULES_BEGIN" -v e="$GLOBAL_RULES_END" '
-            $0 == b { skip = 1 }
-            !skip
-            $0 == e { skip = 0 }
-        ' "$global_md" > "$tmp"
-        mv -f "$tmp" "$global_md"
-        log_success "  ✓ 削除: CLAUDE.md の共通規約ブロック（ブロック外の記述は保持）"
-    fi
+    uninstall_marker_block "CLAUDE.md の共通規約ブロック" "${CLAUDE_DIR}/CLAUDE.md" "$GLOBAL_RULES_BEGIN" "$GLOBAL_RULES_END"
+
+    # Codex 側（自分が置いたものだけ）
+    uninstall_codex
 
     log_info "削除完了 - Scripts: ${scripts_count} 件, Skills: ${skills_count} 件, Commands: ${commands_count} 件, Agents: ${agents_count} 件, Settings: ${settings_count} 件"
 }
@@ -606,7 +1041,7 @@ show_status() {
     fi
 
     echo ""
-    local scripts_dir="${SCRIPT_DIR}/claude/scripts"
+    local scripts_dir="$REPO_SCRIPTS_DIR"
     local scripts_target_dir="${CLAUDE_DIR}/scripts"
     echo -e "${BLUE}[Scripts]${NC} (${scripts_target_dir})"
     if [[ -d "$scripts_target_dir" ]]; then
@@ -727,6 +1162,9 @@ show_status() {
     show_md_links_status "Agents" "$REPO_AGENTS_DIR" "$CLAUDE_AGENTS_DIR"
 
     echo ""
+    show_codex_status
+
+    echo ""
 }
 
 # メイン処理
@@ -776,6 +1214,12 @@ main() {
             install_settings
             echo ""
             install_global_rules
+            echo ""
+            if [[ -d "$CODEX_DIR" ]]; then
+                install_codex
+            else
+                log_info "~/.codex が無いので Codex への展開を省略します"
+            fi
             echo ""
             log_success "セットアップが完了しました！"
             echo ""

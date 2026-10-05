@@ -1,0 +1,8 @@
+rc=0
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "ask",
+    "permissionDecisionReason": "SKILL.md lint の前処理に失敗しました: lint-prep-failed: [Errno 13] Permission denied: '<TMP>/gd-lint/unreadable/SKILL.md' — 内容を目視確認して承認してください。"
+  }
+}

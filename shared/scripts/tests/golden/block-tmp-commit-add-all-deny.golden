@@ -1,0 +1,8 @@
+rc=0
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "deny",
+    "permissionDecisionReason": "tmp/ 配下、もしくは 'git add .' / 'git add -A' / 'git add --all' はコミット禁止です。対象ファイルを明示的に指定してください (CLAUDE.md の Git ルール準拠)。"
+  }
+}
