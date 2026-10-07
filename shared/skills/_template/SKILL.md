@@ -4,6 +4,7 @@ description: <何をする skill か + いつ使うか。120 字以内（T7 / ve
 # 起動制御フィールドの選び方は shared/skills/skill-authoring/SKILL.md の判断表（正本）を見る。
 # 要点だけ: disable-model-invocation: true は Claude の自動起動に加えて Skill ツール呼び出し・
 # subagent preload・scheduled task 起動もブロックするので、どこからも呼ばれない終端 skill にのみ使う。
+# 付けたら agents/openai.yaml（policy: allow_implicit_invocation: false）も置く。Codex はこのフィールドを読まない（verify の check 9）
 # listing budget を空けたいだけなら settings.json の skillOverrides: "name-only" を選ぶ。
 ---
 
@@ -29,7 +30,7 @@ skill 実行に必要なファイル / 環境を列挙する。条件未達時�
 
 ### フェーズ 1: ...
 
-メインフローのステップを段階的に記述。冗長な汎用説明は避け、CLAUDE.md の共通規約で代替できる内容は再宣言しない。
+メインフローのステップを段階的に記述。冗長な汎用説明は避け、AGENTS.md の Skills 共通規約で代替できる内容は再宣言しない。
 
 ## 注意事項
 

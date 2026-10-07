@@ -59,9 +59,15 @@ cd gamonges-prompt
 | Skills | `~/.claude/skills/<name>`（symlink。repo の更新が即座に反映される） | `~/.agents/skills/<name>`（symlink）。同名の他者の実体・リンクには触れず warn する |
 | Agents | `~/.claude/agents/`（symlink。`shared/agents/<カテゴリ>/` の定義を basename で平置きにする。ユーザーレベルの subagent を読み込む場所） | `~/.codex/agents/<name>.toml`（**install 時に `.md` から生成**。**`shared/agents/` を編集したら `./setup.sh install` を再実行する**。手書きの TOML には触れない） |
 | 共通規約 | `~/.claude/CLAUDE.md` のマーカーブロック | `~/.codex/AGENTS.md` のマーカーブロック 2 つ（共通規約と、Codex 専用の読み替え表 `codex/codex-rules.md`） |
-| Hook | `~/.claude/settings.json`（symlink）の定義が `~/.claude/scripts/` を実行する | `~/.codex/hooks.json` の**自前エントリだけ**（各イベントの先頭のグループ。Muxy・Orca の位置は動かさない）。変わったら Codex の `/hooks` で信頼し直す |
+| Hook | `~/.claude/settings.json`（symlink）の定義が `~/.claude/scripts/` を実行する | `~/.codex/hooks.json` の**自前エントリだけ**（各イベントの先頭のグループ。Muxy・Orca の位置は動かさない）。変わったら Codex の `/hooks` で信頼し直す（効かない経路は「Codex で使うときの注意」） |
 | settings.json | `~/.claude/settings.json`（symlink） | — |
 | Scripts | `~/.claude/scripts/`（**実体コピー**。編集・pull したら `./setup.sh install` を再実行する） | （共通。Codex の hook も同じスクリプトを実行する） |
+
+install が失敗したとき・並行して実行したとき:
+
+- `~/.claude/CLAUDE.md` の共通規約と、Codex 側の各段（hooks.json → skills → agents → `~/.codex/AGENTS.md` の順）は、1 つが失敗しても残りの段を最後まで実行し、最後に失敗した段の一覧を出して exit 1 で終わる（完了メッセージは出ない。理由は各段の ✗ の行にある）。hooks.json を最初に置くのは、他の段の失敗で Codex のガードが入らないままにしないため。それより前の scripts・skills・agents・settings.json の配置で失敗したときは、その場で止まる
+- 次のときは、そのファイルに何も書き込まずに段を失敗させる（uninstall は同じ場合に撤去せず warn する）: 読めない、またはマーカーの並びが「BEGIN 行 1 つ・その後ろに END 行 1 つ」でない `~/.claude/CLAUDE.md`・`~/.codex/AGENTS.md`（BEGIN 以降を消さないため。手で直す）、空・JSON のオブジェクトでない `~/.codex/hooks.json`、読んだ後に他のツール（Codex・Orca・Muxy）が書き換えた hooks.json（もう一度 install する）、hooks.json に自前 hook が残っているのに自前 hook を 1 本も含まない `claude/settings.json`（撤去は uninstall の役目）
+- install・uninstall・migrate は `~/.claude/.setup.lock` で直列化する（status は取らない）。実行中に別の setup.sh を起動すると、後の方が PID を出して止まる。強制終了（SIGKILL 等）の後にロックが残ったら、他に setup.sh が動いていないことを確かめてから `rm -rf ~/.claude/.setup.lock` で消す（自動では奪わない）
 
 ### 状態確認
 
@@ -105,11 +111,15 @@ git pull
 
 - **skill は `$name` で呼ぶ**（Claude Code の `/name` に当たる）。skill・agent の本文は Claude Code の語彙（`/name`・`AskUserQuestion`・`Skill` ツール等）で書かれており、`~/.codex/AGENTS.md` に入る読み替え表（`codex/codex-rules.md`）が Codex 向けに読み替える
 - `disable-model-invocation: true` の skill は、Claude Code では `/` 呼び出しのみ。Codex では frontmatter のこのフィールドが効かないので、skill ごとの `agents/openai.yaml`（`policy: allow_implicit_invocation: false`）で自然文からの起動を止めている。`verify-skills.sh` の check 9 が一致を検査する
-- **hook の信頼**: Codex は hook の信頼を「配列上の位置と定義」に紐づけ、変わった hook は `/hooks` で信頼し直すまでスキップする（= ガードが黙って開く）。install は自前の hook だけを各イベントの先頭に置いて、Orca・Muxy の位置を動かさない。`./setup.sh install` が hooks.json を書き換えたり、scripts を更新したりしたら、Codex で `/hooks` を開いて「要レビュー」が出ていないか確認する（check 12 が位置と信頼キーを検査する）
-- Codex は `ask`（確認プロンプト）に未対応なので、確認が要る操作の hook は Codex では `deny` で止め、理由に `[要確認]` と付ける。モデルはユーザーに確認して、ユーザー自身に実行してもらう
+- **hook の信頼**: Codex は hook の信頼を「配列上の位置と定義」に紐づけ、変わった hook は `/hooks` で信頼し直すまでスキップする（= ガードが黙って開く）。install は自前の hook だけを各イベントの先頭に置いて、Orca・Muxy の位置を動かさない。`./setup.sh install` が hooks.json を書き換えたり、自前 hook が指すスクリプトを更新したりしたら（install が最後に案内する）、Codex で `/hooks` を開いて「要レビュー」が出ていないか確認する（check 12 が位置と信頼キーを検査する）。install の hooks.json の段が「先頭の自前グループの後ろに自前の hook があります」で失敗したら（hooks.json には書き込まない）、自前の hook を先頭のグループにまとめてから install をやり直し、`/hooks` でそのイベントの全件を信頼し直す
+- Codex は `ask`（確認プロンプト）に未対応なので、確認が要る操作の hook は Codex では `deny` で止め、理由に `[要確認]` と付ける。モデルはユーザーに確認して、ユーザー自身に実行してもらう（SKILL.md の lint の frontmatter の deny は、直した内容で再実行する）
 - Codex の「Claude 取り込み機能」が `~/.codex/AGENTS.md`・`hooks.json`・repo 直下の `AGENTS.md` を書き換えることがある。ずれたら `./shared/scripts/verify-skills.sh` と `git status` で気づける
-- `~/.agents/skills` は他のツール（skills CLI 等）も書き込む共有の場所。同名の実体（例: Bugbot 用の `review`）があると install は触らず warn し、その skill は Codex で使えないまま残る
+- `~/.agents/skills` は他のツール（skills CLI 等）も書き込む共有の場所。同名の実体（例: Bugbot 用の `review`）があると install は触らず warn する。その名前を Codex で呼ぶと、repo の skill ではなく既存の実体が起動する（例: `$review` は Bugbot のレビューを走らせ、`tmp/review/unified.md` を作らないので `/fix` へ続かない）。repo 側を使うなら、既存の実体を別名に退避してから install し直す
 - Codex が読む指示は `~/.codex/AGENTS.md` と repo 直下の `AGENTS.md` の合計で 32 KiB まで。超えると後から読まれる repo 直下の `AGENTS.md` が欠ける（check 11 が検査する）
+- **ガードが効かない経路**（hook では塞げないので、書き方で避ける。避け方は読み替え表にある）
+  - `write_stdin` で対話シェルに打ち込んだコマンドは、どの hook も通らない
+  - シェルで `apply_patch <<'EOF'` を実行すると、hook には `Bash` として届き、SKILL.md の lint に当たらない
+  - `exec_command` の `workdir` は hook に渡らず、contract-link は turn の作業ディレクトリのリポジトリを検査する。tmp-commit と破壊的 git はコマンド文字列だけで判定するので影響しない。第一ガードの `skip-worktree` は経路を問わず効くので、これは 2 枚目の穴（`workdir` が渡らないことはバイナリの解析による推定で、実機の入力では採取していない）
 
 ## 📚 Skills 一覧
 
@@ -117,7 +127,7 @@ git pull
 
 > **起動方法（重要）**: `disable-model-invocation: true` を付けた skill は **`/` 呼び出しのみ**で、自然言語からは起動しない。無反応で終わるのではなく有効な別実装（plugin など）に流れることがあるため、明示的に `/名前` で呼ぶ。
 > `settings.json` の `skillOverrides: "name-only"` を付けた skill は listing に name だけ載る（description が落ちるだけで、自然言語からの起動は可能）。
-> 現在の状態: `grep -l 'disable-model-invocation: true' shared/skills/*/SKILL.md` と `jq .skillOverrides claude/settings.json`
+> 現在の状態: `grep -l '^disable-model-invocation: true' shared/skills/*/SKILL.md | xargs -n1 dirname | xargs -n1 basename` と `jq .skillOverrides claude/settings.json`
 
 ### 開発ワークフロー系
 | スキル名 | 説明 |
@@ -238,7 +248,7 @@ description: Brief description of what this Skill does
 1. `shared/agents/<カテゴリ>/` に `.md` ファイルを作成する。frontmatter の `name` はファイル名と一致させ、`shared/agents/` 全体で一意にする（書き方の規約は `shared/skills/skill-authoring/SKILL.md` の「SubAgents の追加」）
 2. `./setup.sh install` を再実行（`~/.claude/agents/` を初めて作った場合は、Claude Code のセッションを開き直す）。Codex には install 時に TOML が生成される（**`.md` を編集したら再実行しないと、Codex には古い TOML が残る**。`verify-skills.sh` の check 10 が検知する）
 
-Codex では frontmatter のうち `name`・`description`・`tools`・`skills` だけが意味を持つ。`tools` に `Write`・`Edit`・`MultiEdit`・`NotebookEdit` が無い agent は `sandbox_mode = "read-only"` になり、`tools` が無い agent は親を継承する。それ以外の `tools` の制限（例: WebSearch の有無）と `model:` は Codex に渡らない。`skills:` は本文の先頭で SKILL.md を読ませる指示に変換される。未知の frontmatter キー・name とファイル名の不一致・Codex の組み込み agent（`default`・`worker`・`explorer`）と同じ name は、生成がエラーになる
+Codex では frontmatter のうち `name`・`description`・`tools`・`skills` だけが意味を持つ。`tools` に `Write`・`Edit`・`MultiEdit`・`NotebookEdit` が無い agent は `sandbox_mode = "read-only"` になり、`tools` が無い agent は親を継承する。それ以外の `tools` の制限（例: WebSearch の有無）と `model:` は Codex に渡らない。`skills:` は本文の先頭で SKILL.md を読ませる指示に変換される。未知の frontmatter キー・name とファイル名の不一致・Codex の組み込み agent（`default`・`worker`・`explorer`）と同じ name・空の本文・`tools: null` のような null・真偽値の `tools`・引用符付きや空のリスト項目は、生成がエラーになる（Codex に渡さないキーを増やすなら、`codex/gen-agents.py` の `ALLOWED_KEYS` に足す。TOML には出ない）
 
 ## ⚠️ 注意事項
 

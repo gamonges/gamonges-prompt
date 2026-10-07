@@ -33,7 +33,7 @@ Claude Code と Codex で使用する Skills、SubAgents のコレクション�
 
 **install はメインチェックアウトから実行する。** settings.json と skills は symlink のままなので install 元のチェックアウトを全プロジェクトのランタイムが参照する。worktree から install すると、その worktree を削除した瞬間に deny リスト・hook 定義・全 skill・`~/.claude/agents/` の subagent がまとめて失われる（hook と違って何も失敗しないので気づけない）。linked worktree から実行すると `./setup.sh install` が警告する。
 
-構造的検証は `./shared/scripts/verify-skills.sh`（fail があれば exit 1、warn のみなら exit 0。check 4 が scripts の同期・orphan・install 元を、check 5 が listing budget を見る。Codex 側は check 8（skills）・9（暗黙起動の抑止）・10（TOML の同期）・11（AGENTS.md のブロックとサイズ）・12（hooks.json の位置と信頼）、7(1) が `decide_ask_or_deny` の複製と「自分のリンク」の判定の一致を見る）。
+構造的検証は `./shared/scripts/verify-skills.sh`（fail があれば exit 1、warn のみなら exit 0。check 4 が scripts の同期・orphan・install 元を、check 5 が listing budget を見る。Codex 側は check 8（skills）・9（暗黙起動の抑止）・10（TOML の同期）・11（AGENTS.md のブロックとサイズ）・12（hooks.json の位置と信頼）、7(1) が `decide_ask_or_deny` の複製と「自分のリンク」・マーカーの並びの判定の本体の一致を見る）。
 
 **ガードレールの挙動検証は `bash shared/scripts/tests/test-guardrails.sh`（`shared/scripts/` を編集したら実行する）。** 対象はいずれも fail-open 型（ガードが黙って開く / error が黙って消える）で、壊れても何も起きないため通常の動作確認では検知できない。Claude Code の入力と Codex の入力（`turn_id` あり）の両方を検査する。CI が無い本リポジトリでは、このテストが回帰を捉える唯一の手段になる。`./shared/scripts/verify-skills.sh --with-behavior-tests` からも呼べる。`setup.sh` と `verify-skills.sh` の**配置処理**（リンク先・実体コピー・前回 sha の判定）は、sandbox HOME で実プロセスを走らせる `bash shared/scripts/tests/test-setup-codex.sh` が検証する（`setup.sh` を編集したら実行する）。
 
@@ -78,16 +78,16 @@ export OTEL_EXPORTER_OTLP_HEADERS="DD-API-KEY=$CLAUDE_CODE_TELEMETRY_DD_API_KEY"
 - **パッケージ名もリポジトリパスも持たない汎用パターン**にした。settings.json は PUBLIC リポジトリにコミットされるため引数にパスを書けず、Claude Code は settings.json `env` の `${VAR}` 展開を非サポートなので環境変数でも渡せない。汎用にすると適用範囲も広がる（pnpm workspace は `workspace:` を使うので、コミットされた `link:` / `file:` はほぼ常に事故）
 - **`deny` ではなく `ask`**。`file:` を正規に使うリポジトリでの誤爆に備える（`bypassPermissions` 下では deny は確認プロンプトなしでブロックされる）
 - **足切り（基点に `pnpm-lock.yaml` が無ければ素通し）を fail-closed より前に置く**。逆順だと変数展開を含む commit が pnpm 非使用リポジトリでも `ask` になり、**本リポジトリ自身が該当する**。日常的に出る ask は「中身を読まずに承認する習慣」を育て、fail-open とは別方向で同じくガードを無効化する
-- **第一ガードは hook ではない**。`link-contract.sh` が張る `git update-index --skip-worktree` が経路を問わず巻き込みを防ぎ、hook は 2 枚目（Claude Code の Bash 経路のみ / wrapper 経由の commit は素通し）
+- **第一ガードは hook ではない**。`link-contract.sh` が張る `git update-index --skip-worktree` が経路を問わず巻き込みを防ぎ、hook は 2 枚目（Bash 経路のみ。Codex の `workdir` と wrapper 経由の commit は素通し）
 
 ### hook の判断記録（Codex）
 
 `~/.codex/hooks.json` の自前エントリ（command が `/.claude/scripts/` を含む hook）は、`claude/settings.json` から生成する。定義の正本は 1 か所。
 
 - **自前グループは各イベントの先頭に固定する。** Codex の hook の信頼は `config.toml` の `[hooks.state."<hooks.json の絶対パス>:<event の snake_case>:<グループ index>:<hook index>"]` で、位置が 1 つずれると中身が同じでも「要レビュー」になりスキップされる（= ガードが黙って開く）。Orca・Muxy のグループは自前グループの後ろに居るので、先頭を同じ数で差し替えれば位置は動かない（実機の並びなら初回の install から書き込まない）。数が変わるときだけ、そのイベントの全件を `/hooks` で信頼し直す（install が案内する）。先頭以外に自前の hook があるときは、推測で並べ替えず失敗する
-- **Codex では `ask` を `deny` に変える。** Codex は確認プロンプトに未対応で、未対応の値は hook の失敗として扱われ操作が続行する。入力に `turn_id` があれば Codex（Claude Code の入力には無い）。判定は各 hook に複製した `decide_ask_or_deny` で行い、共通ファイルは `source` しない（`source` の失敗は exit 2 以外になりガードが開く）。複製の欠落と、関数を通さない ask の直書きは verify の check 7(1) が検知する。理由には `[要確認]` を付け、モデルはユーザーに確認して、ユーザー自身に実行してもらう
+- **Codex では `ask` を `deny` に変える。** Codex は確認プロンプトに未対応で、未対応の値は hook の失敗として扱われ操作が続行する。入力に `turn_id` があれば Codex（Claude Code の入力には無い）。判定は各 hook に複製した `decide_ask_or_deny` で行い、共通ファイルは `source` しない（`source` の失敗は exit 2 以外になりガードが開く）。複製の欠落・本体の不一致と、関数を通さない ask の直書きは verify の check 7(1) が検知する。理由には `[要確認]` を付け、モデルはユーザーに確認して、ユーザー自身に実行してもらう（SKILL.md の lint の frontmatter の deny は、直した内容で再実行する）
 - **`apply_patch` で書かれる SKILL.md も lint する。** Codex は SKILL.md を Write / Edit ではなく `apply_patch` で編集し、入力に `file_path` が無い（patch 本文は `tool_input.command`）。以前は lint が黙って開いていた。patch の書式は Codex 0.160.0 に同梱の文法に従い、patch を解釈できないとき・現ファイルに当てられないときは、SKILL.md に触れる疑いがあれば止める（fail-closed）
-- **未確定（G-1）: 信頼ハッシュがスクリプトの中身を含むか。** 含む場合、scripts を更新すると信頼が外れて hook がスキップされる。実測するまで、install は scripts を更新したら `/hooks` の確認を案内し、verify の check 12 は mtime の比較を INFO に留める
+- **未確定（G-1）: 信頼ハッシュがスクリプトの中身を含むか。** 含む場合、scripts を更新すると信頼が外れて hook がスキップされる。実測するまで、install は自前 hook が指すスクリプトを更新したら `/hooks` の確認を案内し、verify の check 12 は mtime の比較を INFO に留める
 
 ### portability 課題（Claude Code 固有。F-7 で対応予定）
 
@@ -115,7 +115,7 @@ Skills は開発ワークフローの各ステップを担う。**下図の矢�
 
 ### 自然言語では起動しない skill
 
-`disable-model-invocation: true` を付けた skill は **`/` 呼び出しのみ**で、自然言語からは起動しない（一覧: `grep -l 'disable-model-invocation: true' shared/skills/*/SKILL.md | xargs -n1 dirname | xargs -n1 basename`）。
+`disable-model-invocation: true` を付けた skill は **`/` 呼び出しのみ**で、自然言語からは起動しない（一覧: `grep -l '^disable-model-invocation: true' shared/skills/*/SKILL.md | xargs -n1 dirname | xargs -n1 basename`）。
 
 **無反応で終わるのではなく、有効な別実装に流れる**点に注意する。例: 「worktree を掃除して」は `worktree-cleanup` ではなく commit-commands plugin の `clean_gone` に吸われ、claude-context index の `clear_index` 回収が行われずに collection が孤児化する。`/worktree-cleanup` と明示すること。
 

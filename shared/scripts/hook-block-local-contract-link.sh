@@ -22,7 +22,8 @@ set -euo pipefail
 
 INPUT=$(cat)
 # malformed JSON は silent miss を生むため非ゼロ終了して可観測化
-if ! echo "$INPUT" | jq -e . >/dev/null 2>&1; then
+# オブジェクトでない入力（配列・tool_input が false 等）も止める。jq -e . は通し、後続の jq が exit 5 で落ちて素通しする
+if ! echo "$INPUT" | jq -e 'type == "object" and ((.tool_input | type) | . == "object" or . == "null")' >/dev/null 2>&1; then
   echo "$(basename "$0"): malformed input JSON" >&2
   exit 2
 fi
@@ -41,12 +42,14 @@ trace() {
 # （Claude Code の入力には無い）ので、それで見分けて ask を deny に変え、確認をユーザーに戻す。
 # 共通ファイルを source しない: source が失敗すると exit コードが 2 以外になり、ガードが黙って開く。
 # 同じ関数を ask を返す hook に複製し、verify-skills.sh の対称性 check が存在を確かめる
-decide_ask_or_deny() {  # $1=理由
+decide_ask_or_deny() {  # $1=理由, $2=Codex で止めたときの次の行動（省略可）
   local decision="ask" reason="$1"
   if echo "$INPUT" | jq -e 'has("turn_id")' >/dev/null 2>&1; then
     decision="deny"
-    reason="[要確認] ${reason} — Codex は確認プロンプトに未対応のため止めました。ユーザーに確認し、ユーザー自身に実行してもらってください。"
+    reason="[要確認] ${reason} — Codex は確認プロンプトに未対応のため止めました。${2:-ユーザーに確認し、ユーザー自身に実行してもらってください。}"
   fi
+  # trace に実際の判定を記録するため（Codex では deny）
+  LAST_DECISION="$decision"
   jq -n --arg decision "$decision" --arg reason "$reason" '{
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
@@ -244,7 +247,7 @@ check_commit() {  # $1=git commit の一致文字列
   #    ここまで来た時点で pnpm を使うリポジトリなので、ask に価値がある
   if [[ "$base_resolved" -eq 0 ]]; then
     ask "git commit の対象リポジトリを静的に特定できませんでした（変数展開を含むパス / 複数の cd / 実在しないパス など）。pnpm を使うリポジトリなので、依存宣言が link: / file: のままの package.json を巻き込んでいないか確認のうえ承認してください。"
-    trace "matched=true decision=ask reason=base-unresolved"
+    trace "matched=true decision=${LAST_DECISION:-ask} reason=base-unresolved"
     return 1
   fi
 
@@ -292,14 +295,14 @@ check_commit() {  # $1=git commit の一致文字列
   pkg_diff=$(git -C "$base" "${DIFF_SCOPE[@]}" -- '*package.json' 2>/dev/null || true)
   if matches "$pkg_diff" '^\+[^+].*"[^"]+"[[:space:]]*:[[:space:]]*"(link:|file:)'; then
     ask "commit 対象の package.json に link: / file: のローカル依存宣言が含まれています。ローカル結合のまま commit すると CI の --frozen-lockfile が壊れます。unlink-contract.sh で復元してから commit するか、正規の file: 依存であることを確認のうえ承認してください。"
-    trace "matched=true decision=ask reason=local-link-package-json base=$base scope=$scope_label"
+    trace "matched=true decision=${LAST_DECISION:-ask} reason=local-link-package-json base=$base scope=$scope_label"
     return 1
   fi
 
   lock_diff=$(git -C "$base" "${DIFF_SCOPE[@]}" -- '*pnpm-lock.yaml' 2>/dev/null || true)
   if matches "$lock_diff" '^\+[^+].*specifier:[[:space:]]*['"'"'"]?(link:|file:)'; then
     ask "commit 対象の pnpm-lock.yaml に link: / file: のローカル解決が含まれています。ローカル結合のまま commit すると CI の --frozen-lockfile が壊れます。unlink-contract.sh で復元してから commit するか、正規の file: 依存であることを確認のうえ承認してください。"
-    trace "matched=true decision=ask reason=local-link-lockfile base=$base scope=$scope_label"
+    trace "matched=true decision=${LAST_DECISION:-ask} reason=local-link-lockfile base=$base scope=$scope_label"
     return 1
   fi
 
@@ -310,7 +313,7 @@ check_commit() {  # $1=git commit の一致文字列
   ws_diff=$(git -C "$base" "${DIFF_SCOPE[@]}" -- '*pnpm-workspace.yaml' 2>/dev/null || true)
   if matches "$ws_diff" '^\+[^+].*['"'"'"]?[^[:space:]'"'"'"]+['"'"'"]?:[[:space:]]*['"'"'"]?(link:|file:)'; then
     ask "commit 対象の pnpm-workspace.yaml に link: / file: のローカル結合（overrides）が含まれています。ローカル結合のまま commit すると CI の --frozen-lockfile が壊れます。unlink-contract.sh で復元してから commit するか、正規の file: 依存であることを確認のうえ承認してください。"
-    trace "matched=true decision=ask reason=local-link-workspace base=$base scope=$scope_label"
+    trace "matched=true decision=${LAST_DECISION:-ask} reason=local-link-workspace base=$base scope=$scope_label"
     return 1
   fi
 

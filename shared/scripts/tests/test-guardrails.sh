@@ -26,6 +26,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
 HOOK="$REPO_ROOT/shared/scripts/hook-block-local-contract-link.sh"
 TMP_HOOK="$REPO_ROOT/shared/scripts/hook-block-tmp-commit.sh"
+CONFIRM_HOOK="$REPO_ROOT/shared/scripts/hook-confirm-destructive-git.sh"
 LINT="$REPO_ROOT/shared/skills/verify-scenario/scripts/verification-lint.mjs"
 ORPHAN="$REPO_ROOT/shared/skills/worktree-cleanup/scripts/find-orphan-collections.mjs"
 
@@ -94,6 +95,16 @@ assert_contains() {  # $1=ラベル, $2=実出力, $3=期待する部分文字�
         fail "$1"
         echo "       期待する部分文字列: $3" >&2
         echo "       実際の出力: ${2:-（出力なし）}" >&2
+    fi
+}
+
+assert_not_contains() {  # $1=ラベル, $2=実出力, $3=含まれてはいけない部分文字列
+    if [[ "$2" != *"$3"* ]]; then
+        pass "$1"
+    else
+        fail "$1"
+        echo "       含まれてはいけない部分文字列: $3" >&2
+        echo "       実際の出力: $2" >&2
     fi
 }
 
@@ -645,6 +656,44 @@ t_many=$(i=0; while [[ $i -lt 4000 ]]; do printf 'git add tmp/f%d.txt; ' "$i"; i
 assert_hook_contains "T-9 ; 区切り 4,000 句でも tmp/ の git add を deny する" \
     "$(run_tmp_hook "$t_many" "$t_dir")" \
     '"permissionDecision": "deny"'
+
+# --- T-10〜T-21: wrapper とグローバルオプション付きの git ---
+# git とサブコマンドの間のグローバルオプション（git -C <path> add）・-c を束ねたシェル（bash -lc・sh -ce）で
+# ガードをすり抜けない。直接の git add の deny は wrapper の ask より先に判定する（ask に弱めない）
+t_expect() {  # $1=ラベル, $2=期待（deny|ask|pass）, $3=command, $4=hook（既定は tmp-commit）
+    local out
+    out="$(run_hook_on "${4:-$TMP_HOOK}" "$3" "$t_dir")"
+    case "$2" in
+        pass) assert_hook_empty "$1" "$out" ;;
+        *) assert_hook_contains "$1" "$out" "\"permissionDecision\": \"$2\"" ;;
+    esac
+}
+t_expect "T-10 git -C <path> add tmp/… を deny する" deny 'git -C /repo add tmp/plan.md'
+t_expect "T-11 複数行の 2 行目の git -C <path> add tmp/… を deny する" deny "$(printf 'echo hi\ngit -C /r add tmp/x')"
+t_expect "T-12 git -C . add src/… は素通しする（-C の引数 . を git add . と取り違えない）" pass 'git -C . add src/x.ts'
+for w in "bash -lc 'git add foo'" "/bin/bash -c 'git add foo'" "zsh -lc 'git add foo'" "sh -c 'git add foo'"; do
+    t_expect "T-13 git add を運ぶ wrapper（${w%% \'*}）は ask" ask "$w"
+done
+# -c は他のオプション文字と束ねられる。c の後ろの文字を許さないと、-ce で素通しに戻る（ガードが開く方向の回帰）
+for w in "bash -ce 'git add -A'" "bash -cex 'git add .'" "sh -ce 'git add -A'"; do
+    t_expect "T-14 -c を束ねた wrapper（${w%% \'*}）は ask" ask "$w"
+done
+t_expect "T-15 wrapper の中の git -C <path> add は ask" ask "bash -lc 'git -C /r add tmp/x'"
+t_expect "T-15 bash --login -c は ask" ask "bash --login -c 'git add foo'"
+# 外側の境界: ssh -c（暗号の指定）・flash -c を wrapper と取り違えない
+t_expect "T-16 ssh -c は wrapper ではない（素通し）" pass 'ssh -c aes128-ctr host git add .'
+t_expect "T-16 flash -c は wrapper ではない（素通し）" pass "flash -c 'git add foo'"
+t_expect "T-17 git -C <path> reset --hard は ask" ask 'git -C /repo reset --hard' "$CONFIRM_HOOK"
+t_expect "T-17 git -C <path> push --force は ask" ask 'git -C /r push --force' "$CONFIRM_HOOK"
+t_expect "T-18 wrapper の外の直接の git add -A は deny（wrapper の ask に弱めない）" deny "bash -c 'echo hi' && git add -A"
+t_expect "T-19 2 つ目以降の git add の tmp/ も deny する" deny 'git add src/a.ts && git add tmp/x'
+# :!tmp/ の除外は git add の出現ごと（行単位）。コマンド全体で 1 回見ると、どこかの :!tmp/ で全部の判定が止まる
+t_expect "T-20 :!tmp/ の除外は、別の git add の tmp/ を素通しさせない" deny "git add src ':!tmp/' && git add tmp/c"
+# T-21: 破壊的 git の行の後ろに約 64 KB 超が続くと、パイプの grep -q が SIGPIPE で落ちて素通しする（位置を問わない）
+t_expect "T-21 先頭行の git reset --hard の後ろに 120 KB が続いても ask" ask \
+    "$(printf 'git reset --hard\n%s' "$t_pad")" "$CONFIRM_HOOK"
+t_expect "T-21 2 行目の git reset --hard の後ろに 120 KB が続いても ask" ask \
+    "$(printf 'echo hi\ngit reset --hard\n%s' "$t_pad")" "$CONFIRM_HOOK"
 
 # --- F-5: 変更ファイルが多い commit でもガードが働く（SIGPIPE + pipefail の回帰） ---
 # grep -q は最初のマッチで終了する。書き込み側（git）がまだ書いている途中だと SIGPIPE で
@@ -1227,8 +1276,9 @@ assert_orphan "W-16 ~/.claude.json も環境変数も無ければ ~/.context/.en
 # 変換のために hook を触っても、turn_id の無い Claude Code の出力は 1 バイトも変えてはいけない。
 # ゴールデンは変換を入れる前の出力を固定したもの。作り直す（UPDATE_GOLDEN=1）のは、契約を
 # 意図して変えたときだけにする（作り直せば何でも通るので、回帰の検出力はここで決まる）
+# GD-6・GD-7 の理由文には skill の配置パス（shared/skills/_template/…）が入る。配置を移したら
+# ゴールデンも作り直す（契約の意図した変更にあたる）
 GOLDEN_DIR="$SCRIPT_DIR/golden"
-CONFIRM_HOOK="$REPO_ROOT/shared/scripts/hook-confirm-destructive-git.sh"
 LINT_HOOK="$REPO_ROOT/shared/scripts/hook-lint-skill-frontmatter.sh"
 
 # 一時ディレクトリのパスは実行ごとに変わる（macOS では /var と /private/var の 2 表記がある）
@@ -1254,7 +1304,7 @@ assert_golden() {  # $1=ラベル, $2=ゴールデンの名前, $3=hook, $4=入�
         cp "$WORK/golden.actual" "$file"
         pass "$1（ゴールデンを更新した）"
     elif [[ ! -f "$file" ]]; then
-        fail "$1（ゴールデンが無い: $file）"
+        fail "$1（ゴールデンが無い: ${file}）"
     elif cmp -s "$file" "$WORK/golden.actual"; then
         pass "$1"
     else
@@ -1293,13 +1343,17 @@ assert_ask_becomes_deny() {  # $1=ラベル, $2=hook, $3=Claude 入力の JSON, 
 }
 
 # --- 入力 ---
-GD_DESTRUCTIVE='{"tool_input":{"command":"git reset --hard HEAD"},"cwd":"/"}'
-GD_WRAPPER='{"tool_input":{"command":"bash -c \"git add foo\""},"cwd":"/"}'
-GD_ADD_ALL='{"tool_input":{"command":"git add -A"},"cwd":"/"}'
-GD_COMMIT="$(jq -nc --arg w "$f1/apps/web" '{tool_input:{command:"git commit -m x"},cwd:$w}')"
+# Claude Code の実際の入力が持つキーを揃える。Codex の判定を turn_id 以外のキーに広げる回帰を検知するため
+claude_payload() { jq -c '{session_id:"s-test",transcript_path:"/tmp/t.jsonl",cwd:"/",permission_mode:"default",
+                           hook_event_name:"PreToolUse",tool_use_id:"toolu_test"} + .' <<<"$1"; }
+GD_DESTRUCTIVE="$(claude_payload '{"tool_name":"Bash","tool_input":{"command":"git reset --hard HEAD"},"cwd":"/"}')"
+GD_PASS="$(claude_payload '{"tool_name":"Bash","tool_input":{"command":"git status"},"cwd":"/"}')"
+GD_WRAPPER="$(claude_payload '{"tool_name":"Bash","tool_input":{"command":"bash -c \"git add foo\""},"cwd":"/"}')"
+GD_ADD_ALL="$(claude_payload '{"tool_name":"Bash","tool_input":{"command":"git add -A"},"cwd":"/"}')"
+GD_COMMIT="$(claude_payload "$(jq -nc --arg w "$f1/apps/web" '{tool_name:"Bash",tool_input:{command:"git commit -m x"},cwd:$w}')")"
 
 lint_write() {  # $1=file_path, $2=content
-    jq -nc --arg p "$1" --arg c "$2" '{tool_name:"Write",tool_input:{file_path:$p,content:$c}}'
+    claude_payload "$(jq -nc --arg p "$1" --arg c "$2" '{tool_name:"Write",tool_input:{file_path:$p,content:$c}}')"
 }
 LINT_NO_FM="$(lint_write /fx/skills/demo/SKILL.md $'no frontmatter here\n')"
 LINT_NO_DESC="$(lint_write /fx/skills/demo/SKILL.md $'---\nname: demo\n---\nbody\n')"
@@ -1314,14 +1368,14 @@ mkdir -p "$GD_LINT_DIR/unreadable" "$GD_LINT_DIR/readable"
 printf '%s\n' '---' 'name: demo' 'description: Does a thing. 使用する時に呼ぶ。' '---' 'body' >"$GD_LINT_DIR/unreadable/SKILL.md"
 cp "$GD_LINT_DIR/unreadable/SKILL.md" "$GD_LINT_DIR/readable/SKILL.md"
 chmod 000 "$GD_LINT_DIR/unreadable/SKILL.md"
-LINT_EDIT_FAIL="$(jq -nc --arg p "$GD_LINT_DIR/unreadable/SKILL.md" '{tool_name:"Edit",tool_input:{file_path:$p,old_string:"body",new_string:"changed"}}')"
-LINT_MULTI_FAIL="$(jq -nc --arg p "$GD_LINT_DIR/readable/SKILL.md" '{tool_name:"MultiEdit",tool_input:{file_path:$p,edits:["not-a-dict"]}}')"
-LINT_EDIT_OK="$(jq -nc --arg p "$GD_LINT_DIR/readable/SKILL.md" '{tool_name:"Edit",tool_input:{file_path:$p,old_string:"body",new_string:"changed"}}')"
+LINT_EDIT_FAIL="$(claude_payload "$(jq -nc --arg p "$GD_LINT_DIR/unreadable/SKILL.md" '{tool_name:"Edit",tool_input:{file_path:$p,old_string:"body",new_string:"changed"}}')")"
+LINT_MULTI_FAIL="$(claude_payload "$(jq -nc --arg p "$GD_LINT_DIR/readable/SKILL.md" '{tool_name:"MultiEdit",tool_input:{file_path:$p,edits:["not-a-dict"]}}')")"
+LINT_EDIT_OK="$(claude_payload "$(jq -nc --arg p "$GD_LINT_DIR/readable/SKILL.md" '{tool_name:"Edit",tool_input:{file_path:$p,old_string:"body",new_string:"changed"}}')")"
 
 # --- GD: turn_id なし（Claude Code）の出力と終了コードが、変換を入れる前と同一 ---
 # 出力箇所ごとに 1 件（理由文まで固定する）。素通しの入力も含め、過剰検知（日常的に出る確認）も捕まえる
 assert_golden "GD-1 confirm-destructive: git reset --hard は ask" confirm-destructive-git-reset-hard "$CONFIRM_HOOK" "$GD_DESTRUCTIVE"
-assert_golden "GD-2 confirm-destructive: 破壊的でない git は素通し" confirm-destructive-git-pass "$CONFIRM_HOOK" '{"tool_input":{"command":"git status"},"cwd":"/"}'
+assert_golden "GD-2 confirm-destructive: 破壊的でない git は素通し" confirm-destructive-git-pass "$CONFIRM_HOOK" "$GD_PASS"
 assert_golden "GD-3 tmp-commit: git add を運ぶ wrapper は ask" block-tmp-commit-wrapper-ask "$TMP_HOOK" "$GD_WRAPPER"
 assert_golden "GD-4 tmp-commit: git add -A は deny" block-tmp-commit-add-all-deny "$TMP_HOOK" "$GD_ADD_ALL"
 assert_golden "GD-5 local-contract-link: staged な link: は ask" block-local-contract-link-package-json-ask "$HOOK" "$GD_COMMIT"
@@ -1354,6 +1408,44 @@ assert_equal "CX-10 lint の必須フィールド欠落は Codex でも deny の
 # 素通しは Codex でも素通し（ask でない入力を deny にしない）
 out="$(printf '%s' "$(jq -c '. + {turn_id: "t-test"}' <<<'{"tool_input":{"command":"git status"},"cwd":"/"}')" | bash "$CONFIRM_HOOK" 2>/dev/null; echo "${PIPESTATUS[1]}" >"$RC_FILE")"
 assert_hook_empty "CX-11 破壊的でない git は Codex でも素通し（出力が空で、exit 0）" "$out"
+
+# --- CX-12・CX-13: Codex で lint が止めたときの次の行動は、用途に合わせる ---
+# 既定の「ユーザー自身に実行してもらう」は、直せば済む frontmatter の欠落にまでユーザーを回す。
+# 既定の文の後ろに新しい文を足しただけの形（食い違う指示が並ぶ）も Red にするため、既定の文が無いことも見る
+codex_of() { jq -c '. + {turn_id: "t-test"}' <<<"$1"; }
+out="$(printf '%s' "$(codex_of "$LINT_NO_FM")" | bash "$LINT_HOOK" 2>/dev/null)"
+assert_contains "CX-12 frontmatter 無しの deny は、frontmatter を付けて編集し直すよう促す" "$(reason_of "$out")" "frontmatter を付けた内容で編集し直してください"
+assert_not_contains "CX-12 frontmatter 無しの deny は、ユーザー自身に実行させない" "$(reason_of "$out")" "ユーザー自身に実行"
+out="$(printf '%s' "$(codex_of "$LINT_NO_TRIGGER")" | bash "$LINT_HOOK" 2>/dev/null)"
+assert_contains "CX-13 トリガー語なしの deny は、このままでよいかをユーザーに確認するよう促す" "$(reason_of "$out")" "このままでよいかユーザーに確認"
+assert_not_contains "CX-13 トリガー語なしの deny は、ユーザー自身に実行させない" "$(reason_of "$out")" "ユーザー自身に実行"
+
+# --- CX-14: trace（CLAUDE_CODE_HOOK_TRACE）に実際の判定を記録する（Codex では deny）---
+TRH="$WORK/trace-home"
+mkdir -p "$TRH"
+printf '%s' "$(codex_of "$GD_DESTRUCTIVE")" | HOME="$TRH" CLAUDE_CODE_HOOK_TRACE=1 bash "$CONFIRM_HOOK" >/dev/null 2>&1
+printf '%s' "$(codex_of "$LINT_NO_TRIGGER")" | HOME="$TRH" CLAUDE_CODE_HOOK_TRACE=1 bash "$LINT_HOOK" >/dev/null 2>&1
+printf '%s' "$(codex_of "$GD_COMMIT")" | HOME="$TRH" CLAUDE_CODE_HOOK_TRACE=1 bash "$HOOK" >/dev/null 2>&1
+trace_log="$(cat "$TRH/.claude/logs/hook-trace.log" 2>/dev/null)"
+assert_contains "CX-14 破壊的 git の trace に Codex での判定（deny）を記録する" "$trace_log" "hook-confirm-destructive-git.sh matched=true decision=deny"
+assert_contains "CX-14 lint の trace に Codex での判定（deny）を記録する" "$trace_log" "decision=deny reason=trigger-missing"
+assert_contains "CX-14 contract-link の trace に Codex での判定（deny）を記録する" "$trace_log" "decision=deny reason=local-link-package-json"
+
+# --- IN-1・IN-2: オブジェクトでない JSON の入力（PreToolUse の 5 本）---
+# jq -e . は配列や {"tool_input":false} を通し、後続の jq が exit 5 で落ちる（exit 2 以外は non-blocking なので素通し）。
+# Claude Code・Codex の正常な入力は常にオブジェクトなので、{} と tool_input: null は従来どおり通す
+for h in "$TMP_HOOK" "$CONFIRM_HOOK" "$LINT_HOOK" "$REPO_ROOT/shared/scripts/hook-block-full-lint.sh" "$HOOK"; do
+    for inp in '[]' '{"tool_input":false}'; do
+        printf '%s' "$inp" | bash "$h" >/dev/null 2>&1
+        rc=$?  # 引数の $(basename …) が先に展開されて $? を上書きするので、すぐに取る
+        assert_equal "IN-1 [$(basename "$h")] ${inp} は exit 2 で止める（素通しにしない）" "2" "$rc"
+    done
+    for inp in '{}' '{"tool_input":null}'; do
+        printf '%s' "$inp" | bash "$h" >/dev/null 2>&1
+        rc=$?
+        assert_equal "IN-2 [$(basename "$h")] ${inp} は従来どおり exit 0" "0" "$rc"
+    done
+done
 
 # =====================================================================
 # AP: apply_patch で書かれる SKILL.md の lint（Codex）
@@ -1601,6 +1693,15 @@ EOF
 )" "$AP")"
 assert_ap "AP-14 *** End of File 付きの hunk を適用でき、正しければ素通し" "" "$out"
 
+# AP-14b・14c: *** End of File のアンカーは、hunk をファイルの末尾に当てる。末尾に --- があるファイルで、
+# アンカーを無視して先頭から探すと frontmatter の開きの --- を消したと解釈して止めてしまう（実パーサは末尾を消す）
+mkdir -p "$AP/skills/eof"
+printf '%s\n' '---' 'name: eof' 'description: Does a thing. 使用する時に呼ぶ。' '---' '# Eof' '' 'Line A' '---' >"$AP/skills/eof/SKILL.md"
+out="$(run_ap "$(printf '%s\n' '*** Begin Patch' '*** Update File: skills/eof/SKILL.md' '@@' '----' '*** End of File' '*** End Patch')" "$AP")"
+assert_ap "AP-14b End of File のアンカーで末尾の --- を消す hunk は素通し（先頭の --- と取り違えない）" "" "$out"
+out="$(run_ap "$(printf '%s\n' '*** Begin Patch' '*** Update File: skills/eof/SKILL.md' '@@' '----' '*** End of File ' '*** End Patch')" "$AP")"
+assert_ap "AP-14c 末尾に空白のある End of File のアンカーも認める" "" "$out"
+
 out="$(run_ap "$(cat <<'EOF'
 *** Begin Patch
 *** Update File: skills/demo/SKILL.md
@@ -1684,6 +1785,118 @@ out="$(run_ap "$(cat <<'EOF'
 EOF
 )" "$AP")"
 assert_ap "AP-21 トリガー語の無い description の Add File は Codex では deny" deny "$out" "トリガー語"
+
+# AP-22〜27c: 見出し・境界の空白と heredoc。Codex 0.160.0 の実パーサは見出しの前後を trim し、
+# 3 種の heredoc を外して適用する（実測）。hook の解釈がずれると、実際に書かれる SKILL.md を検査せずに通す
+out="$(run_ap "$(printf '%s\n' '*** Begin Patch' $'*** Add File: skills/x/SKILL.md \t' '+no frontmatter' '*** End Patch')" "$AP")"
+assert_ap "AP-22 Add の見出しの末尾に空白・タブがあっても SKILL.md として検査する" deny "$out" "YAML frontmatter"
+
+out="$(run_ap "$(printf '%s\n' '*** Begin Patch' '*** Update File: README-old.md' '*** Move to: skills/moved/SKILL.md ' \
+    '@@' '-plain text' '+still no frontmatter' '*** End Patch')" "$AP")"
+assert_ap "AP-23 Move to の末尾に空白があっても移動先の SKILL.md を検査する" deny "$out" "YAML frontmatter"
+
+out="$(run_ap "$(printf '%s\n' '*** Begin Patch' $'*** Update File: skills/demo/SKILL.md\t' '@@' ' ---' '-name: demo' \
+    ' description: Does a thing. 使用する時に呼ぶ。' ' ---' '*** End Patch')" "$AP")"
+assert_ap "AP-24 Update の見出しの末尾にタブがあっても name 行の削除を止める" deny "$out" "必須フィールド"
+
+# Add / Delete の後ろでは、行頭が空白の見出しも見出しになる（Update の本文の中だけは文脈行。AP-27b）
+out="$(run_ap "$(printf '%s\n' '*** Begin Patch' '*** Add File: notes.md' '+hello' ' *** Add File: skills/x/SKILL.md' \
+    '+no frontmatter' '*** End Patch')" "$AP")"
+assert_ap "AP-25 [Add の後] 行頭が空白の Add 見出しも SKILL.md として検査する" deny "$out" "YAML frontmatter"
+out="$(run_ap "$(printf '%s\n' '*** Begin Patch' '*** Delete File: README-old.md' ' *** Add File: skills/x/SKILL.md' \
+    '+no frontmatter' '*** End Patch')" "$AP")"
+assert_ap "AP-25 [Delete の後] 行頭が空白の Add 見出しも SKILL.md として検査する" deny "$out" "YAML frontmatter"
+
+for opener in '<<EOF' "<<'EOF'" '<<"EOF"'; do
+    out="$(run_ap "$(printf '%s\n' "$opener" '*** Begin Patch' '*** Update File: skills/demo/SKILL.md' '@@' '-Line A' \
+        '+Line A2' '*** End Patch' 'EOF')" "$AP")"
+    assert_ap "AP-26 heredoc（${opener}）で包んだ正しい patch は素通し" "" "$out"
+done
+out="$(run_ap "$(cat <<'PATCH'
+<<'EOF'
+*** Begin Patch
+*** Update File: skills/demo/SKILL.md
+@@
+ ---
+-name: demo
+ description: Does a thing. 使用する時に呼ぶ。
+ ---
+*** End Patch
+EOF
+PATCH
+)" "$AP")"
+assert_ap "AP-26b heredoc で包んだ不正な patch は中身を検査して止める" deny "$out" "必須フィールド"
+
+out="$(run_ap "$(printf '%s\n' '  *** Begin Patch  ' '  *** Environment ID: env-1  ' '  *** Update File: skills/demo/SKILL.md  ' \
+    '@@' '-Line A' '+Line A2' '  *** End Patch  ')" "$AP")"
+assert_ap "AP-27 境界と見出しの前後に空白がある正しい patch は素通し" "" "$out"
+
+# Update の本文の中の行頭が空白の ' ***' は文脈行（notes.md の中身）で、見出しにも patch の終わりにもしない。
+# notes.md は SKILL.md でないので hook は読まない（fixture 不要）
+out="$(run_ap "$(printf '%s\n' '*** Begin Patch' '*** Update File: notes.md' '@@' ' *** Add File: skills/q/SKILL.md' \
+    '+added' '*** End Patch')" "$AP")"
+assert_ap "AP-27b Update の本文中の ' *** Add File:' は文脈行で、SKILL.md の追加にしない" "" "$out"
+out="$(run_ap "$(printf '%s\n' '*** Begin Patch' '*** Update File: notes.md' '@@' ' *** End Patch' '+x' \
+    '*** Update File: skills/demo/SKILL.md' '@@' ' ---' '-name: demo' ' description: Does a thing. 使用する時に呼ぶ。' \
+    ' ---' '*** End Patch')" "$AP")"
+assert_ap "AP-27c Update の本文中の ' *** End Patch' で解析を打ち切らず、後ろの SKILL.md も検査する" deny "$out" "必須フィールド"
+
+# AP-28・LC-1〜3: SKILL.md の判定は大文字小文字を区別しない。macOS の APFS は区別しないので、
+# skill.md と指定しても SKILL.md が書き換わる
+out="$(run_ap "$(printf '%s\n' '*** Begin Patch' '*** Add File: skills/x/skill.md' '+no frontmatter' '*** End Patch')" "$AP")"
+assert_ap "AP-28 小文字の skill.md の Add も SKILL.md として検査する" deny "$out" "YAML frontmatter"
+out="$(run_ap "$(printf '%s\n' '*** Begin Patch' '*** Add File: skills/x/my-skill.md' '+no frontmatter' '*** End Patch')" "$AP")"
+assert_ap "AP-28b my-skill.md は SKILL.md ではない（素通し）" "" "$out"
+assert_ap "AP-28c 解釈できない patch が小文字の skill.md に触れている疑いでも止める" deny \
+    "$(run_ap $'garbage\n*** Update File: skills/demo/skill.md' "$AP")" "Begin Patch"
+assert_equal "LC-1 小文字の skill.md の Write も検査する（frontmatter 無しは ask）" "ask" \
+    "$(decision_of "$(printf '%s' "$(lint_write /fx/skills/demo/skill.md $'no frontmatter here\n')" | bash "$LINT_HOOK" 2>/dev/null)")"
+out="$(printf '%s' "$(lint_write /fx/skills/demo/my-skill.md $'no frontmatter here\n')" | bash "$LINT_HOOK" 2>/dev/null; echo "${PIPESTATUS[1]}" >"$RC_FILE")"
+assert_hook_empty "LC-2 my-skill.md の Write は検査しない（素通し）" "$out"
+out="$(printf '%s' "$(lint_write /fx/skills/_template/skill.md $'no frontmatter here\n')" | bash "$LINT_HOOK" 2>/dev/null; echo "${PIPESTATUS[1]}" >"$RC_FILE")"
+assert_hook_empty "LC-3 _template/skill.md は大文字小文字を問わず検査対象外（素通し）" "$out"
+
+# PF-1・PF-2: 前処理のエラーは実行ごとの一時ファイル（TMPDIR）に書き、終了時に消す。固定パス /tmp/skill-lint-err を
+# 使うと、並行して走る別の hook の失敗の理由を出し、残骸も残る。偽の python3 は失敗し、その時点の TMPDIR の
+# 中身を stderr に書く（固定パスなら一覧が空、実行ごとの一時ファイルならその名前が出る）
+PF_BIN="$WORK/pf-bin"
+PF_TMP="$WORK/pf-tmp"
+mkdir -p "$PF_BIN" "$PF_TMP"
+cat >"$PF_BIN/python3" <<'EOF'
+#!/bin/bash
+echo "FAKE-PY-FAIL in-tmpdir=[$(ls "$TMPDIR")]" >&2
+exit 1
+EOF
+chmod +x "$PF_BIN/python3"
+pf_run() {  # $1=入力 JSON → hook の出力
+    printf '%s' "$1" | PATH="$PF_BIN:$PATH" TMPDIR="$PF_TMP" bash "$LINT_HOOK" 2>/dev/null
+}
+out="$(pf_run "$(lint_patch "$PATCH_NAME_REMOVED" "$AP" 1)")"
+assert_equal "PF-1 apply_patch の前処理（python）の失敗は Codex では deny" "deny" "$(decision_of "$out")"
+assert_contains "PF-1 理由に前処理のエラーを出す" "$(reason_of "$out")" "FAKE-PY-FAIL"
+assert_not_contains "PF-1 エラーは実行ごとの一時ファイル（TMPDIR）に書く" "$(reason_of "$out")" "in-tmpdir=[]"
+assert_equal "PF-1 終わった後に TMPDIR に一時ファイルを残さない" "0" "$(ls -A "$PF_TMP" | wc -l | tr -d ' ')"
+out="$(pf_run "$LINT_EDIT_OK")"
+assert_equal "PF-2 Edit の前処理（python）の失敗は ask" "ask" "$(decision_of "$out")"
+assert_contains "PF-2 理由に前処理のエラーを出す" "$(reason_of "$out")" "FAKE-PY-FAIL"
+assert_not_contains "PF-2 エラーは実行ごとの一時ファイル（TMPDIR）に書く" "$(reason_of "$out")" "in-tmpdir=[]"
+assert_equal "PF-2 終わった後に TMPDIR に一時ファイルを残さない" "0" "$(ls -A "$PF_TMP" | wc -l | tr -d ' ')"
+
+# --- BG-1〜3: 大きな SKILL.md でも判定を出す ---
+# 本文を環境変数で子プロセスに渡すと、awk が Argument list too long で落ちる。echo | awk で awk が早く exit すると、
+# 書き手が SIGPIPE を受けて set -e で hook ごと落ちる（どちらも判定が出ずに素通し）
+mkdir -p "$AP/skills/big"
+{ printf '%s\n' '---' 'name: big' 'description: Does a thing. 使用する時に呼ぶ。' '---' '# Big'
+  i=0; while [[ $i -lt 30000 ]]; do printf 'line %d padding padding padding padding\n' "$i"; i=$((i + 1)); done; } >"$AP/skills/big/SKILL.md"
+assert_equal "前提: BG-1 の SKILL.md は 1 MB を超える" "yes" "$([[ $(wc -c <"$AP/skills/big/SKILL.md") -gt 1048576 ]] && echo yes || echo no)"
+out="$(run_ap "$(printf '%s\n' '*** Begin Patch' '*** Update File: skills/big/SKILL.md' '@@' ' ---' '-name: big' \
+    ' description: Does a thing. 使用する時に呼ぶ。' ' ---' '*** End Patch')" "$AP")"
+assert_ap "BG-1 1 MB を超える SKILL.md の name 行を消す patch は止める" deny "$out" "必須フィールド"
+big_body="$(i=0; while [[ $i -lt 20000 ]]; do echo "body line $i"; i=$((i + 1)); done)"
+out="$(printf '%s' "$(lint_write /fx/skills/demo/SKILL.md "$(printf '%s\n%s' $'---\nname: demo\n---' "$big_body")")" | bash "$LINT_HOOK" 2>/dev/null)"
+assert_equal "BG-2 description の無い 200 KB の SKILL.md の Write は deny" "deny" "$(decision_of "$out")"
+out="$(printf '%s' "$(lint_write /fx/skills/demo/SKILL.md "$(printf '%s\n%s' $'---\nname: demo\ndescription: Does a thing.\nlicense: x' "$big_body")")" | bash "$LINT_HOOK" 2>/dev/null)"
+assert_equal "BG-3 閉じの --- が無い 200 KB の SKILL.md の Write は ask（素通しにしない）" "ask" "$(decision_of "$out")"
 
 # =====================================================================
 # SY: hook-check-scripts-sync.sh（SessionStart。~/.claude/scripts/ の未同期を通知する）

@@ -13,7 +13,7 @@ description: 実装計画(plan.md)とgit diffを対象に、実装前後で結�
 
 - `--plan <path>`: 対象の実装計画ファイル（デフォルト `./tmp/plan.md`）
 - diff 範囲: `git diff`（staged + unstaged）を対象とし、それが空なら `git diff HEAD~1`（直近コミット）にフォールバックする（`code-comments` と同じ cascading デフォルト）
-- `--artifact`: HTML artifact 生成を行う（デフォルト off）。日常利用（実装後の軽量な事実ベース確認）の頻度が PdM/SRE 共有目的の可視化より高いと想定されるため、opt-in とする
+- `--artifact`: PdM/SRE と共有する可視化ページ（Artifact）を作る（デフォルト off）。共通規約の「共有を求めたとき」の経路で、手元で読むだけなら完了報告の HTML 化で足りる。日常利用（実装後の軽量な事実ベース確認）の頻度が PdM/SRE 共有目的の可視化より高いと想定されるため、opt-in とする
 
 ## ワークフロー上の位置付け
 
@@ -57,4 +57,4 @@ description: 実装計画(plan.md)とgit diffを対象に、実装前後で結�
 ### フェーズ7: 完了報告
 
 - Before/Afterで確認した結合関係の件数と、改善/悪化した件数の概要
-- `--artifact` 未指定の場合: 「HTML化しますか?」と尋ね、Yesなら `/coupling-plan-diff --artifact` の再実行を案内する（自動連鎖はしない）
+- `--artifact` 未指定の場合: Skills 共通規約どおり HTML 化を提案し、了承されたら `html-view tmp/coupling-plan-diff.md --style generic` で開く（`--style` を省くと、ファイル名の `plan` で plan style に誤判定される）。PdM/SRE と共有する散布図つきのページを求められたときだけ、`/coupling-plan-diff --artifact` の再実行を案内する（自動連鎖はしない）

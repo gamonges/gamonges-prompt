@@ -25,14 +25,14 @@ Perform comprehensive code review using specialized AI agents working in paralle
 
 ## Execution Conditions
 
-- Pull Request exists for the current branch (draft or opened), OR the user appended a PR link or number after the command.
+- Pull Request exists for the current branch (draft or opened), OR the user appended a PR link or number after the command. Either way, the PR must be open and its head branch must be the current branch (the diff is taken from the local `HEAD`).
 - If not met: stop immediately, notify the user, do not proceed.
 
 ## Subagent Output Template
 
 Each subagent writes its review to `./tmp/review/{agent-name}-review.md`.
 
-`./tmp/review/` の既存ファイルは、実行のたびに確認せず上書きする。レビューはその時点の差分に対して毎回作り直す契約で、`tmp/` の成果物を黙って上書きしない規約（`AGENTS.md`）の対象外。
+PR が確定した後（ブランチから探す経路でも、引数で PR を渡す経路でも）、`./tmp/review/` の既存ファイルを確認せず消してから書く（前回の `_ci-failures.md` や、今回走らないレビュアーの `*-review.md` を、Phase 4 が今回の結果として読むため）。レビューはその時点の差分に対して毎回作り直す契約で、`tmp/` の成果物を黙って上書きしない規約（`AGENTS.md`）の対象外。消す手順は Phase 1 の bash ブロックにある。
 
 **File path rules**: Always use relative paths from project root with `L{number}` line format (e.g. `src/apps/app/src/routes/_staff/file.tsx:L42-50`). Never use bare file names.
 
@@ -84,13 +84,42 @@ Each subagent writes its review to `./tmp/review/{agent-name}-review.md`.
 ### Phase 1: Collect PR Context
 
 ```bash
-# Verify PR exists
+# Verify PR exists（引数の PR 番号または URL があればそれを使い、無ければ今のブランチの open な PR を探す）
 current_branch=$(git branch --show-current)
-pr_number=$(gh pr list --head "$current_branch" --state all --json number --jq '.[0].number')
+if [ -z "$current_branch" ]; then
+    # detached HEAD。gh pr list --head "" は全 PR を返し、無関係な PR を拾う
+    echo "No branch (detached HEAD): cannot determine the PR"
+    exit 1
+fi
+pr_number="<引数の PR 番号または URL。無ければ空>"
+if [ -z "$pr_number" ]; then
+    pr_number=$(gh pr list --head "$current_branch" --state open --json number --jq '.[0].number')
+fi
 if [ "$pr_number" = "null" ] || [ -z "$pr_number" ]; then
     echo "No PR found for branch: $current_branch"
     exit 1
 fi
+# PR を確かめ、URL で渡されても番号にそろえる。以後は番号で今のリポジトリの PR を引くので、別のリポジトリの URL なら止める
+pr_url=$(gh pr view "$pr_number" --json url --jq '.url') || { echo "PR not found: $pr_number"; exit 1; }
+pr_number=$(gh pr view "$pr_url" --json number --jq '.number')
+if [ "$(gh pr view "$pr_number" --json url --jq '.url' 2>/dev/null)" != "$pr_url" ]; then
+    echo "PR $pr_url is not in this repository"
+    exit 1
+fi
+# open の PR に限る（Execution Conditions）。差分はローカルの HEAD から取るので、今のブランチの PR でなければ止める
+# フォーク PR はブランチ名が同じでも別物（--head も headRefName もブランチ名しか見ない）
+pr_state=$(gh pr view "$pr_number" --json state --jq '.state')
+pr_head=$(gh pr view "$pr_number" --json headRefName --jq '.headRefName')
+pr_fork=$(gh pr view "$pr_number" --json isCrossRepository --jq '.isCrossRepository')
+if [ "$pr_state" != "OPEN" ] || [ "$pr_head" != "$current_branch" ] || [ "$pr_fork" != "false" ]; then
+    echo "PR #$pr_number is $pr_state on branch $pr_head (current: $current_branch). Review needs the open PR of the current branch"
+    exit 1
+fi
+
+# PR が確定した直後に、前回の結果を消す（どちらの経路でもここを通る）。PR の確認より前で消すと、
+# PR の無いブランチで実行したときに /fix が読む前回の unified.md まで消える。
+# rm -f ./tmp/review/* は zsh では空のディレクトリで no matches found になるので find で消す
+find ./tmp/review -mindepth 1 -maxdepth 1 -type f -delete 2>/dev/null; mkdir -p ./tmp/review
 
 # Collect metadata & diff
 base_branch=$(gh pr view "$pr_number" --json baseRefName --jq '.baseRefName')
@@ -101,6 +130,8 @@ full_diff=$(git diff "${base_branch}...HEAD")
 commit_log=$(git log --oneline "${base_branch}...HEAD")
 diff_lines=$(git diff --stat "${base_branch}...HEAD" | tail -1)
 ```
+
+Phase 1 で決めた変数（`$pr_number`・`$base_branch`・`$full_diff`・`$commit_log` 等）は Phase 1.6 以降の bash ブロックでも使う。同じシェルで続けて実行するか、別の呼び出しにするなら `# Collect metadata & diff` 以降の取得だけをやり直す（PR の確定と消去は流し直さない。流し直すと Phase 1.6 が書いた今回の `_ci-failures.md` を消す。空のまま `gh pr checks ""` を呼ぶと別の PR の CI を見て、空の差分をレビューに渡す）。
 
 ### Phase 1.6: Collect CI Status
 

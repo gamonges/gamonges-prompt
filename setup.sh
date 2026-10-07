@@ -60,8 +60,14 @@ REPO_CODEX_RULES="${SCRIPT_DIR}/codex/codex-rules.md"
 REPO_GEN_AGENTS="${SCRIPT_DIR}/codex/gen-agents.py"
 # gen-agents.py が出力する TOML の 1 行目の先頭。「自分が置いたもの」の目印（uninstall・orphan 判定）
 GEN_HEADER_PREFIX="# generated-by: gamonges-prompt setup.sh"
-# install_scripts が更新した（内容が変わった・新規の）スクリプトの本数
-SCRIPTS_UPDATED=0
+# install_scripts が更新した（内容が変わった・新規の）スクリプトの名前。Codex の /hooks の案内に使う
+UPDATED_SCRIPTS=()
+# install の段のうち失敗したものの名前（run_stage が積む）
+STAGE_FAILURES=()
+# install・uninstall・migrate を直列化するロック（acquire_lock）
+SETUP_LOCK="${CLAUDE_DIR}/.setup.lock"
+# Codex の /hooks で信頼を確かめる案内を、install の最後に出すか（install_codex が決める）
+CODEX_TRUST_NOTICE=false
 CODEX_RULES_BEGIN="<!-- BEGIN gamonges-prompt: codex 読み替え表 -->"
 CODEX_RULES_END="<!-- END gamonges-prompt: codex 読み替え表 -->"
 
@@ -80,6 +86,69 @@ log_warning() {
 
 log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# setup.sh 同士の並行実行を止める。固定名の一時ファイルの衝突と、rm → ln -s の間に別の install がリンクを
+# 作ると BSD の ln がその先（チェックアウトの中）に自己参照リンクを作る問題があるため。書き込み先を HOME で共有し、
+# メインと worktree の両方から install されうるので、repo ではなく HOME に置く。
+# 残骸のロックは自動で奪わない（2 本が同時に奪う窓を作らない）。EXIT trap はサブシェル（run_stage の段）では
+# 発火しないので、段が終わってもロックは外れない
+acquire_lock() {
+    mkdir -p "$CLAUDE_DIR" 2>/dev/null || true
+    if ! mkdir "$SETUP_LOCK" 2>/dev/null; then
+        # ロックが無いのに失敗した（その間に他方が外した）ときは 1 回だけやり直す
+        if [[ -d "$SETUP_LOCK" ]] || ! mkdir "$SETUP_LOCK" 2>/dev/null; then
+            if [[ -d "$SETUP_LOCK" ]]; then
+                report_lock_held
+            fi
+            log_error "  ✗ ロックを作れません: ${SETUP_LOCK}（~/.claude の権限を確かめてください）"
+            exit 1
+        fi
+    fi
+    # pid を書く前に trap を張る（書く前に止まってもロックを残さない）。trap の中は失敗させない
+    # （EXIT trap の中のコマンドが失敗すると終了コードが変わる）
+    trap 'rm -rf "$SETUP_LOCK" 2>/dev/null || true' EXIT
+    echo "$$" >"$SETUP_LOCK/pid"
+}
+
+report_lock_held() {
+    local pid comm
+    pid=$(cat "$SETUP_LOCK/pid" 2>/dev/null || true)
+    if [[ -z "$pid" ]]; then
+        log_error "  ✗ 別の setup.sh が実行中です（PID 不明: ロックの取得の直後）。終わってから実行し直してください。続くようなら、他に setup.sh が動いていないことを確かめてから rm -rf ~/.claude/.setup.lock で消してください"
+    elif comm=$(ps -p "$pid" -o comm= 2>/dev/null) && [[ -n "$comm" ]]; then
+        log_error "  ✗ 別の setup.sh が実行中です（PID ${pid}: ${comm}）。終わってから実行し直してください（ロック: ${SETUP_LOCK}）"
+    else
+        log_error "  ✗ ロック ${SETUP_LOCK} が残っていますが、PID ${pid} は動いていません（前の実行が強制終了された可能性があります）。他に setup.sh が動いていないことを確かめてから、rm -rf ~/.claude/.setup.lock で消して実行し直してください"
+    fi
+    exit 1
+}
+
+# 一時リンクを mv -h で名前ごと置き換える。リンクが無い瞬間を作らず、既存のリンク先ディレクトリの中へ入らないため。
+# 置き換え先は symlink か不在であること（実ディレクトリなら mv -h もその中へ移す）。一時名をドットで始めるのは、
+# ln と mv の間で強制終了されたとき、残骸が同名の skill の重複として読み込まれにくくするため
+replace_link() {  # $1=リンク先, $2=リンクのパス
+    local tmp
+    tmp="$(dirname "$2")/.$(basename "$2").tmp.$$"
+    ln -sfn "$1" "$tmp"
+    mv -fh "$tmp" "$2"
+}
+
+# install の段を走らせ、失敗しても続行して段の名前を STAGE_FAILURES に積む。段は ( set -e; … ) で走らせる。
+# f || … ・if ! f の形で呼ぶと f の中の set -e が無効になり、段の内部の失敗が黙って消えるため。
+# 段の中で変えた変数は呼び出し元に戻らない。run_stage を呼ぶ関数を ||・if の条件の中で呼ばない
+# （外側が ||・if の文脈だと、サブシェルの set -e も効かない）
+run_stage() {  # $1=段名, $2...=コマンド
+    local label="$1" rc
+    shift
+    set +e
+    ( set -e; "$@" )
+    rc=$?
+    set -e
+    if [[ $rc -ne 0 ]]; then
+        STAGE_FAILURES+=("$label")
+    fi
+    return 0
 }
 
 # ディレクトリの存在確認
@@ -134,9 +203,8 @@ install_settings() {
         log_warning "  ! 既存をバックアップ: $backup_path"
     fi
 
-    # atomic 置換
-    ln -s "$source_file" "${target_link}.new"
-    mv -f "${target_link}.new" "$target_link"
+    # atomic 置換（固定名の一時リンクは、強制終了の後に残ると ln -s が File exists で失敗し続ける）
+    replace_link "$source_file" "$target_link"
     log_success "  ✓ settings.json → $source_file"
 }
 
@@ -156,77 +224,140 @@ GLOBAL_RULES_BEGIN="<!-- BEGIN gamonges-prompt: skills 共通規約 -->"
 GLOBAL_RULES_END="<!-- END gamonges-prompt: skills 共通規約 -->"
 
 # 一時ファイルで置き換え先を差し替える。置き換え先が symlink のときは、リンクを通常ファイルに
-# 置き換えて壊さないよう、リンク先へ書き込む（dotfiles への symlink にしている場合）
+# 置き換えて壊さないよう、リンク先へ書き込む（dotfiles への symlink にしている場合）。
+# 通常ファイルのときは置き換え先の mode を一時ファイルに写す（mktemp は 0600 で作るので、写さないと mode が変わる）
 replace_file() {  # $1=一時ファイル, $2=置き換え先
     if [[ -L "$2" ]]; then
-        cat "$1" > "$2"
+        cat "$1" > "$2" || { rm -f "$1"; return 1; }   # rm の終了コードで cat の失敗を上書きしない
         rm -f "$1"
     else
-        mv -f "$1" "$2"
+        if [[ -f "$2" ]]; then chmod "$(stat -f %Lp "$2")" "$1" 2>/dev/null || true; fi
+        mv -f "$1" "$2" || return 1
     fi
+}
+
+# BEGIN・END は行の完全一致で数える。部分一致で判定すると、書き込みの awk（行の完全一致）と食い違い、
+# BEGIN 以降を消す
+marker_shape() {  # $1=ファイル, $2=BEGIN 行, $3=END 行 → none | ok | bad
+    awk -v b="$2" -v e="$3" '
+        $0 == b { nb++; if (open) bad = 1; open = 1; next }
+        $0 == e { ne++; if (!open) bad = 1; open = 0; next }
+        END { if (!nb && !ne) print "none"; else if (bad || open || nb != 1 || ne != 1) print "bad"; else print "ok" }
+    ' "$1"
 }
 
 # マーカーで囲んだブロックだけを冪等に追記・差し替える（ブロック外の記述には触れない）。
-#   $1=表示名, $2=ブロックの中身のファイル, $3=書き込み先, $4=BEGIN 行, $5=END 行
-# BEGIN があって END が無い場合は、書き込まずに失敗する。差し替えの awk は BEGIN から END までを
-# 読み飛ばすので、END が無いと BEGIN 以降（ユーザーが書いた記述を含む）がすべて消える
-install_marker_block() {
-    local label="$1" src="$2" dest="$3" begin="$4" end="$5"
+#   $1=書き込み先, 以降は 4 つ組（表示名, ブロックの中身のファイル, BEGIN 行, END 行）の繰り返し
+# 同じファイルの複数のブロックは、写しに順に適用し、すべて成功したときだけ 1 回で置き換える（1 つ目を書いた後に
+# 2 つ目で失敗すると、半端な状態が残る）。マーカーの並びが「BEGIN 行 1 つ・その後ろに END 行 1 つ」でなければ、
+# 書き込まずに失敗する。差し替えの awk は BEGIN から END までを読み飛ばすので、END が無い・前にある等では
+# BEGIN 以降（ユーザーが書いた記述を含む）が消える。
+# この関数は if !・|| の中から呼ばれうる（set -e が効かない）ので、各書き込みの失敗を自分で返す
+install_marker_blocks() {
+    local dest="$1" tmp next label src begin end shape i
+    local labels=() srcs=() begins=() ends=() done_msgs=()
+    shift
+    while [[ $# -ge 4 ]]; do
+        if [[ -f "$2" ]]; then
+            labels+=("$1") srcs+=("$2") begins+=("$3") ends+=("$4")
+        else
+            log_warning "  ! ${2} がありません。${1}の配置をスキップします"
+        fi
+        shift 4
+    done
+    # 中身のファイルが 1 つも無ければ dest に触れない（空の写しで置き換えると、無かったファイルを作る）
+    [[ ${#labels[@]} -gt 0 ]] || return 0
 
-    if [[ ! -f "$src" ]]; then
-        log_warning "  ! ${src} がありません。${label}の配置をスキップします"
-        return 0
+    mkdir -p "$(dirname "$dest")" || return 1
+    tmp=$(mktemp "${dest}.XXXXXX") || return 1
+    if [[ -f "$dest" ]]; then
+        # 読めなければ止める（握りつぶすと空の写しから組み立て、個人部分を消す）
+        cat "$dest" >"$tmp" 2>/dev/null || { rm -f "$tmp"; log_error "  ✗ ${dest} を読めません（権限を確かめてください）。書き込まずに中断します"; return 1; }
+    else
+        # mktemp は 0600 で作るので、新規のファイルは umask に従わせる
+        chmod "$(printf '%o' $(( 0666 & ~$(umask) )))" "$tmp" || { rm -f "$tmp"; return 1; }
     fi
 
-    if [[ -f "$dest" ]] && grep -qF "$begin" "$dest"; then
-        if ! grep -qF "$end" "$dest"; then
-            log_error "  ✗ ${dest} に ${begin} はあるが ${end} がありません。BEGIN 以降を消さないよう、書き込まずに中断します。手で確認してください"
+    for i in "${!labels[@]}"; do
+        label="${labels[$i]}" src="${srcs[$i]}" begin="${begins[$i]}" end="${ends[$i]}"
+        shape=$(marker_shape "$tmp" "$begin" "$end" 2>/dev/null) || shape=error
+        case "$shape" in
+            ok)
+                # 既存ブロックの中身だけを差し替える。写しの mode を保つため、mv でなく cat で戻す
+                next=$(mktemp "${dest}.XXXXXX") || { rm -f "$tmp"; return 1; }
+                awk -v b="$begin" -v e="$end" -v f="$src" '
+                    $0 == b { print; while ((getline line < f) > 0) print line; close(f); skip = 1; next }
+                    $0 == e { skip = 0 }
+                    !skip
+                ' "$tmp" >"$next" && cat "$next" >"$tmp" || { rm -f "$tmp" "$next"; return 1; }
+                rm -f "$next"
+                done_msgs+=("${label}を更新しました")
+                ;;
+            none)
+                # 既存の中身の後ろに空行 1 行（ファイルが無いときも置く）・BEGIN・中身・END。中身が改行で終わらなければ
+                # END の前に改行を足す（END が中身の最終行にくっつくと、次の install で END が見つからない）
+                { echo "" && echo "$begin" && cat "$src" && { [[ -z "$(tail -c1 "$src")" ]] || echo ""; } && echo "$end"; } >>"$tmp" \
+                    || { rm -f "$tmp"; return 1; }
+                done_msgs+=("${label}を追記しました")
+                ;;
+            *)
+                log_error "  ✗ ${dest} の ${label}のマーカーの並びが不正です（BEGIN 行 1 つ・その後ろに END 行 1 つが必要）。BEGIN 以降を消さないよう、書き込まずに中断します"
+                rm -f "$tmp"
+                return 1
+                ;;
+        esac
+    done
+
+    # 後のブロックの差し替えが前のブロックを消すことがある（入れ子の並び）。適用したブロックがすべて残っていることを
+    # 確かめてから置き換える
+    for i in "${!labels[@]}"; do
+        if [[ "$(marker_shape "$tmp" "${begins[$i]}" "${ends[$i]}" 2>/dev/null)" != ok ]]; then
+            log_error "  ✗ ${dest} の ${labels[$i]}のマーカーの並びが不正です（ブロックが入れ子になっている等）。BEGIN 以降を消さないよう、書き込まずに中断します"
+            rm -f "$tmp"
             return 1
         fi
-        # 既存ブロックの中身だけを差し替える
-        local tmp="${dest}.new.$$"
-        awk -v b="$begin" -v e="$end" -v f="$src" '
-            $0 == b { print; while ((getline line < f) > 0) print line; skip = 1; next }
-            $0 == e { skip = 0 }
-            !skip
-        ' "$dest" > "$tmp"
-        replace_file "$tmp" "$dest"
-        log_success "  ✓ ${label}を更新しました"
-    else
-        mkdir -p "$(dirname "$dest")"
-        {
-            [[ -f "$dest" ]] && echo ""
-            echo "$begin"
-            cat "$src"
-            echo "$end"
-        } >> "$dest"
-        log_success "  ✓ ${label}を追記しました"
-    fi
+    done
+
+    replace_file "$tmp" "$dest" || { rm -f "$tmp"; return 1; }
+    for i in "${!done_msgs[@]}"; do
+        log_success "  ✓ ${done_msgs[$i]}"
+    done
 }
 
-# マーカーで囲んだブロックだけを撤去する。END が無ければ撤去せずに残す（awk が BEGIN 以降を全部消すため）
+# マーカーで囲んだブロックだけを撤去する。並びが不正なら撤去せずに残す（awk が BEGIN 以降を全部消すため）
 uninstall_marker_block() {  # $1=表示名, $2=対象ファイル, $3=BEGIN 行, $4=END 行
-    local label="$1" dest="$2" begin="$3" end="$4"
-    if [[ ! -f "$dest" ]] || ! grep -qF "$begin" "$dest"; then
-        return 0
-    fi
-    if ! grep -qF "$end" "$dest"; then
-        log_warning "  ! ${dest} に ${end} がありません。${label}は撤去せずに残します（BEGIN 以降を消さないため）"
-        return 0
-    fi
+    local label="$1" dest="$2" begin="$3" end="$4" shape
+    [[ -f "$dest" ]] || return 0
+    shape=$(marker_shape "$dest" "$begin" "$end" 2>/dev/null) || shape=error
+    case "$shape" in
+        none) return 0 ;;
+        ok) ;;
+        error)
+            log_warning "  ! ${dest} を読めません（権限を確かめてください）。${label}は撤去せずに残します"
+            return 0
+            ;;
+        *)
+            log_warning "  ! ${dest} の ${label}のマーカーの並びが不正です。${label}は撤去せずに残します（BEGIN 以降を消さないため）"
+            return 0
+            ;;
+    esac
     local tmp="${dest}.new.$$"
+    # 追記のときに足した区切りの空行（BEGIN の直前の 1 行）も一緒に落とし、install → uninstall で元に戻す
     awk -v b="$begin" -v e="$end" '
-        $0 == b { skip = 1 }
-        !skip
-        $0 == e { skip = 0 }
+        $0 == b { skip = 1; held = 0; next }
+        skip { if ($0 == e) skip = 0; next }
+        held { print ""; held = 0 }
+        $0 == "" { held = 1; next }
+        { print }
+        END { if (held) print "" }
     ' "$dest" > "$tmp"
     replace_file "$tmp" "$dest"
     log_success "  ✓ 削除: ${label}（ブロック外の記述は保持）"
 }
 
 install_global_rules() {
-    install_marker_block "CLAUDE.md の共通規約ブロック" "$REPO_GLOBAL_RULES" "${CLAUDE_DIR}/CLAUDE.md" \
-        "$GLOBAL_RULES_BEGIN" "$GLOBAL_RULES_END"
+    install_marker_blocks "${CLAUDE_DIR}/CLAUDE.md" \
+        "CLAUDE.md の共通規約ブロック" "$REPO_GLOBAL_RULES" "$GLOBAL_RULES_BEGIN" "$GLOBAL_RULES_END"
 }
 
 warn_if_worktree() {
@@ -312,10 +443,11 @@ install_scripts() {
             fi
         fi
 
-        # 内容が変わる（または新規の）ものを数える。Codex は hook の信頼を定義に紐づけるので、
-        # 更新したら /hooks の確認を案内する（install_codex）
+        # 内容が変わる（または新規の）ものを記録する。Codex の hook が指すスクリプトなら、install_codex が
+        # /hooks の確認を案内する。ここでは jq も settings.json も読まない（settings.json が壊れているとき、
+        # set -e の効くこの関数で jq が失敗すると、Claude 側の install まで止まる）
         if [[ ! -f "$target" ]] || ! cmp -s "$script" "$target"; then
-            SCRIPTS_UPDATED=$((SCRIPTS_UPDATED + 1))
+            UPDATED_SCRIPTS+=("$name")
         fi
 
         # hook は常時発火するため、上書き中のファイルが別セッションから実行されうる。
@@ -373,18 +505,40 @@ install_scripts() {
     log_info "Scripts: ${count} 件インストール完了（スクリプト編集後は ./setup.sh install の再実行が必要）"
 }
 
-# 「自分のリンク」か。Codex 側の install・uninstall と verify-skills.sh の check 8 で同じパターンを使う。
+# 「自分のリンク」か。Codex 側の install・uninstall・status と verify-skills.sh の check 8 で同じ本体を使う
+# （互いを source しないので複製し、verify の check 7(1) が一致を確かめる）。
+# ~/.agents/skills は他のツールと共有する場所なので、パターンだけで自分と判定しない。リンク先が実在すれば
+# git の共通ディレクトリで本 repo か確かめ、切れているときだけパターンで判定する。
 # 今のチェックアウトとの完全一致にはしない: 同じ repo の別 worktree を指すリンク（worktree からの一時
 # install で生じる）を他者のものと誤判定すると、worktree を消した後に install は skip・uninstall は
-# 対象外・verify は warn のままになり、誰も直さない切れたリンクが残る。
-# 前例は旧 sub-agents のリンクを */claude/subagents/* で判定する migrate()
-is_own_skill_link() {  # $1=リンク, $2=skill 名
-    local target
+# 対象外・verify は warn のままになり、誰も直さない切れたリンクが残る
+own_git_common() {  # $1=ディレクトリ → git の共通ディレクトリ（絶対パス。git でなければ空）
+    git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true
+}
+
+is_own_skill_link() {  # $1=リンク, $2=skill 名, $3=本 repo のルート
+    local target root own_common
     target=$(readlink "$1" 2>/dev/null) || return 1
+    # 相対パスはリンクのディレクトリ基準で解く（cwd 基準で解くと、自分の repo を指す相対リンクを他者と判定する）
+    [[ $target == /* ]] || target="$(dirname "$1")/$target"
+    # 今のチェックアウトそのもの（互換 symlink 経由・/tmp と /private/tmp の表記違いを含む）なら git を起動しない
+    if [[ -e "$1" && "$(realpath "$target" 2>/dev/null)" == "$(realpath "$3/shared/skills/$2" 2>/dev/null)" ]]; then
+        return 0
+    fi
     case "$target" in
-        */shared/skills/"$2"|*/shared/skills/"$2"/|*/claude/skills/"$2"|*/claude/skills/"$2"/) return 0 ;;
+        */shared/skills/"$2"|*/shared/skills/"$2"/|*/claude/skills/"$2"|*/claude/skills/"$2"/) ;;
+        *) return 1 ;;
     esac
-    return 1
+    # 切れたリンクは、どの repo のものかを確かめようがないのでパターンで判定する
+    [[ -e "$1" ]] || return 0
+    root="${target%/*/skills/*}"
+    own_common=$(own_git_common "$3")
+    if [[ -n "$own_common" ]]; then
+        [[ "$(own_git_common "$root")" == "$own_common" ]]
+    else
+        # git でないチェックアウト: 空どうしで一致させず、repo のルートの実パスで比べる
+        [[ "$(realpath "$root" 2>/dev/null)" == "$(realpath "$3" 2>/dev/null)" ]]
+    fi
 }
 
 # Skills のインストール
@@ -411,26 +565,30 @@ install_skills() {
             # （install は Claude Code セッション内から走り、複数 worktree が併走する）
             if [[ ! -L "$target_link" || "$(readlink "$target_link")" != "$skill_dir" ]]; then
                 if [[ "$collision" == skip ]]; then
-                    if [[ -L "$target_link" ]] && is_own_skill_link "$target_link" "$skill_name"; then
+                    if [[ -L "$target_link" ]] && is_own_skill_link "$target_link" "$skill_name" "$SCRIPT_DIR"; then
                         log_warning "既存のシンボリックリンクを更新: ${skill_name}"
-                        rm "$target_link"
                     elif [[ -e "$target_link" || -L "$target_link" ]]; then
-                        log_warning "  ! ${target_link} は repo の skill ではありません（他のツールの実体・リンク）。上書きせず配置をスキップします（${label} では repo の ${skill_name} が使えません）"
+                        # 他者の実体に SKILL.md があれば、その名前で呼ぶと repo の skill ではなく他者の skill が起動する
+                        if [[ -f "$target_link/SKILL.md" ]]; then
+                            log_warning "  ! ${target_link} は repo の skill ではありません（他のツールの実体・リンク）。上書きせず配置をスキップします。\$${skill_name} を呼ぶと、この別の skill が起動します（${label} では repo の ${skill_name} が使えません）"
+                        else
+                            log_warning "  ! ${target_link} は repo の skill ではありません（他のツールの実体・リンク）。同名の他者のリンク・実体があるので、repo の ${skill_name} を張りませんでした"
+                        fi
                         skipped=$((skipped + 1))
                         continue
                     fi
                 else
-                    # 既存のリンクまたはディレクトリを処理
+                    # 既存のリンクはそのまま置き換え、実体（ディレクトリ・ファイル）は退避する。replace_link の置き換え先は
+                    # symlink か不在に限る（実ファイルを黙って上書きせず、実ディレクトリの中へ一時リンクを入れない）
                     if [[ -L "$target_link" ]]; then
                         log_warning "既存のシンボリックリンクを更新: ${skill_name}"
-                        rm "$target_link"
-                    elif [[ -d "$target_link" ]]; then
-                        log_warning "既存のディレクトリをバックアップ: ${skill_name}"
+                    elif [[ -e "$target_link" ]]; then
+                        log_warning "既存の実体をバックアップ: ${skill_name}"
                         mv "$target_link" "${target_link}.backup.$(date +%Y%m%d%H%M%S).$$"
                     fi
                 fi
 
-                ln -s "$skill_dir" "$target_link"
+                replace_link "$skill_dir" "$target_link"
             fi
 
             # skill 内 scripts/*.sh に実行権限を付与（symlink 経由でも実行可能にする）
@@ -501,6 +659,8 @@ migrate() {
     # 互換 symlink が消えた時点で agents のリンクだけが切れる
     echo ""
     install_md_links "Agents" "$REPO_AGENTS_DIR" "$CLAUDE_AGENTS_DIR"
+    echo ""
+    log_info "続けて ./setup.sh install を実行してください（scripts・settings.json・共通規約・Codex への展開は install が行う）"
 }
 
 # subagent 定義（.md）の symlink を張る・外す・状態を表示する（shared/agents/ → ~/.claude/agents/）。
@@ -528,16 +688,15 @@ install_md_links() {
 
         # install_skills と同じ理由で、既に正しい先を指していれば触らない
         if [[ ! -L "$target_link" || "$(readlink "$target_link")" != "$md_file" ]]; then
-            # 既存のリンクまたはファイルを処理
+            # 既存のリンクはそのまま置き換え、実体（ファイル・ディレクトリ）は退避する（install_skills と同じ理由）
             if [[ -L "$target_link" ]]; then
                 log_warning "既存のシンボリックリンクを更新: ${filename}"
-                rm "$target_link"
-            elif [[ -f "$target_link" ]]; then
-                log_warning "既存のファイルをバックアップ: ${filename}"
+            elif [[ -e "$target_link" ]]; then
+                log_warning "既存の実体をバックアップ: ${filename}"
                 mv "$target_link" "${target_link}.backup.$(date +%Y%m%d%H%M%S).$$"
             fi
 
-            ln -s "$md_file" "$target_link"
+            replace_link "$md_file" "$target_link"
         fi
         log_success "  ✓ ${filename}"
         count=$((count + 1))
@@ -707,13 +866,17 @@ def lead($arr): ([ range(0; ($arr | length)) | select(($arr[.] | solely) | not) 
     | lead($arr) as $k
     | ([ range($k; ($arr | length)) | select($arr[.] | hasself) ]) as $bad
     | (if ($bad | length) > 0
-         then error("\($ev): 先頭の自前グループの後ろに自前の hook があります（グループ index \($bad | map(tostring) | join(","))）。他者の位置を動かさないよう、手で整理してください")
+         then error("\($ev): 先頭の自前グループの後ろに自前の hook があります（グループ index \($bad | map(tostring) | join(","))）。他者の位置を動かさないよう、手で整理してください。整理すると位置が変わるので、./setup.sh install を再実行した後に Codex の /hooks でこのイベントの全件（Orca・Muxy を含む）を信頼し直してください")
          else . end)
     | ($gen[$ev] // []) as $g
     | .hooks[$ev] = ($g + $arr[$k:])
     | (if ($g | length) != $k then .changed += [$ev] else . end)
   )) as $r
-| ($r.hooks | with_entries(select(.value | length > 0))) as $new
+# 自前を抜いた結果として空になったイベントだけを消す。他者の空配列・null のイベントは元の値のまま残す
+| ($r.hooks | with_entries(.key as $e
+    | if (.value | length) > 0 then .
+      elif ($cur | has($e)) and (($cur[$e] // []) | length) == 0 then .value = $cur[$e]
+      else empty end)) as $new
 | { doc: (if ($new | length) == 0 and ($doc | has("hooks") | not) then $doc else ($doc | .hooks = $new) end),
     changed: $r.changed }
 JQ
@@ -739,14 +902,45 @@ install_codex_hooks() {
         return 1
     fi
 
-    local doc="{}" result new_doc changed self_n err
-    if [[ -f "$CODEX_HOOKS_JSON" ]]; then
-        doc=$(cat "$CODEX_HOOKS_JSON")
+    local doc="{}" snap="" result new_doc changed self_n err settings_json
+    # 一時ファイルは hooks.json の隣に作る。テンプレート無しの mktemp は macOS では TMPDIR より
+    # _CS_DARWIN_USER_TEMP_DIR を優先するので、残骸を ~/.codex の hooks.json.* として数えられない。
+    # 各 return の経路で消す（EXIT trap は使わない。ロックの trap を上書きするため）
+    if ! err=$(mktemp "${CODEX_HOOKS_JSON}.err.XXXXXX"); then
+        log_error "  ✗ ${CODEX_DIR} に一時ファイルを作れません（hooks.json には何も書き込んでいません）"
+        return 1
     fi
-    err=$(mktemp)
-    if ! result=$(codex_hooks_transform "$doc" "[$(jq -c . "$settings")]" 2>"$err"); then
+    if [[ -f "$CODEX_HOOKS_JSON" ]]; then
+        # 読んだ時点の写しを取り、読み込み・比較・退避をこの写しで行う（書き込む直前に今のファイルと比べる）
+        if ! snap=$(mktemp "${CODEX_HOOKS_JSON}.snap.XXXXXX") || ! cp -p "$CODEX_HOOKS_JSON" "$snap"; then
+            log_error "  ✗ ${CODEX_HOOKS_JSON} を読めません（hooks.json には何も書き込んでいません）"
+            rm -f "$err" "$snap"
+            return 1
+        fi
+        # 0 バイトは他者の非原子的な書き込みの途中状態でもあるので、新規作成扱いにしない。-s で {} {} も弾く
+        if ! jq -se 'length == 1 and (.[0] | type == "object")' "$snap" >/dev/null 2>&1; then
+            log_error "  ✗ ${CODEX_HOOKS_JSON} が JSON のオブジェクトではありません（空のファイルを含む）。何も書き込んでいません"
+            rm -f "$err" "$snap"
+            return 1
+        fi
+        doc=$(cat "$snap")
+    fi
+    # {} {} のような複数の値も弾くため -s で読む
+    if ! settings_json=$(jq -cse 'select(length == 1 and (.[0] | type == "object")) | .[0]' "$settings" 2>"$err"); then
+        log_error "  ✗ ${settings} を JSON のオブジェクトとして読めません（hooks.json には何も書き込んでいません）: $(cat "$err")"
+        rm -f "$err" "$snap"
+        return 1
+    fi
+    # settings.json 由来の自前 hook が 0 本なら撤去しない。撤去は uninstall の役目で、settings.json の
+    # 読み損ないで全ガードを外さないため
+    if [[ "$(codex_self_hook_count "$settings_json")" -eq 0 ]] && [[ "$(codex_self_hook_count "$doc" 2>/dev/null)" -gt 0 ]]; then
+        log_error "  ✗ ${settings} に自前 hook が 1 本もありません。撤去は ./setup.sh uninstall の役目なので、何も書き込まずに中断します"
+        rm -f "$err" "$snap"
+        return 1
+    fi
+    if ! result=$(codex_hooks_transform "$doc" "[$settings_json]" 2>"$err") || [[ -z "$result" ]]; then
         log_error "  ✗ hooks.json を更新できません（何も書き込んでいません）: $(cat "$err")"
-        rm -f "$err"
+        rm -f "$err" "$snap"
         return 1
     fi
     rm -f "$err"
@@ -754,11 +948,12 @@ install_codex_hooks() {
     changed=$(printf '%s' "$result" | jq -r '.changed[]')
     self_n=$(codex_self_hook_count "$new_doc")
 
-    if [[ -f "$CODEX_HOOKS_JSON" ]]; then
+    if [[ -n "$snap" ]]; then
         # 書式の違い（インデント・キー順）で書き換えないよう、正規化して比べる。
         # 実機と同じ並びなら初回の install から書き込まない（書けば位置キーの検証が要る）
-        if [[ "$(jq -S . "$CODEX_HOOKS_JSON")" == "$(printf '%s' "$new_doc" | jq -S .)" ]]; then
+        if [[ "$(jq -S . "$snap")" == "$(printf '%s' "$new_doc" | jq -S .)" ]]; then
             log_success "  ✓ hooks.json は最新です（自前 hook ${self_n} 本は各イベントの先頭に登録済み。書き込みなし）"
+            rm -f "$snap"
             return 0
         fi
     elif [[ "$self_n" -eq 0 ]]; then
@@ -766,10 +961,17 @@ install_codex_hooks() {
         return 0
     fi
 
+    # 読んだ写しと今のファイルが違えば書かない。Codex・Orca・Muxy も hooks.json に書くので、古い版で
+    # 上書きすると他者の変更が消える。読んだ時に無かったファイルが現れた場合も同じ
+    if [[ -n "$snap" ]] && ! cmp -s "$snap" "$CODEX_HOOKS_JSON" || [[ -z "$snap" && -e "$CODEX_HOOKS_JSON" ]]; then
+        log_error "  ✗ hooks.json を読んだ後に他のツールが書き換えました。何も書き込まずに中断します（もう一度 ./setup.sh install を実行してください）"
+        rm -f "$snap"
+        return 1
+    fi
     mkdir -p "$CODEX_DIR"
-    if [[ -f "$CODEX_HOOKS_JSON" ]]; then
+    if [[ -n "$snap" ]]; then
         local backup="${CODEX_HOOKS_JSON}.pre-install.$(date +%Y%m%d%H%M%S)-$$"
-        cp -p "$CODEX_HOOKS_JSON" "$backup"
+        mv "$snap" "$backup"
         log_warning "  ! 既存の hooks.json を退避: $backup"
     fi
     local tmp="${CODEX_HOOKS_JSON}.new.$$"
@@ -789,19 +991,38 @@ install_codex_hooks() {
 # Orca・Muxy を含むそのイベントの hook の信頼が外れる。撤去しても位置を保つ方法は無いので、案内を出す
 uninstall_codex_hooks() {
     [[ -f "$CODEX_HOOKS_JSON" ]] || return 0
-    local doc result new_doc self_before
-    doc=$(cat "$CODEX_HOOKS_JSON")
+    # 失敗は warn と return 0 にする（uninstall は段を通らないので、return 1 だと set -e で残りの撤去が走らない）
+    local doc result new_doc self_before snap
+    if ! snap=$(mktemp "${CODEX_HOOKS_JSON}.snap.XXXXXX") || ! cp -p "$CODEX_HOOKS_JSON" "$snap"; then
+        log_warning "  ! ${CODEX_HOOKS_JSON} を読めないため、自前 hook の撤去をスキップします"
+        rm -f "$snap"
+        return 0
+    fi
+    if ! jq -se 'length == 1 and (.[0] | type == "object")' "$snap" >/dev/null 2>&1; then
+        log_warning "  ! ${CODEX_HOOKS_JSON} が JSON のオブジェクトではない（空のファイルを含む）ため、自前 hook の撤去をスキップします"
+        rm -f "$snap"
+        return 0
+    fi
+    doc=$(cat "$snap")
     if ! result=$(codex_hooks_transform "$doc" '[{}]' 2>/dev/null); then
-        log_warning "  ! hooks.json を解釈できない（先頭以外に自前の hook がある等）ため、自前 hook の撤去をスキップします。手で確認してください"
+        log_warning "  ! hooks.json を解釈できない（先頭以外に自前の hook がある等）ため、自前 hook の撤去をスキップします。自前の hook を先頭のグループにまとめてから ./setup.sh uninstall を再実行し、Codex の /hooks でこのイベントの全件を信頼し直してください"
+        rm -f "$snap"
         return 0
     fi
     self_before=$(codex_self_hook_count "$doc")
     if [[ "$self_before" -eq 0 ]]; then
+        rm -f "$snap"
         return 0
     fi
     new_doc=$(printf '%s' "$result" | jq '.doc')
+    # 読んだ写しと今のファイルが違えば書かない（他者の変更を古い版で消さない）
+    if ! cmp -s "$snap" "$CODEX_HOOKS_JSON"; then
+        log_warning "  ! hooks.json を読んだ後に他のツールが書き換えたため、自前 hook の撤去をスキップします（何も書き込んでいません）"
+        rm -f "$snap"
+        return 0
+    fi
     local backup="${CODEX_HOOKS_JSON}.pre-uninstall.$(date +%Y%m%d%H%M%S)-$$"
-    cp -p "$CODEX_HOOKS_JSON" "$backup"
+    mv "$snap" "$backup"
     local tmp="${CODEX_HOOKS_JSON}.new.$$"
     printf '%s\n' "$new_doc" > "$tmp"
     replace_file "$tmp" "$CODEX_HOOKS_JSON"
@@ -809,21 +1030,46 @@ uninstall_codex_hooks() {
     log_warning "  ! 先頭の自前グループを取り除いたため、そのイベントの Orca・Muxy を含む hook の位置がずれ、信頼が外れます。Codex の /hooks で全件を信頼し直すか、退避した hooks.json と config.toml を戻してください"
 }
 
+# ~/.codex/AGENTS.md の 2 ブロック（共通規約・読み替え表）は同じファイルなので、1 回の置き換えにまとめる
+install_codex_agents_md() {
+    install_marker_blocks "$CODEX_AGENTS_MD" \
+        "~/.codex/AGENTS.md の共通規約ブロック" "$REPO_GLOBAL_RULES" "$GLOBAL_RULES_BEGIN" "$GLOBAL_RULES_END" \
+        "~/.codex/AGENTS.md の読み替え表ブロック" "$REPO_CODEX_RULES" "$CODEX_RULES_BEGIN" "$CODEX_RULES_END"
+}
+
+codex_hooks_cksum() {  # hooks.json の cksum（無ければ none）。書き換えの有無を親シェルで見る
+    if [[ -f "$CODEX_HOOKS_JSON" ]]; then
+        cksum <"$CODEX_HOOKS_JSON" 2>/dev/null || echo unreadable
+    else
+        echo none
+    fi
+}
+
+# hooks.json の段を最初に置く。他の段の失敗で自前 hook が入らないと、Codex のガードが開いたままになる。
+# 段は run_stage のサブシェルで走るので、案内の判定（変数）はこの親シェルで行う。||・if の条件の中で呼ばない
 install_codex() {
     log_info "Codex への展開を行います（~/.codex が在るため）..."
-    install_skills "Codex Skills (~/.agents/skills)" "$CODEX_SKILLS_DIR" skip
+    local hooks_before hooks_after name
+    hooks_before=$(codex_hooks_cksum)
+    run_stage "Codex の hooks.json" install_codex_hooks
+    hooks_after=$(codex_hooks_cksum)
     echo ""
-    install_codex_agents
+    run_stage "Codex の skills" install_skills "Codex Skills (~/.agents/skills)" "$CODEX_SKILLS_DIR" skip
     echo ""
-    install_marker_block "~/.codex/AGENTS.md の共通規約ブロック" "$REPO_GLOBAL_RULES" "$CODEX_AGENTS_MD" \
-        "$GLOBAL_RULES_BEGIN" "$GLOBAL_RULES_END"
-    install_marker_block "~/.codex/AGENTS.md の読み替え表ブロック" "$REPO_CODEX_RULES" "$CODEX_AGENTS_MD" \
-        "$CODEX_RULES_BEGIN" "$CODEX_RULES_END"
+    run_stage "Codex の agents" install_codex_agents
     echo ""
-    install_codex_hooks
-    if [[ "$SCRIPTS_UPDATED" -gt 0 ]]; then
-        echo ""
-        log_warning "scripts を ${SCRIPTS_UPDATED} 本更新しました。Codex は ~/.claude/scripts/ の hook を実行します。Codex の /hooks で「要レビュー」が出ていないか確認してください（信頼がスクリプトの中身に紐づく場合、更新した hook はスキップされます）"
+    run_stage "Codex の規約ファイル" install_codex_agents_md
+
+    # G-1（信頼ハッシュがスクリプトの中身を含むか）が未実測の間は、hook スクリプトの更新でも信頼の確認を案内する
+    if [[ "$hooks_before" != "$hooks_after" ]]; then
+        CODEX_TRUST_NOTICE=true
+    fi
+    if [[ -f "$CODEX_HOOKS_JSON" ]]; then
+        for name in "${UPDATED_SCRIPTS[@]}"; do
+            if grep -qF "/.claude/scripts/${name}\"" "$CODEX_HOOKS_JSON"; then
+                CODEX_TRUST_NOTICE=true
+            fi
+        done
     fi
 }
 
@@ -839,7 +1085,7 @@ uninstall_skill_links() {  # $1=配置先, $2=exact | own
         target_link="${dst_dir}/${skill_name}"
         [[ -L "$target_link" ]] || continue
         if [[ "$mode" == own ]]; then
-            is_own_skill_link "$target_link" "$skill_name" || continue
+            is_own_skill_link "$target_link" "$skill_name" "$SCRIPT_DIR" || continue
         else
             [[ "$(readlink "$target_link")" == "$skill_dir" ]] || continue
         fi
@@ -880,7 +1126,7 @@ show_codex_status() {
         return 0
     fi
 
-    local skill_dir skill_name total=0 linked=0 foreign=0 target_link
+    local skill_dir skill_name total=0 linked=0 foreign=0 relink=0 target_link
     for skill_dir in "$REPO_SKILLS_DIR"/*/; do
         [[ -d "$skill_dir" ]] || continue
         skill_name=$(basename "$skill_dir")
@@ -889,6 +1135,8 @@ show_codex_status() {
         target_link="${CODEX_SKILLS_DIR}/${skill_name}"
         if [[ -L "$target_link" && "$(readlink "$target_link")" == "$skill_dir" ]]; then
             linked=$((linked + 1))
+        elif [[ -L "$target_link" ]] && is_own_skill_link "$target_link" "$skill_name" "$SCRIPT_DIR"; then
+            relink=$((relink + 1))
         elif [[ -e "$target_link" || -L "$target_link" ]]; then
             foreign=$((foreign + 1))
         fi
@@ -896,26 +1144,48 @@ show_codex_status() {
     if [[ "$linked" -eq "$total" ]]; then
         echo -e "  ${GREEN}✓${NC} Skills: ${linked}/${total} 件リンク済み"
     else
-        echo -e "  ${YELLOW}!${NC} Skills: ${linked}/${total} 件リンク済み（衝突・他者のリンク ${foreign} 件。./setup.sh install で張り直し、衝突は verify-skills.sh が知らせる）"
+        echo -e "  ${YELLOW}!${NC} Skills: ${linked}/${total} 件リンク済み（張り替え待ち ${relink} 件・衝突・他者のリンク ${foreign} 件。張り替え待ちは別のチェックアウトを指す自分のリンクで、./setup.sh install で張り替わる。衝突は verify-skills.sh が知らせる）"
     fi
 
-    local agent_total=0 agent_gen=0 f
-    agent_total=$(find "$REPO_AGENTS_DIR" -name '*.md' -type f ! -name README.md 2>/dev/null | wc -l | tr -d ' ')
+    local agent_total=0 agent_gen=0 agent_hand=0 f
+    # 起点の末尾に / を付ける（起点が symlink のとき、付けないと find がリンク先へ降りない）
+    agent_total=$(find "$REPO_AGENTS_DIR/" -name '*.md' -type f ! -name README.md 2>/dev/null | wc -l | tr -d ' ')
     for f in "$CODEX_AGENTS_DIR"/*.toml; do
         [[ -f "$f" ]] && is_generated_toml "$f" && agent_gen=$((agent_gen + 1))
     done
+    # repo の agent と同名で生成ヘッダの無い TOML（手書き）。install は上書きしないので、件数に埋もれさせず示す
+    while IFS= read -r f; do
+        [[ -n "$f" ]] || continue
+        f="${CODEX_AGENTS_DIR}/$(basename "$f" .md).toml"
+        if [[ -f "$f" ]] && ! is_generated_toml "$f"; then
+            agent_hand=$((agent_hand + 1))
+        fi
+    done < <(find "$REPO_AGENTS_DIR/" -name '*.md' -type f ! -name README.md 2>/dev/null)
+    if [[ "$agent_hand" -gt 0 ]]; then
+        echo -e "  ${RED}✗${NC} Agents: 手書きと衝突 ${agent_hand} 件（install では解消しない。手書きの TOML を消すか改名する）"
+    fi
     if [[ "$agent_gen" -eq "$agent_total" ]]; then
         echo -e "  ${GREEN}✓${NC} Agents: ${agent_gen}/${agent_total} 件の TOML を生成済み"
     else
         echo -e "  ${YELLOW}!${NC} Agents: ${agent_gen}/${agent_total} 件の TOML を生成済み（./setup.sh install で再生成）"
     fi
 
-    local blocks=0
+    local blocks=0 bad_blocks=0 unreadable=0 shape
     if [[ -f "$CODEX_AGENTS_MD" ]]; then
-        grep -qF "$GLOBAL_RULES_BEGIN" "$CODEX_AGENTS_MD" && blocks=$((blocks + 1))
-        grep -qF "$CODEX_RULES_BEGIN" "$CODEX_AGENTS_MD" && blocks=$((blocks + 1))
+        for shape in "$(marker_shape "$CODEX_AGENTS_MD" "$GLOBAL_RULES_BEGIN" "$GLOBAL_RULES_END" 2>/dev/null || echo error)" \
+                     "$(marker_shape "$CODEX_AGENTS_MD" "$CODEX_RULES_BEGIN" "$CODEX_RULES_END" 2>/dev/null || echo error)"; do
+            case "$shape" in
+                ok) blocks=$((blocks + 1)) ;;
+                bad) bad_blocks=$((bad_blocks + 1)) ;;
+                error) unreadable=1 ;;
+            esac
+        done
     fi
-    if [[ "$blocks" -eq 2 ]]; then
+    if [[ "$unreadable" -eq 1 ]]; then
+        echo -e "  ${RED}✗${NC} AGENTS.md: 読めません（権限を確かめてください）"
+    elif [[ "$bad_blocks" -gt 0 ]]; then
+        echo -e "  ${RED}✗${NC} AGENTS.md: マーカーの並びが不正なブロックが ${bad_blocks} 個（install は書き込まずに失敗します。手で直してください）"
+    elif [[ "$blocks" -eq 2 ]]; then
         echo -e "  ${GREEN}✓${NC} AGENTS.md: 共通規約と読み替え表のブロックが入っている"
     else
         echo -e "  ${YELLOW}!${NC} AGENTS.md: ブロックが ${blocks}/2 個（./setup.sh install で追記）"
@@ -923,8 +1193,12 @@ show_codex_status() {
 
     if [[ -f "$CODEX_HOOKS_JSON" ]] && command -v jq >/dev/null 2>&1; then
         local self_now
-        self_now=$(codex_self_hook_count "$(cat "$CODEX_HOOKS_JSON")" 2>/dev/null || echo "?")
-        echo -e "  ${BLUE}·${NC} hooks.json: 自前の hook ${self_now} 本（位置と信頼の検査は verify-skills.sh の check 12）"
+        if ! jq -se 'length == 1 and (.[0] | type == "object")' "$CODEX_HOOKS_JSON" >/dev/null 2>&1; then
+            echo -e "  ${RED}✗${NC} hooks.json: JSON のオブジェクトではありません（install は書き込まずに失敗します）"
+        else
+            self_now=$(codex_self_hook_count "$(cat "$CODEX_HOOKS_JSON")" 2>/dev/null || echo "?")
+            echo -e "  ${BLUE}·${NC} hooks.json: 自前の hook ${self_now} 本（位置と信頼の検査は verify-skills.sh の check 12）"
+        fi
     else
         echo -e "  ${YELLOW}!${NC} hooks.json: 無いか、jq が使えない"
     fi
@@ -1202,6 +1476,7 @@ main() {
 
     case "$command" in
         install)
+            acquire_lock
             check_source_dirs
             warn_if_worktree
             init_claude_dir
@@ -1213,25 +1488,47 @@ main() {
             echo ""
             install_settings
             echo ""
-            install_global_rules
+            # CLAUDE.md の段で止まると install_codex に到達しないので、段として走らせる
+            run_stage "Claude の共通規約" install_global_rules
             echo ""
+            local codex_done=false
             if [[ -d "$CODEX_DIR" ]]; then
                 install_codex
+                codex_done=true
             else
                 log_info "~/.codex が無いので Codex への展開を省略します"
             fi
             echo ""
-            log_success "セットアップが完了しました！"
+            # 案内と失敗一覧は、各段の出力に埋もれないよう最後に出す
+            if [[ "$CODEX_TRUST_NOTICE" == true ]]; then
+                log_warning "Codex を開いて /hooks を確認し、「要レビュー」の hook があれば信頼し直してください（信頼が hook のスクリプトの中身に紐づくかを確かめるまで、hook のスクリプトを更新したときも案内します）"
+                echo ""
+            fi
+            if [[ ${#STAGE_FAILURES[@]} -gt 0 ]]; then
+                log_error "次の段が失敗しました（他の段は最後まで実行しました）。上の ✗ の行で理由を確かめてください:"
+                local stage
+                for stage in "${STAGE_FAILURES[@]}"; do
+                    echo "  - ${stage}"
+                done
+                exit 1
+            fi
+            if [[ "$codex_done" == true ]]; then
+                log_success "セットアップが完了しました！（Claude Code と Codex の両方に展開しました）"
+            else
+                log_success "セットアップが完了しました！"
+            fi
             echo ""
             echo "確認するには: ./setup.sh status"
             ;;
         uninstall)
+            acquire_lock
             uninstall
             ;;
         status)
             show_status
             ;;
         migrate)
+            acquire_lock
             check_source_dirs
             # CLAUDE.md が案内する他端末展開手順は `migrate && install` の順なので、
             # migrate で警告しないと最初の警告機会を逃す

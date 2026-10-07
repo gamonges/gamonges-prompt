@@ -11,14 +11,17 @@
 # 4. shared/scripts/ と ~/.claude/scripts/ の同期状態 (実体コピー方式のため。warn 止まり)
 # 5. skill listing の description 総文字数 (budget 監視。warn 止まり)
 # 6. settings.json に登録された hook の実体が存在すること
-# 7. (1) 同期状態を見る実装の対称性（逆走査・glob 対）と、ask を返す hook の decide_ask_or_deny・
-#       「自分のリンク」「自前 hook」の判定の一致
-#    (2) ガードレール系 hook が grep -q へ直接パイプしていないこと (SIGPIPE + pipefail の fail-open)
+# 7. (1) 同期状態を見る実装の対称性（逆走査・glob 対）と、複製した判定の一致（ask を返す hook 4 本の
+#       decide_ask_or_deny は本体を多数決で比べ、setup.sh と複製した「自分のリンク」・マーカーの並びの判定は
+#       本体を比べる。「自前 hook」の判定は基準の文字列が両方にあるかを見る）
+#    (2) ガードレール系 hook（tmp-commit・contract-link・破壊的 git の 3 本）が grep -q へ直接パイプしていないこと
+#       (SIGPIPE + pipefail の fail-open)
 # 8. Codex の skills (~/.agents/skills) が今のチェックアウトを指していること (~/.codex があるときのみ)
 # 9. disable-model-invocation: true の skill と agents/openai.yaml (Codex の暗黙起動の抑止) の一致
 # 10. Codex の agents (TOML) が shared/agents から生成したものと同期していること (~/.codex があるときのみ)
-# 11. ~/.codex/AGENTS.md の 2 ブロックが最新で、repo 直下と合わせて 32 KiB に収まること (同上)
-# 12. ~/.codex/hooks.json の自前 hook が各イベントの先頭にあり、config.toml に信頼キーがあること (同上)
+# 11. ~/.codex/AGENTS.md の 2 ブロックのマーカーの並びが正しく、中身が最新で、repo 直下と合わせて 32 KiB に収まること (同上)
+# 12. ~/.codex/hooks.json が JSON のオブジェクトで、自前 hook（settings.json・hooks.json のどちらかで 0 本なら warn）が
+#     各イベントの先頭にあり、config.toml に信頼キーがあること (同上)
 #
 # 依存: check 5・10・12(b) が python3 を、check 12 が jq を使う。利用できない場合はその check をスキップして続行する。
 #
@@ -409,36 +412,85 @@ check_glob_pair "verify-skills.sh (check 4)" "$(cat "$REPO_SHARED/scripts/verify
 check_glob_pair "setup.sh:install_scripts()" "$(sed -n '/^install_scripts()/,/^}/p' "$REPO_ROOT/setup.sh")"
 check_glob_pair "setup.sh:show_status()"     "$(sed -n '/^show_status()/,/^}/p' "$REPO_ROOT/setup.sh")"
 
+# 複製した関数の本体を取り出す。比べる関数は repo の慣例どおり、行頭の `name() {` の形でトップレベルに定義する
+# （`name(){`・`function name`・字下げした定義は拾えない）
+fn_body() {  # $1=関数名, $2=ファイル → 本体（定義が無ければ空）
+    awk -v head="$1() {" 'index($0, head) == 1 { on = 1 } on { print } on && /^}/ { exit }' "$2"
+}
+fn_def_count() {  # $1=関数名, $2=ファイル → 定義の数
+    local n
+    n=$(grep -c "^$1() {" "$2" || true)
+    echo "${n:-0}"
+}
+
 # Codex は permissionDecision: "ask"（確認プロンプト）に未対応で、未対応の値は hook の失敗として扱われ、
 # 操作が続行する（= ガードが黙って開く）。ask を返す hook は decide_ask_or_deny を通し、Codex では deny に
 # 変える。共通ファイルを source しない（source の失敗は exit 2 以外になり、ガードが開く）ので、同じ関数を
-# 各 hook に複製している。複製が欠けたり、関数を通さない ask の直書きが入ると、その hook だけが Codex で素通しになる
+# 各 hook に複製している。複製の欠落・本体の食い違い・関数を通さない ask の直書きは、その hook だけを Codex で
+# 素通しにする。本体は多数決で比べる（先頭の 1 本を基準にすると、先頭が壊れたときに健全な 3 本を名指しする）
+da_votes=""
 for hook_name in hook-confirm-destructive-git.sh hook-block-local-contract-link.sh hook-block-tmp-commit.sh hook-lint-skill-frontmatter.sh; do
     hook_path="${REPO_SHARED}/scripts/${hook_name}"
     if [ ! -f "$hook_path" ]; then
         warn "${hook_name} がありません（ask を返す hook の一覧が古い）"
-    elif ! grep -qF 'decide_ask_or_deny()' "$hook_path"; then
-        warn "${hook_name} に decide_ask_or_deny() がありません（Codex では ask が確認にならず、この hook のガードが黙って開く）"
+        continue
     fi
+    da_n=$(fn_def_count decide_ask_or_deny "$hook_path")
+    if [ "$da_n" -eq 0 ]; then
+        warn "${hook_name} に decide_ask_or_deny() がありません（Codex では ask が確認にならず、この hook のガードが黙って開く）"
+        continue
+    elif [ "$da_n" -gt 1 ]; then
+        # 実行時は後勝ちなので、先頭の定義を比べても意味が無い。票から外す
+        warn "${hook_name} に decide_ask_or_deny() の定義が 2 つ以上あります（実行時は後の定義が使われる）"
+        continue
+    fi
+    da_votes="${da_votes}$(fn_body decide_ask_or_deny "$hook_path" | cksum | tr ' ' '-') ${hook_name}"$'\n'
 done
+da_n=$(printf '%s' "$da_votes" | grep -c . || true)
+if [ "$da_n" -ge 3 ]; then
+    da_top=$(printf '%s' "$da_votes" | awk '{ print $1 }' | sort | uniq -c | sort -rn | sed -n 1p)
+    if [ "$(echo "$da_top" | awk '{ print $1 }')" -ge 3 ]; then
+        da_major=$(echo "$da_top" | awk '{ print $2 }')
+        while read -r da_sum da_hook; do
+            [ -n "$da_sum" ] || continue
+            [ "$da_sum" = "$da_major" ] && continue
+            warn "${da_hook} の decide_ask_or_deny() の本体が他の 3 本と違う（複製の片側だけを直した。Codex での判定がこの hook だけ変わる）"
+        done <<<"$da_votes"
+    else
+        warn "decide_ask_or_deny() の複製が一致しません（多数派が無い。全 4 本を見比べてください）"
+    fi
+elif [ "$da_n" -eq 2 ]; then
+    if [ "$(printf '%s' "$da_votes" | awk '{ print $1 }' | sort -u | grep -c . || true)" -ne 1 ]; then
+        warn "decide_ask_or_deny() の複製が一致しません（残る 2 本の本体が違う）"
+    fi
+fi
 # 直書きの ask は、一覧にある hook に限らず全 hook を見る（5 本目が足されても検知できるように）。
-# コメント行は除く（この仕組みを説明するコメントに "ask" の表記が入るため）
+# 二重引用符の中のエスケープ（\"ask\"）も拾う。コメント行は除く（この仕組みを説明するコメントに "ask" の表記が入るため）
 for hook_path in "$REPO_SHARED"/scripts/hook-*.sh; do
     [ -f "$hook_path" ] || continue
-    hits=$(grep -v '^[[:space:]]*#' "$hook_path" | grep -cE 'permissionDecision(": |: )"ask"' || true)
+    hits=$(grep -v '^[[:space:]]*#' "$hook_path" | grep -cE 'permissionDecision\\?"?[[:space:]]*:[[:space:]]*\\?"ask' || true)
     if [ "${hits:-0}" -gt 0 ]; then
         warn "$(basename "$hook_path") に decide_ask_or_deny() を通らない ask の直書きが ${hits} 件あります（Codex では確認にならず、ガードが黙って開く）"
     fi
 done
 
-# 「自分のリンク」の判定パターン（install・uninstall は setup.sh、check 8 は本ファイル）は、互いを source しない
-# ので同じ文字列を複製している。片方だけ直すと、install が張り替えるリンクを verify が他者のものと数える。
+# setup.sh と本ファイルに複製した判定関数は、互いを source しないので本体を比べる。片方だけ直すと、install が
+# 張り替えるリンクを verify が他者のものと数える・install が書き込まない並びを verify が案内する、等の食い違いになる
+check_dup_pair() {  # $1=関数名, $2=食い違いの説明
+    local n_setup n_verify
+    n_setup=$(fn_def_count "$1" "$REPO_ROOT/setup.sh")
+    n_verify=$(fn_def_count "$1" "${BASH_SOURCE[0]}")
+    if [ "$n_setup" -ne 1 ] || [ "$n_verify" -ne 1 ]; then
+        # 空どうしの一致を PASS にしない
+        warn "$1 の定義が setup.sh に ${n_setup} 個・verify-skills.sh に ${n_verify} 個あります（1 つずつ必要。無いか 2 つ以上ある）"
+    elif [ "$(fn_body "$1" "$REPO_ROOT/setup.sh")" != "$(fn_body "$1" "${BASH_SOURCE[0]}")" ]; then
+        warn "$1 の本体が setup.sh と verify-skills.sh で一致しません（$2）"
+    fi
+}
+check_dup_pair is_own_skill_link "「自分のリンク」の判定パターン。片方だけ直すと install と check 8 の判定が食い違う"
+check_dup_pair own_git_common "「自分のリンク」の判定に使う git の共通ディレクトリ"
+check_dup_pair marker_shape "マーカーの並びの判定。片方だけ直すと install と check 11 の判定が食い違う"
 # 「自前の hook」の判定（command が /.claude/scripts/ を含む）も、setup.sh と check 12 で同じ基準を使う
-own_line_setup=$(grep -E '^[[:space:]]+\*/shared/skills/"\$2"\|' "$REPO_ROOT/setup.sh" | sed 's/^[[:space:]]*//' || true)
-own_line_verify=$(grep -E '^[[:space:]]+\*/shared/skills/"\$2"\|' "${BASH_SOURCE[0]}" | sed 's/^[[:space:]]*//' || true)
-if [ -z "$own_line_setup" ] || [ "$own_line_setup" != "$own_line_verify" ]; then
-    warn "「自分のリンク」の判定パターンが setup.sh と verify-skills.sh の is_own_skill_link で一致しません（片方だけ直すと install と check 8 の判定が食い違う）"
-fi
 for self_file in "$REPO_ROOT/setup.sh" "${BASH_SOURCE[0]}"; do
     if ! grep -qF 'contains("/.claude/scripts/")' "$self_file"; then
         warn "$(basename "$self_file") に自前 hook の判定 contains(\"/.claude/scripts/\") がありません（setup.sh と check 12 は同じ基準で自前の hook を数える）"
@@ -446,7 +498,7 @@ for self_file in "$REPO_ROOT/setup.sh" "${BASH_SOURCE[0]}"; do
 done
 
 if [ "$warn_count" -eq "$sym_warn_before" ]; then
-    pass "対称性: 逆走査・glob 対・ask を返す 4 本の decide_ask_or_deny・自分のリンクと自前 hook の判定は揃っています"
+    pass "対称性: 逆走査・glob 対・ask を返す 4 本の decide_ask_or_deny・自分のリンク・マーカーの並び・自前 hook の判定は揃っています（本体が一致）"
 fi
 
 
@@ -455,15 +507,15 @@ fi
 # SIGPIPE で死んで 141 を返し、set -o pipefail がパイプライン全体を 141 にする。
 # マッチしているのに if が偽になり、ガードが黙って開く (実測: 入力が 64 KB を超えた時点)。
 #
-# 対象を 2 本に絞るのは、repo 全体では 31 箇所あり全件を warn にするとノイズになるため。
-# この 2 本は matches() ヘルパーへ移行済みで該当 0 件なので、増えたときだけ警告が出る。
+# 対象を 3 本に絞るのは、repo 全体では 31 箇所あり全件を warn にするとノイズになるため。
+# この 3 本は matches() ヘルパーへ移行済みで該当 0 件なので、増えたときだけ警告が出る。
 # 残る hook は matches() 化してから対象に加える。
 #
 # コメント行は除く。matches() の由来を説明するコメントに「printf | grep -q では塞がらない」
 # という記述が入るため、除かないと原理を説明した行そのものが warn になる。
 echo -e "${BLUE}== check 7(2): ガードレール hook の grep -q パイプ ==${NC}"
 grep_q_guarded=0
-for hook_name in hook-block-local-contract-link.sh hook-block-tmp-commit.sh; do
+for hook_name in hook-block-local-contract-link.sh hook-block-tmp-commit.sh hook-confirm-destructive-git.sh; do
     hook_path="${REPO_SHARED}/scripts/${hook_name}"
     [ -f "$hook_path" ] || continue
     hits=$(grep -v '^[[:space:]]*#' "$hook_path" | grep -cE '\|[[:space:]]*grep -[a-zA-Z]*q' || true)
@@ -484,15 +536,35 @@ fi
 #   - 同名の実体・自分のリンクでない symlink → warn。install が触らず skip した衝突で、fail にすると
 #     実機の review で常に fail して他の fail が埋もれる
 #   - 未配置 → warn（install 待ち）
-# 「自分のリンク」の判定は setup.sh の is_own_skill_link と同じパターン（互いを source しないので複製し、
-# 7(1) の対称性 check が一致を確かめる）
-is_own_skill_link() {  # $1=リンク, $2=skill 名
-    local target
+# 「自分のリンク」の判定は setup.sh の is_own_skill_link・own_git_common と同じ本体（互いを source しないので
+# 複製し、7(1) の対称性 check が一致を確かめる）。実在するリンク先は git の共通ディレクトリで本 repo か確かめる
+own_git_common() {  # $1=ディレクトリ → git の共通ディレクトリ（絶対パス。git でなければ空）
+    git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true
+}
+
+is_own_skill_link() {  # $1=リンク, $2=skill 名, $3=本 repo のルート
+    local target root own_common
     target=$(readlink "$1" 2>/dev/null) || return 1
+    # 相対パスはリンクのディレクトリ基準で解く（cwd 基準で解くと、自分の repo を指す相対リンクを他者と判定する）
+    [[ $target == /* ]] || target="$(dirname "$1")/$target"
+    # 今のチェックアウトそのもの（互換 symlink 経由・/tmp と /private/tmp の表記違いを含む）なら git を起動しない
+    if [[ -e "$1" && "$(realpath "$target" 2>/dev/null)" == "$(realpath "$3/shared/skills/$2" 2>/dev/null)" ]]; then
+        return 0
+    fi
     case "$target" in
-        */shared/skills/"$2"|*/shared/skills/"$2"/|*/claude/skills/"$2"|*/claude/skills/"$2"/) return 0 ;;
+        */shared/skills/"$2"|*/shared/skills/"$2"/|*/claude/skills/"$2"|*/claude/skills/"$2"/) ;;
+        *) return 1 ;;
     esac
-    return 1
+    # 切れたリンクは、どの repo のものかを確かめようがないのでパターンで判定する
+    [[ -e "$1" ]] || return 0
+    root="${target%/*/skills/*}"
+    own_common=$(own_git_common "$3")
+    if [[ -n "$own_common" ]]; then
+        [[ "$(own_git_common "$root")" == "$own_common" ]]
+    else
+        # git でないチェックアウト: 空どうしで一致させず、repo のルートの実パスで比べる
+        [[ "$(realpath "$root" 2>/dev/null)" == "$(realpath "$3" 2>/dev/null)" ]]
+    fi
 }
 
 echo -e "${BLUE}== check 8: Codex の skills (~/.agents/skills) ==${NC}"
@@ -512,7 +584,7 @@ else
             if [ "$link_target" = "${skill_dir%/}" ] || [ "$link_target" = "$skill_dir" ]; then
                 continue
             fi
-            if is_own_skill_link "$target" "$name"; then
+            if is_own_skill_link "$target" "$name" "$REPO_ROOT"; then
                 wrong_own+=("$name (リンク先: $link_target)")
             else
                 foreign+=("$name (他のリンク: $link_target)")
@@ -650,6 +722,16 @@ else
     rm -rf "$gen_dir"
 fi
 
+# setup.sh の marker_shape の複製（互いを source しないので複製し、7(1) が本体の一致を確かめる）。BEGIN・END は
+# 行の完全一致で数える。部分一致で判定すると、install の差し替え（行の完全一致）と食い違う
+marker_shape() {  # $1=ファイル, $2=BEGIN 行, $3=END 行 → none | ok | bad
+    awk -v b="$2" -v e="$3" '
+        $0 == b { nb++; if (open) bad = 1; open = 1; next }
+        $0 == e { ne++; if (!open) bad = 1; open = 0; next }
+        END { if (!nb && !ne) print "none"; else if (bad || open || nb != 1 || ne != 1) print "bad"; else print "ok" }
+    ' "$1"
+}
+
 # --- check 11: Codex の AGENTS.md（ブロックとサイズ）---
 # ~/.codex/AGENTS.md には共通規約と読み替え表の 2 ブロックが入る。Codex の取り込み機能や手編集で消える・
 # 古くなることがあり、読み替え表が無い Codex は skill 本文の Claude の語彙（/name・AskUserQuestion 等）で止まる。
@@ -665,23 +747,33 @@ else
         warn "~/.codex/AGENTS.md がありません — ./setup.sh install で作られます"
     else
         check_codex_block() {  # $1=表示名, $2=BEGIN 行, $3=END 行, $4=中身のファイル
-            if ! grep -qF "$2" "$codex_md"; then
-                warn "~/.codex/AGENTS.md に $1 のブロックがありません — ./setup.sh install で追記されます"
-            elif ! cmp -s <(awk -v b="$2" -v e="$3" '$0 == e { on = 0 } on { print } $0 == b { on = 1 }' "$codex_md") "$4"; then
-                warn "~/.codex/AGENTS.md の $1 のブロックが $(basename "$4") と一致しません（取り込み機能による上書き・install 待ち）— ./setup.sh install"
-            fi
+            local shape
+            shape=$(marker_shape "$codex_md" "$2" "$3" 2>/dev/null) || shape=error
+            case "$shape" in
+                none) warn "~/.codex/AGENTS.md に $1 のブロックがありません — ./setup.sh install で追記されます" ;;
+                bad) warn "~/.codex/AGENTS.md の $1 のブロックのマーカーの並びが不正です（BEGIN 行 1 つ・その後ろに END 行 1 つが必要）。install は書き込まずに失敗するので、手で直してください" ;;
+                error) warn "~/.codex/AGENTS.md を読めません（権限を確かめてください）" ;;
+                *)
+                    if ! cmp -s <(awk -v b="$2" -v e="$3" '$0 == e { on = 0 } on { print } $0 == b { on = 1 }' "$codex_md") "$4"; then
+                        warn "~/.codex/AGENTS.md の $1 のブロックが $(basename "$4") と一致しません（取り込み機能による上書き・install 待ち）— ./setup.sh install"
+                    fi
+                    ;;
+            esac
         }
         check_codex_block "共通規約" '<!-- BEGIN gamonges-prompt: skills 共通規約 -->' '<!-- END gamonges-prompt: skills 共通規約 -->' "$REPO_SHARED/global-rules.md"
         check_codex_block "Codex 読み替え表" '<!-- BEGIN gamonges-prompt: codex 読み替え表 -->' '<!-- END gamonges-prompt: codex 読み替え表 -->' "$REPO_ROOT/codex/codex-rules.md"
 
-        codex_bytes=$(wc -c < "$codex_md" | tr -d ' ')
-        repo_bytes=0
-        if [ -f "$REPO_ROOT/AGENTS.md" ]; then
-            repo_bytes=$(wc -c < "$REPO_ROOT/AGENTS.md" | tr -d ' ')
-        fi
-        total_bytes=$((codex_bytes + repo_bytes))
-        if [ "$total_bytes" -ge 32768 ]; then
-            warn "~/.codex/AGENTS.md (${codex_bytes} バイト) と repo 直下の AGENTS.md (${repo_bytes} バイト) の合計 ${total_bytes} バイトが、Codex の指示の上限 32 KiB (project_doc_max_bytes) に達しています。超えた分は読まれず、後から読まれる repo 直下の AGENTS.md が欠けます"
+        # 読めないときはサイズを測らない（check_codex_block が warn 済み。set -euo pipefail の下で wc が verify ごと落ちる）
+        if [ -r "$codex_md" ]; then
+            codex_bytes=$(wc -c < "$codex_md" | tr -d ' ')
+            repo_bytes=0
+            if [ -f "$REPO_ROOT/AGENTS.md" ]; then
+                repo_bytes=$(wc -c < "$REPO_ROOT/AGENTS.md" | tr -d ' ')
+            fi
+            total_bytes=$((codex_bytes + repo_bytes))
+            if [ "$total_bytes" -ge 32768 ]; then
+                warn "~/.codex/AGENTS.md (${codex_bytes} バイト) と repo 直下の AGENTS.md (${repo_bytes} バイト) の合計 ${total_bytes} バイトが、Codex の指示の上限 32 KiB (project_doc_max_bytes) に達しています。超えた分は読まれず、後から読まれる repo 直下の AGENTS.md が欠けます"
+            fi
         fi
     fi
     if [ "$warn_count" -eq "$md_warn_before" ]; then
@@ -704,10 +796,21 @@ elif ! command -v jq >/dev/null 2>&1; then
     warn "check 12 (Codex の hooks.json) をスキップしました（jq が利用できない）"
 elif [ ! -f "$HOME/.codex/hooks.json" ]; then
     warn "~/.codex/hooks.json がありません — ./setup.sh install で作られます"
+elif ! jq -se 'length == 1 and (.[0] | type == "object")' "$HOME/.codex/hooks.json" >/dev/null 2>&1; then
+    # -s で {} {} のような複数の値も弾く（jq -e 'type == "object"' は [] {} を通す）。install は空・壊れた
+    # hooks.json に書き込まずに失敗するので、install だけを案内しても直らない
+    warn "~/.codex/hooks.json が空か、JSON のオブジェクトではありません。install は書き込まずに失敗するので、中身を確かめて直すか、退避して消してから ./setup.sh install"
 else
     hooks_json="$HOME/.codex/hooks.json"
     codex_config="$HOME/.codex/config.toml"
     hook_warn_before=$warn_count
+
+    # settings.json に自前 hook が 1 本も無いと、(a) は何も検査せずに通る
+    settings_self=$(jq '[.hooks[]?[]? | .hooks[]? | (.command // "") | select(contains("/.claude/scripts/"))] | length' \
+        "$REPO_CLAUDE/settings.json" 2>/dev/null || echo 0)
+    if [ "${settings_self:-0}" -eq 0 ]; then
+        warn "settings.json に自前 hook が 1 本もありません（check 12 は何も検査できない。settings.json を確かめてください）"
+    fi
 
     # (a) 位置: 各イベントの先頭が、settings.json から作った自前グループの列と一致する
     if mismatched=$(jq -r --slurpfile s "$REPO_CLAUDE/settings.json" '
@@ -736,6 +839,10 @@ else
     elif ! command -v python3 >/dev/null 2>&1; then
         warn "check 12 (b) をスキップしました（python3 が利用できない）"
         keys_ok=0
+    elif [ ! -r "$codex_config" ]; then
+        # 読めないまま python3 で読むと、set -euo pipefail の下で verify ごと落ちる
+        warn "~/.codex/config.toml を読めません（権限を確かめてください）。hook の信頼状態を確認できません"
+        keys_ok=0
     else
         trusted_keys=$(python3 - "$codex_config" <<'PY'
 import re, sys
@@ -746,6 +853,18 @@ with open(sys.argv[1], encoding="utf-8", errors="replace") as fp:
             print(m.group(1))
 PY
         )
+    fi
+    # 自前 hook の列挙は変数に取り、jq の失敗と 0 件を検知する（プロセス置換にすると、jq が途中で失敗しても
+    # 見えず、そこまでの行だけを検査して PASS に見える）。他者のイベントの値が null・空配列でも、グループに
+    # hooks が無くても止まらないよう // [] を当てる
+    if ! own_rows=$(jq -r '(.hooks // {}) | to_entries[] | .key as $e | (.value // []) | to_entries[] | .key as $g
+        | (.value.hooks // []) | to_entries[]
+        | select((.value.command // "") | contains("/.claude/scripts/"))
+        | [$e, ($g | tostring), (.key | tostring), (.value.command | split("/") | last)] | @tsv' "$hooks_json" 2>/dev/null); then
+        warn "hooks.json の自前 hook を列挙できません（グループが配列のオブジェクトでない等、想定外の形）。check 12 (b) を判定できません"
+        own_rows=""
+    elif [ -z "$own_rows" ]; then
+        warn "hooks.json に自前 hook が 1 件もありません — ./setup.sh install"
     fi
     newer_scripts=0
     while IFS=$'\t' read -r ev group_idx hook_idx script_name; do
@@ -761,10 +880,7 @@ PY
         if [ -f "$codex_config" ] && [ -f "$HOME/.claude/scripts/$script_name" ] && [ "$HOME/.claude/scripts/$script_name" -nt "$codex_config" ]; then
             newer_scripts=$((newer_scripts + 1))
         fi
-    done < <(jq -r '.hooks | to_entries[] | .key as $e | .value | to_entries[] | .key as $g
-        | .value.hooks | to_entries[]
-        | select((.value.command // "") | contains("/.claude/scripts/"))
-        | [$e, ($g | tostring), (.key | tostring), (.value.command | split("/") | last)] | @tsv' "$hooks_json" 2>/dev/null)
+    done <<< "$own_rows"
 
     # G-1（信頼ハッシュがスクリプトの中身を含むか）は未実測。含む場合、scripts を更新すると信頼が外れて
     # hook がスキップされる。含まない場合は無害なので、実測までは warn にせず INFO に留める

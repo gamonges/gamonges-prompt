@@ -18,7 +18,8 @@
 set -euo pipefail
 
 INPUT=$(cat)
-if ! echo "$INPUT" | jq -e . >/dev/null 2>&1; then
+# オブジェクトでない入力（配列・tool_input が false 等）も止める。jq -e . は通し、後続の jq が exit 5 で落ちて素通しする
+if ! echo "$INPUT" | jq -e 'type == "object" and ((.tool_input | type) | . == "object" or . == "null")' >/dev/null 2>&1; then
   echo "$(basename "$0"): malformed input JSON" >&2
   exit 2
 fi

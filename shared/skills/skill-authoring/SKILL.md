@@ -3,7 +3,7 @@ name: skill-authoring
 description: skill / subagent を新規追加・編集する時の規約。Claude 5 向けのプロンプト変換ルール（T1–T8）、起動制御フィールドの選び方、追加手順。`/skill-authoring` 呼び出しでも使用。
 ---
 
-本リポジトリの skill / subagent を書くときの規約。**Skills 共通規約（出力言語・`tmp/` の扱い・`L{number}` 形式）は `CLAUDE.md` にあり、ここでは再宣言しない。**
+本リポジトリの skill / subagent を書くときの規約。**Skills 共通規約（出力言語・`tmp/` の扱い・`L{number}` 形式）は `AGENTS.md`（`CLAUDE.md` はその symlink）にあり、ここでは再宣言しない。**
 
 ## Claude 5 プロンプト規約
 
@@ -110,7 +110,7 @@ scheduled task から repo skill を回している場合は `/schedule` の一�
 
 ### SubAgents の追加
 
-1. `shared/agents/<category>/` に `.md` ファイルを作成する（配置と再起動の要否は `CLAUDE.md` のセットアップ節）
+1. `shared/agents/<category>/` に `.md` ファイルを作成する（配置と再起動の要否は `AGENTS.md` のセットアップ節）
 2. `./setup.sh install` を再実行（Codex には install 時に `.md` から TOML を生成して置くので、**`.md` を編集したら再実行しないと古い TOML が残る**）
 3. `README.md` はセットアップスクリプトがスキップするため、ドキュメント用に使用可
 

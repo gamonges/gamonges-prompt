@@ -98,7 +98,8 @@ def parse_frontmatter(fm_lines, path):
         i += 1
         if key not in ALLOWED_KEYS:
             raise GenError(
-                "%s: 未知の frontmatter キー %r（受け付けるのは %s。生成器を意図して直す）"
+                "%s: 未知の frontmatter キー %r（受け付けるのは %s。生成器を意図して直す。"
+                "Codex に渡さないキーなら codex/gen-agents.py の ALLOWED_KEYS に足す（TOML には出ない））"
                 % (path, key, ", ".join(ALLOWED_KEYS))
             )
         if key in data:
@@ -111,20 +112,29 @@ def parse_frontmatter(fm_lines, path):
                 im = ITEM_RE.match(fm_lines[i].rstrip("\r"))
                 if not im:
                     break
-                items.append(im.group(1).strip())
+                item = im.group(1).strip()
+                check_plain(path, key, item)
+                items.append(item)
                 i += 1
             if not items:
                 raise GenError("%s: %r の値が空です（リスト項目も無い）" % (path, key))
             data[key] = items
-        elif rest[0] in "'\"[{&*!@`%>|":
-            # 引用符・フロー形式・アンカー・未対応のブロック指示子（>+ や |2 等）は、
-            # YAML としての解釈と生成器の解釈が割れうる。プレーンな文字列として黙って通さない
-            raise GenError("%s: %r の値の書式は未対応です: %r" % (path, key, rest))
-        elif " #" in rest:
-            raise GenError("%s: %r の値に ' #' があります（YAML ではコメントになり解釈が割れる）" % (path, key))
         else:
+            check_plain(path, key, rest)
             data[key] = rest
     return data
+
+
+def check_plain(path, key, value):
+    """スカラーの値・リスト項目を、プレーンな文字列として受け付けてよいか確かめる"""
+    if not value:
+        raise GenError("%s: %r の値（リスト項目）が空です" % (path, key))
+    if value[0] in "'\"[{&*!@`%>|":
+        # 引用符・フロー形式・アンカー・未対応のブロック指示子（>+ や |2 等）は、
+        # YAML としての解釈と生成器の解釈が割れうる。プレーンな文字列として黙って通さない
+        raise GenError("%s: %r の値の書式は未対応です: %r" % (path, key, value))
+    if " #" in value:
+        raise GenError("%s: %r の値に ' #' があります（YAML ではコメントになり解釈が割れる）" % (path, key))
 
 
 def as_list(value):
@@ -161,6 +171,9 @@ def build_agent(path, rel, text):
             "%s: name %r は Codex の組み込み agent と重なります（意図せず置き換えないため止める）" % (path, name)
         )
 
+    # Codex は developer_instructions が空の agent を拒否する（cannot be blank）。skills の前置きを足す前に判定する
+    if not body.strip():
+        raise GenError("%s: 本文が空です（Codex は developer_instructions が空の agent を読み込まない）" % path)
     instructions = body.strip("\n")
     skills = as_list(data["skills"]) if "skills" in data else []
     if skills:
@@ -180,6 +193,10 @@ def build_agent(path, rel, text):
     # tools が無い agent は Claude Code では全ツールを継承する。read-only にすると、
     # 書き込みが要る agent が Codex で黙って書けなくなるので、sandbox_mode は出さない（親を継承）
     if "tools" in data:
+        # YAML では null・~・true・false（大文字小文字を問わない）は文字列ではない。tools: null は Claude Code では
+        # tools 無し（全ツールの継承）なので、文字列として read-only に分類すると権限の向きが逆になる
+        if isinstance(data["tools"], str) and data["tools"].lower() in ("null", "~", "true", "false"):
+            raise GenError("%s: tools の値 %r は YAML では null・真偽値です。tools を省くか、リストで書いてください" % (path, data["tools"]))
         tools = as_list(data["tools"])
         if not any(t in WRITE_TOOLS for t in tools):
             lines.append('sandbox_mode = "read-only"')

@@ -27,6 +27,7 @@
 | `user-Notion:<tool>` などの MCP ツール名、「Serena MCP」「Context7 MCP」 | 同じ役割の MCP ツールが設定されていればそれを使う。無ければ skill に書かれたフォールバック（grep・Read 等）に従う |
 | `CLAUDE.md` | `AGENTS.md`（グローバルは `~/.codex/AGENTS.md`） |
 | `~/.claude/skills/<x>` | `~/.agents/skills/<x>`（`~/.claude/scripts/` と `~/.claude/logs/` は両ツール共通なのでそのまま） |
+| Artifact（claude.ai の共有ページ）・artifact-design・dataviz | Codex には無い。読む形にするのは html-view（ローカル HTML）で足りる。共有ページを求められたら作れないと報告し、html-view の HTML を渡す案を示す |
 
 ### 記憶
 
@@ -39,4 +40,7 @@
 
 | 状況 | Codex での扱い |
 |---|---|
-| hook の理由に「[要確認]」とあって操作が止められた | ユーザーに確認し、ユーザー自身に実行してもらう。理由を言い換えて同じ操作を再実行しない |
+| hook の理由に「[要確認]」とあって操作が止められた | 理由の末尾の次の行動に従う。既定はユーザーに確認し、ユーザー自身に実行してもらう（理由を言い換えて同じ操作を再実行しない）。SKILL.md の lint が frontmatter の欠落で止めたときは、直した内容でなら再実行してよい |
+| git 操作（add・commit・reset・push 等） | exec_command で 1 回ずつ実行する。write_stdin（対話シェルへの入力）はどの hook も通らない |
+| SKILL.md の編集 | apply_patch ツールで行う。シェルの `apply_patch <<'EOF'` や exec_command での書き換えは Bash として届き、lint を通らない |
+| 作業ディレクトリ以外のリポジトリでの git commit | workdir を使わず、`git -C <repo> commit …` か、wrapper で包まない `cd <repo> && git commit …` と 1 本のコマンドに書く。workdir は hook に渡らず、`bash -lc "cd … && git commit"` は contract-link の基点の解決に当たらない |

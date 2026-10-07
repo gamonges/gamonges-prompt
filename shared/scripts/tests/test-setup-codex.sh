@@ -637,6 +637,8 @@ expect_gen_fail() {  # $1=ラベル, $2=想定するエラー文の一部, $3=fi
     local rc=$?
     if [[ "$rc" -ne 0 ]]; then pass "$1: exit 非 0"; else fail "$1: exit 非 0（実際は ${rc}）"; fi
     assert_contains "$1: 理由を出す" "$(cat "$WORK/gen.out")" "$2"
+    # 想定外の入力でも GenError の 1 行で止める（トレースバックは、検査していない経路に落ちた印）
+    assert_not_contains "$1: トレースバックを出さない" "$(cat "$WORK/gen.out")" "Traceback"
     assert_eq "$1: 何も書かない" "0" "$(find "$root/out" -name '*.toml' 2>/dev/null | wc -l | tr -d ' ')"
 }
 
@@ -674,6 +676,31 @@ expect_gen_fail "G-8 未対応のブロック指示子（>+）を文字列 '>+' 
 mkdir -p "$WORK/gen-comment/src"
 printf '%s\n' '---' 'name: comment' 'description: has a # comment-like part' '---' 'X.' >"$WORK/gen-comment/src/comment.md"
 expect_gen_fail "G-7 値に ' #' がある（YAML ではコメントになる）" "コメント" comment
+
+# リスト項目も、スカラーの値と同じくプレーンな文字列だけを受け付ける（- "Write" を '"Write"' として読むと
+# 書き込みツールと見なされず、read-only に誤って分類される）
+gen_case() {  # $1=fixture の名前, $2...=frontmatter と本文の行
+    local name="$1"
+    shift
+    mkdir -p "$WORK/gen-$name/src"
+    printf '%s\n' "$@" >"$WORK/gen-$name/src/$name.md"
+}
+gen_case item-quoted '---' 'name: item-quoted' 'description: d' 'tools:' '  - "Write"' '---' 'X.'
+expect_gen_fail "G-9 tools のリスト項目が引用符つき" "未対応" item-quoted
+gen_case item-flow '---' 'name: item-flow' 'description: d' 'tools:' '  - [Write]' '---' 'X.'
+expect_gen_fail "G-9 tools のリスト項目がフロー形式" "未対応" item-flow
+gen_case item-empty '---' 'name: item-empty' 'description: d' 'tools:' '  -  ' '---' 'X.'
+expect_gen_fail "G-9 tools のリスト項目が空" "空" item-empty
+gen_case empty-body '---' 'name: empty-body' 'description: d' '---' '' '  '
+expect_gen_fail "G-10 本文が空（Codex は空の developer_instructions を拒否する）" "本文が空" empty-body
+# tools: null は Claude Code では tools 無し（全ツールの継承）。read-only として通すと権限の向きが逆になる
+# fixture 名は通し番号にする（APFS は大文字小文字を区別しないので、tools-null と tools-Null が同じ場所になる）
+gi=0
+for v in null '~' Null NULL false True; do
+    gi=$((gi + 1))
+    gen_case "tools-v$gi" '---' "name: tools-v$gi" 'description: d' "tools: $v" '---' 'X.'
+    expect_gen_fail "G-11 tools: ${v}（YAML では null・真偽値）" "tools を省くか" "tools-v$gi"
+done
 
 # 実データ: 現行の agents 全件を生成し、最小パーサが実際の frontmatter を通ることと、
 # read-only の分類が独立に数えた件数と一致することを見る
@@ -766,6 +793,41 @@ make_codex_home() {  # $1=名前 → HOME のパスを返す
     echo "$h"
 }
 
+make_mini_repo() {  # $1=名前 → mini repo のパス（verify はスクリプトの所在から repo ルートを導く）
+    local d="$WORK/mini-$1"
+    mkdir -p "$d/shared/scripts" "$d/claude" "$d/codex"
+    cp "$SETUP" "$d/setup.sh"
+    cp "$REPO_SHARED"/scripts/*.sh "$REPO_SHARED"/scripts/*.py "$d/shared/scripts/"
+    ln -s "$REPO_SHARED/skills" "$d/shared/skills"
+    ln -s "$REPO_SHARED/agents" "$d/shared/agents"
+    cp "$REPO_SHARED/global-rules.md" "$d/shared/"
+    cp "$REPO_ROOT/claude/settings.json" "$d/claude/"
+    cp "$REPO_ROOT"/codex/* "$d/codex/"
+    echo "$d"
+}
+
+# 別の setup.sh（mini repo のコピー）で run_setup する。run_setup は SETUP を参照するので、local で差し替える
+run_setup_with() {  # $1=setup.sh, $2=HOME, $3...=setup.sh の引数
+    local SETUP="$1"
+    shift
+    run_setup "$@"
+}
+
+# マーカー行（setup.sh と同じ文字列。setup.sh の変数を読まずに書き、食い違いを検知できるようにする）
+GB='<!-- BEGIN gamonges-prompt: skills 共通規約 -->'
+GE='<!-- END gamonges-prompt: skills 共通規約 -->'
+CB='<!-- BEGIN gamonges-prompt: codex 読み替え表 -->'
+CE='<!-- END gamonges-prompt: codex 読み替え表 -->'
+# 共通規約のマーカーの並びが不正なファイルを、個人部分つきで標準出力に書く。読み替え表のブロックで作ると、
+# 共通規約が先に追記されて「書き換えない」が成り立たなくなる
+bad_marker_fixture() {  # $1=noend（END 無し）| endfirst（END が BEGIN より前）| endspace（END 行の末尾に空白）
+    case "$1" in
+        noend) printf '%s\n' 'keep me' "$GB" 'half written' 'user line after' ;;
+        endfirst) printf '%s\n' 'keep me' "$GE" "$GB" 'old' 'user line after' ;;
+        endspace) printf '%s\n' 'keep me' "$GB" 'old' "$GE " 'user line after' ;;
+    esac
+}
+
 HC="$(make_codex_home main)"
 positions_before="$(non_self_positions "$HC/.codex/hooks.json")"
 assert_eq "前提: fixture の hooks.json に自前 hook が settings.json と同数ある（抽出が 0 件で全ケースが空振りするのを防ぐ）" "$SELF_COUNT" "$(self_hook_count "$HC/.codex/hooks.json")"
@@ -777,6 +839,8 @@ sleep 1
 run_setup "$HC" install
 assert_eq "C-8 Codex を含む install は成功する" "0" "$(last_rc)"
 install_out="$(last_out)"
+# 照合は案内文に固有の部分で行う（"/hooks" は退避ファイルのパス hooks.json.pre-* にも偶然一致する）
+assert_not_contains "C-12 hooks.json に書き込まない install は信頼し直しを案内しない" "$install_out" "変わった定義を信頼し直してください"
 
 # --- skills（~/.agents/skills）---
 cx_linked=0
@@ -801,6 +865,63 @@ assert_eq "C-9 退避（.backup.*）を ~/.agents/skills に作らない（走�
     "$(find "$HC/.agents/skills" -maxdepth 1 -name '*.backup.*' | wc -l | tr -d ' ')"
 assert_contains "C-9 衝突した review を warn で知らせる（Claude 側の「✓ review」に偶然当たらないよう、配置先のパスで見る）" "$install_out" ".agents/skills/review"
 assert_contains "C-9 他者のリンクに当たった grill を warn で知らせる" "$install_out" ".agents/skills/grill"
+
+# --- 「自分のリンク」の判定: ~/.agents/skills は共有の場所なので、パターンだけで自分と判定しない ---
+# 実在するリンク先は git の共通ディレクトリで本 repo か確かめる（切れたリンクだけパターンで判定する）。
+# git にした mini repo（自分）、その worktree（同じ repo の別のチェックアウト）、clone（別の repo）を作る。
+# shared/skills は実ディレクトリにする（実 repo への symlink のままだと、どのチェックアウトから辿っても
+# 実パスが同じになり、git の比較を通らずに「自分」と判定される）
+MOWN="$(make_mini_repo own-git)"
+rm "$MOWN/shared/skills"
+[[ -L "$MOWN/shared/skills" ]] && { echo "fixture が実 repo への symlink のまま" >&2; exit 1; }
+for n in adr ask design grill; do
+    mkdir -p "$MOWN/shared/skills/$n"
+    printf '%s\n' '---' "name: $n" 'description: x' '---' >"$MOWN/shared/skills/$n/SKILL.md"
+done
+git_init "$MOWN"
+git -C "$MOWN" add -A >/dev/null 2>&1 && git -C "$MOWN" commit -qm init >/dev/null 2>&1
+git -C "$MOWN" worktree add -q "$WORK/own-wt" >/dev/null 2>&1
+git clone -q "$MOWN" "$WORK/own-clone" >/dev/null 2>&1
+assert_eq "前提: worktree と clone ができた" "yes" \
+    "$([[ -f "$WORK/own-wt/shared/skills/adr/SKILL.md" && -f "$WORK/own-clone/shared/skills/grill/SKILL.md" ]] && echo yes || echo no)"
+relpath() { python3 -c 'import os, sys; print(os.path.relpath(sys.argv[1], sys.argv[2]))' "$1" "$2"; }
+
+HOWN="$(make_codex_home own-links)"
+rm -f "$HOWN/.agents/skills/ask" "$HOWN/.agents/skills/grill" "$HOWN/.agents/skills/design"
+ln -s "$WORK/own-wt/shared/skills/adr/" "$HOWN/.agents/skills/adr"
+ln -s "$WORK/own-clone/shared/skills/ask/" "$HOWN/.agents/skills/ask"
+rel_design="$(relpath "$MOWN/shared/skills/design" "$HOWN/.agents/skills")/"
+rel_grill="$(relpath "$WORK/own-clone/shared/skills/grill" "$HOWN/.agents/skills")/"
+ln -s "$rel_design" "$HOWN/.agents/skills/design"
+ln -s "$rel_grill" "$HOWN/.agents/skills/grill"
+# cwd を / にし、CDPATH を export する（相対リンクを cwd 基準で解く・cd の行き先が CDPATH で変わる回帰を捕まえる）
+(cd / && export CDPATH=".:/tmp" && run_setup_with "$MOWN/setup.sh" "$HOWN" install)
+assert_eq "C-9 実在する別 worktree を指す自分のリンクは、今のチェックアウトへ張り替わる" \
+    "$MOWN/shared/skills/adr/" "$(readlink "$HOWN/.agents/skills/adr")"
+assert_eq "C-9 実在する別の repo（clone）を指すリンクは触らない" \
+    "$WORK/own-clone/shared/skills/ask/" "$(readlink "$HOWN/.agents/skills/ask")"
+assert_eq "C-9 自分の repo を指す相対リンクは、cwd に依らず自分と判定して張り替わる" \
+    "$MOWN/shared/skills/design/" "$(readlink "$HOWN/.agents/skills/design")"
+assert_eq "C-9 別の repo を指す相対リンクは、cwd に依らず他者と判定して触らない" \
+    "$rel_grill" "$(readlink "$HOWN/.agents/skills/grill")"
+
+# status: 別のチェックアウトを指す自分のリンクは「他者」と数えない。生成ヘッダの無い同名の TOML は衝突として示す
+rm "$HOWN/.agents/skills/adr" && ln -s "$WORK/own-wt/shared/skills/adr/" "$HOWN/.agents/skills/adr"
+run_setup_with "$MOWN/setup.sh" "$HOWN" status
+assert_contains "C-17 別のチェックアウトを指す自分のリンクを「張り替え待ち」と示す" "$(last_out)" "張り替え待ち 1 件"
+assert_contains "C-17 他者のリンク（clone の 2 件）だけを衝突と数える" "$(last_out)" "衝突・他者のリンク 2 件"
+assert_contains "C-17 生成ヘッダの無い同名の TOML（test-auditor）を手書きとの衝突と示す" "$(last_out)" "手書きと衝突 1 件"
+
+(cd / && run_setup_with "$MOWN/setup.sh" "$HOWN" uninstall)
+assert_eq "C-15 別の repo（clone）を指すリンクを uninstall は撤去しない" \
+    "$WORK/own-clone/shared/skills/ask/" "$(readlink "$HOWN/.agents/skills/ask" 2>/dev/null)"
+assert_eq "C-15 別のチェックアウトを指す自分のリンクは uninstall で撤去する" "no" \
+    "$([[ -L "$HOWN/.agents/skills/adr" ]] && echo yes || echo no)"
+
+# review の衝突: 他者の実体に SKILL.md があるので、その名前で呼ぶと別の skill が起動する（$$ を PID に展開しない）
+assert_contains "C-9 review の衝突の warn は、\$review で別の skill が起動することを知らせる" "$install_out" '$review を呼ぶと'
+assert_eq "C-9 SKILL.md の無い他者のリンク（grill）の行では「起動します」と言わない" "0" \
+    "$(printf '%s\n' "$install_out" | grep -F '.agents/skills/grill' | grep -cF 起動します)"
 
 # --- agents（~/.codex/agents の TOML）---
 header_ok=0
@@ -864,7 +985,7 @@ assert_eq "C-13 自前 hook が全件（settings.json と同数）に戻る" "$S
 assert_eq "C-13 差し替えは同じ位置で行われ、自前以外の位置は変わらない" "$pos_stale_before" "$(non_self_positions "$HS/.codex/hooks.json")"
 assert_eq "C-13 差し替えの前に hooks.json.pre-install.* へ退避する" "1" \
     "$(find "$HS/.codex" -maxdepth 1 -name 'hooks.json.pre-install.*' | wc -l | tr -d ' ')"
-assert_contains "C-13 /hooks で信頼し直す案内を出す" "$(last_out)" "/hooks"
+assert_contains "C-13 /hooks で信頼し直す案内を出す" "$(last_out)" "変わった定義を信頼し直してください"
 
 # --- hooks.json: 自前グループが 1 つも無い fixture → 各イベントの先頭に挿入し、全件の信頼し直しを案内 ---
 HN="$(make_codex_home noself)"
@@ -890,6 +1011,13 @@ cp -p "$HM/.codex/hooks.json" "$WORK/hm.snapshot"
 run_setup "$HM" install
 assert_eq "C-14 先頭以外に自前 hook がある hooks.json は exit 非 0（推測で並べ替えない）" "1" "$([[ "$(last_rc)" != "0" ]] && echo 1 || echo 0)"
 assert_eq "C-14 先頭以外に自前 hook がある hooks.json は書き換えない" "0" "$(cmp -s "$WORK/hm.snapshot" "$HM/.codex/hooks.json"; echo $?)"
+# 理由と案内は同じ 1 行で照合する（手で整理すると位置が変わるので、/hooks での信頼し直しをここで案内する）
+assert_eq "C-14 HM の失敗の理由と信頼し直しの案内（同じ行に 1 件）" "1" \
+    "$(last_out | grep -F '先頭の自前グループの後ろに自前の hook があります' | grep -cF 'install を再実行した後に Codex の /hooks で')"
+run_setup "$HM" uninstall
+assert_eq "C-15 先頭以外に自前 hook がある hooks.json でも uninstall は成功する" "0" "$(last_rc)"
+assert_eq "C-15 先頭以外に自前 hook がある hooks.json を uninstall は書き換えない" "0" "$(cmp -s "$WORK/hm.snapshot" "$HM/.codex/hooks.json"; echo $?)"
+assert_contains "C-15 撤去しなかったことと、整理の手順を warn で知らせる" "$(last_out)" "自前の hook を先頭のグループにまとめてから ./setup.sh uninstall を再実行し"
 
 HB="$(make_codex_home badjson)"
 printf '%s' '{"hooks": {broken' >"$HB/.codex/hooks.json"
@@ -897,14 +1025,221 @@ cp -p "$HB/.codex/hooks.json" "$WORK/hb.snapshot"
 run_setup "$HB" install
 assert_eq "C-14 壊れた JSON の hooks.json は exit 非 0" "1" "$([[ "$(last_rc)" != "0" ]] && echo 1 || echo 0)"
 assert_eq "C-14 壊れた JSON の hooks.json は書き換えない（空や半端なファイルにしない）" "0" "$(cmp -s "$WORK/hb.snapshot" "$HB/.codex/hooks.json"; echo $?)"
+assert_eq "C-14 HB の失敗の理由（パスと同じ行に 1 件）" "1" "$(last_out | grep -F "$HB/.codex/hooks.json" | grep -cF 'が JSON のオブジェクトではありません')"
 
-# --- AGENTS.md: BEGIN だけがあって END が無い → 書き込まずエラー（BEGIN 以降の全消去を防ぐ）---
-HE="$(make_codex_home noend)"
-printf '%s\n' 'keep me' '<!-- BEGIN gamonges-prompt: skills 共通規約 -->' 'half written, no end marker' >"$HE/.codex/AGENTS.md"
-cp -p "$HE/.codex/AGENTS.md" "$WORK/he.snapshot"
-run_setup "$HE" install
-assert_eq "C-10 END の無い AGENTS.md は exit 非 0" "1" "$([[ "$(last_rc)" != "0" ]] && echo 1 || echo 0)"
-assert_eq "C-10 END の無い AGENTS.md は書き換えない" "0" "$(cmp -s "$WORK/he.snapshot" "$HE/.codex/AGENTS.md"; echo $?)"
+# --- 他者の空配列・null のイベントは残す。消すのは、自前を抜いた結果として空になったイベントだけ ---
+# 他者のイベントを消すと、書き込み・退避・信頼し直しの案内が毎回出る（Stop・Notification に自前 hook は無い）
+HI10="$(make_codex_home empty-events)"
+jq '.hooks.Stop = [] | .hooks.Notification = null' "$HI10/.codex/hooks.json" >"$WORK/hi10.json" && cp "$WORK/hi10.json" "$HI10/.codex/hooks.json"
+cp -p "$HI10/.codex/hooks.json" "$WORK/hi10.snapshot"
+run_setup "$HI10" install
+assert_eq "C-12 他者の空配列・null のイベントがあっても、install は hooks.json を書き換えない" "0" "$(cmp -s "$WORK/hi10.snapshot" "$HI10/.codex/hooks.json"; echo $?)"
+assert_not_contains "C-12 他者の空配列・null のイベントだけでは信頼し直しを案内しない" "$(last_out)" "変わった定義を信頼し直してください"
+run_setup "$HI10" uninstall
+assert_eq "C-15 uninstall の後も他者の空配列・null のイベントが残る" '{"Notification":null,"Stop":[]}' \
+    "$(jq -cS '.hooks | with_entries(select(.key == "Notification" or .key == "Stop"))' "$HI10/.codex/hooks.json")"
+
+# --- 0 バイトの hooks.json: 他者の非原子的な書き込みの途中状態でもあるので、新規作成扱いにせずエラー ---
+H0="$(make_codex_home zero)"
+: >"$H0/.codex/hooks.json"
+run_setup "$H0" install
+assert_eq "C-14 0 バイトの hooks.json は exit 非 0" "1" "$([[ "$(last_rc)" != "0" ]] && echo 1 || echo 0)"
+assert_eq "C-14 0 バイトの hooks.json は 0 バイトのまま（新規作成扱いで上書きしない）" "0" "$(wc -c <"$H0/.codex/hooks.json" | tr -d ' ')"
+assert_eq "C-14 0 バイトの hooks.json の理由（パスと同じ行）" "1" \
+    "$(last_out | grep -F "$H0/.codex/hooks.json" | grep -cF 'が JSON のオブジェクトではありません')"
+assert_not_contains "C-14 0 バイトの hooks.json を「最新です」と言わない" "$(last_out)" "hooks.json は最新です"
+run_setup "$H0" status
+assert_contains "C-17 0 バイトの hooks.json を status が示す" "$(last_out)" "hooks.json: JSON のオブジェクトではありません"
+assert_not_contains "C-17 0 バイトの hooks.json の件数を空のまま出さない" "$(last_out)" "自前の hook  本"
+
+# --- 読んだ後に他のツールが hooks.json を書き換えた: 古い読み取りで上書きしない ---
+# jq の shim で、変換（--argjson を伴う呼び出し）の最中に 1 回だけ他者の書き込みを挟む。印は $WORK に置く
+# （~/.codex に置くと、それ自体が hooks.json.* の残骸に数えられる）
+RACE_SHIM="$WORK/race-shim"
+mkdir -p "$RACE_SHIM"
+REAL_JQ="$(command -v jq)"
+cat >"$RACE_SHIM/jq" <<EOF
+#!/bin/bash
+for a in "\$@"; do
+    if [[ "\$a" == --argjson && -n "\${RACE_FILE:-}" && ! -e "\$RACE_MARK" ]]; then
+        : >"\$RACE_MARK"
+        "$REAL_JQ" '.hooks.Stop += [{hooks: [{type: "command", command: "/opt/other/added-during-install.sh"}]}]' "\$RACE_FILE" >"\$RACE_MARK.w" \\
+            && cat "\$RACE_MARK.w" >"\$RACE_FILE"
+    fi
+done
+exec "$REAL_JQ" "\$@"
+EOF
+chmod +x "$RACE_SHIM/jq"
+run_race() {  # $1=HOME, $2=setup.sh の引数
+    rm -f "$WORK/race.done" "$WORK/race.done.w"
+    PATH="$RACE_SHIM:$PATH" RACE_FILE="$1/.codex/hooks.json" RACE_MARK="$WORK/race.done" run_setup "$1" "$2"
+}
+race_added() { jq '[.hooks.Stop[]?.hooks[]? | select(.command == "/opt/other/added-during-install.sh")] | length' "$1"; }
+stale_self_group() {  # $1=hooks.json。自前グループから 1 本外す
+    jq '.hooks.UserPromptSubmit[0].hooks |= map(select(.command | contains("hook-detect-correction.sh") | not))' \
+        "$1" >"$WORK/stale.json" && cp "$WORK/stale.json" "$1"
+}
+
+HR1="$(make_codex_home race-same)"
+run_race "$HR1" install
+assert_eq "前提: [競合・定義は同じ] shim が他者の書き込みを挟んだ" "yes" "$([[ -e "$WORK/race.done" ]] && echo yes || echo no)"
+assert_eq "C-13 [競合・定義は同じ] install は成功する" "0" "$(last_rc)"
+assert_contains "C-13 [競合・定義は同じ] 読んだ写しと比べて「最新です」とし、書き込まない" "$(last_out)" "hooks.json は最新です"
+assert_eq "C-13 [競合・定義は同じ] 他者の追加が残る" "1" "$(race_added "$HR1/.codex/hooks.json")"
+
+HR2="$(make_codex_home race-stale)"
+stale_self_group "$HR2/.codex/hooks.json"
+run_race "$HR2" install
+assert_eq "前提: [競合・定義が古い] shim が他者の書き込みを挟んだ" "yes" "$([[ -e "$WORK/race.done" ]] && echo yes || echo no)"
+assert_eq "C-14 [競合・定義が古い] install は exit 非 0" "1" "$([[ "$(last_rc)" != "0" ]] && echo 1 || echo 0)"
+assert_eq "C-14 [競合・定義が古い] 他者の追加が残る（古い読み取りで上書きしない）" "1" "$(race_added "$HR2/.codex/hooks.json")"
+assert_contains "C-14 [競合・定義が古い] 中断の理由を出す" "$(last_out)" "読んだ後に他のツールが書き換えました"
+
+# 異常系で ~/.codex に hooks.json.* の残骸（読み込みの写し・退避・エラーの一時ファイル）を残さない
+for hh in "$HM" "$HB" "$H0" "$HR2"; do
+    assert_eq "C-14 [$(basename "$hh")] 異常系で ~/.codex に hooks.json.* の残骸を残さない" "0" \
+        "$(find "$hh/.codex" -maxdepth 1 -name 'hooks.json.*' | wc -l | tr -d ' ')"
+done
+
+# --- uninstall: 0 バイト・読んだ後に書き換えられた hooks.json は書き換えず、残りの撤去は最後まで続ける ---
+HU0="$(make_codex_home uninstall-zero)"
+: >"$HU0/.codex/hooks.json"
+run_setup "$HU0" uninstall
+assert_eq "C-15 [0 バイト] uninstall は成功する" "0" "$(last_rc)"
+assert_eq "C-15 [0 バイト] hooks.json は 0 バイトのまま" "0" "$(wc -c <"$HU0/.codex/hooks.json" | tr -d ' ')"
+assert_contains "C-15 [0 バイト] 撤去をスキップしたことを warn で知らせる" "$(last_out)" "撤去をスキップします"
+assert_contains "C-15 [0 バイト] 残りの撤去を最後まで続ける" "$(last_out)" "削除完了 - Scripts"
+
+HU2="$(make_codex_home uninstall-race)"
+run_race "$HU2" uninstall
+assert_eq "前提: [uninstall の競合] shim が他者の書き込みを挟んだ" "yes" "$([[ -e "$WORK/race.done" ]] && echo yes || echo no)"
+assert_eq "C-15 [競合] uninstall は成功する" "0" "$(last_rc)"
+assert_eq "C-15 [競合] 他者の追加が残る" "1" "$(race_added "$HU2/.codex/hooks.json")"
+assert_eq "C-15 [競合] 自前 hook も残る（古い読み取りで書き込まない）" "$SELF_COUNT" "$(self_hook_count "$HU2/.codex/hooks.json")"
+assert_eq "C-15 [競合] 退避（hooks.json.pre-uninstall.*）を作らない" "0" \
+    "$(find "$HU2/.codex" -maxdepth 1 -name 'hooks.json.pre-uninstall.*' | wc -l | tr -d ' ')"
+assert_contains "C-15 [競合] 撤去をスキップしたことを warn で知らせる" "$(last_out)" "撤去をスキップします"
+assert_contains "C-15 [競合] 残りの撤去を最後まで続ける" "$(last_out)" "削除完了 - Scripts"
+
+# --- settings.json を読めない・自前 hook が 0 本: 既存の自前 hook を撤去せず、書き込まずエラー ---
+# settings.json の読み損ないで自前 hook を全部外すと、Codex のガードが黙ってすべて開く。撤去は uninstall の役目
+for kind in broken empty nohooks; do
+    MS="$(make_mini_repo "settings-$kind")"
+    case "$kind" in
+        broken) printf '%s' '{"hooks": {broken' >"$MS/claude/settings.json" ;;
+        empty) : >"$MS/claude/settings.json" ;;
+        nohooks) printf '%s\n' '{"env":{}}' >"$MS/claude/settings.json" ;;
+    esac
+    HSJ="$(make_codex_home "settings-$kind")"
+    cp -p "$HSJ/.codex/hooks.json" "$WORK/hsj.snapshot"
+    run_setup_with "$MS/setup.sh" "$HSJ" install
+    assert_eq "C-14 [settings.json: $kind] install は exit 非 0" "1" "$([[ "$(last_rc)" != "0" ]] && echo 1 || echo 0)"
+    assert_eq "C-14 [settings.json: $kind] 既存の hooks.json を書き換えない（自前 hook を撤去しない）" "0" \
+        "$(cmp -s "$WORK/hsj.snapshot" "$HSJ/.codex/hooks.json"; echo $?)"
+    case "$kind" in
+        nohooks) assert_contains "C-14 [settings.json: $kind] 撤去は uninstall の役目だと知らせる" "$(last_out)" "撤去は ./setup.sh uninstall の役目" ;;
+        *) assert_contains "C-14 [settings.json: $kind] settings.json を読めないと知らせる" "$(last_out)" "を JSON のオブジェクトとして読めません" ;;
+    esac
+    assert_eq "C-14 [settings.json: $kind] ~/.codex に hooks.json.* の残骸を残さない" "0" \
+        "$(find "$HSJ/.codex" -maxdepth 1 -name 'hooks.json.*' | wc -l | tr -d ' ')"
+done
+# hooks.json が無い ~/.codex でも、settings.json を読めなければ「作らない（rc=0）」で黙って終わらない
+MS="$(make_mini_repo settings-broken-nojson)"
+printf '%s' '{"hooks": {broken' >"$MS/claude/settings.json"
+HSJ="$(new_home settings-broken-nojson)"
+mkdir -p "$HSJ/.codex"
+run_setup_with "$MS/setup.sh" "$HSJ" install
+assert_eq "C-14 [settings.json: broken・hooks.json 無し] install は exit 非 0" "1" "$([[ "$(last_rc)" != "0" ]] && echo 1 || echo 0)"
+assert_contains "C-14 [settings.json: broken・hooks.json 無し] settings.json を読めないと知らせる" "$(last_out)" "を JSON のオブジェクトとして読めません"
+
+# --- AGENTS.md・CLAUDE.md: マーカーの並びが不正 → 書き込まずエラー ---
+# 部分一致で判定すると、行の完全一致で読み飛ばす差し替えの awk と食い違い、BEGIN 以降を消すか誤った位置に追記する
+for shape in noend endfirst endspace; do
+    HE="$(make_codex_home "bad-$shape")"
+    bad_marker_fixture "$shape" >"$HE/.codex/AGENTS.md"
+    cp -p "$HE/.codex/AGENTS.md" "$WORK/he.snapshot"
+    run_setup "$HE" install
+    assert_eq "C-10 [$shape] 並びが不正な AGENTS.md は exit 非 0" "1" "$([[ "$(last_rc)" != "0" ]] && echo 1 || echo 0)"
+    assert_eq "C-10 [$shape] 並びが不正な AGENTS.md は書き換えない" "0" "$(cmp -s "$WORK/he.snapshot" "$HE/.codex/AGENTS.md"; echo $?)"
+    # 理由はパスと同じ 1 行で照合する（パスは成功時のログにも、「書き込まずに中断します」は他の失敗にも出る）
+    assert_eq "C-10 [$shape] 失敗の理由（パスと「並びが不正」が同じ行に 1 件）" "1" "$(last_out | grep -F "$HE/.codex/AGENTS.md" | grep -cF 並びが不正)"
+
+    HCB="$(new_home "claudemd-bad-$shape")"
+    mkdir -p "$HCB/.claude"
+    bad_marker_fixture "$shape" >"$HCB/.claude/CLAUDE.md"
+    cp -p "$HCB/.claude/CLAUDE.md" "$WORK/hcb.snapshot"
+    run_setup "$HCB" install
+    assert_eq "C-11 [$shape] 並びが不正な CLAUDE.md は exit 非 0" "1" "$([[ "$(last_rc)" != "0" ]] && echo 1 || echo 0)"
+    assert_eq "C-11 [$shape] 並びが不正な CLAUDE.md は書き換えない" "0" "$(cmp -s "$WORK/hcb.snapshot" "$HCB/.claude/CLAUDE.md"; echo $?)"
+    assert_eq "C-11 [$shape] 失敗の理由（パスと「並びが不正」が同じ行に 1 件）" "1" "$(last_out | grep -F "$HCB/.claude/CLAUDE.md" | grep -cF 並びが不正)"
+done
+
+# --- 読めない AGENTS.md・CLAUDE.md: 並びの問題と取り違えず「読めません」で止め、中身を変えない ---
+for target in codex claude; do
+    HUR="$(make_codex_home "unreadable-$target")"
+    mkdir -p "$HUR/.claude"
+    printf '%s\n' '# my personal rules' 'be nice' >"$HUR/.claude/CLAUDE.md"
+    case "$target" in codex) f="$HUR/.codex/AGENTS.md" cid=C-10 ;; claude) f="$HUR/.claude/CLAUDE.md" cid=C-11 ;; esac
+    cp -p "$f" "$WORK/hur.snapshot"
+    chmod 000 "$f"
+    run_setup "$HUR" install
+    chmod 600 "$f"
+    assert_eq "$cid [読めない $(basename "$f")] install は exit 非 0" "1" "$([[ "$(last_rc)" != "0" ]] && echo 1 || echo 0)"
+    assert_contains "$cid [読めない $(basename "$f")] 読めないことを知らせる" "$(last_out)" "を読めません"
+    assert_not_contains "$cid [読めない $(basename "$f")] 並びの問題と取り違えない" "$(last_out)" "並びが不正"
+    assert_eq "$cid [読めない $(basename "$f")] 中身を変えない" "0" "$(cmp -s "$WORK/hur.snapshot" "$f"; echo $?)"
+done
+
+# --- 追記のバイト形: 従来の追記と同じ（既存の中身・空行 1 行・BEGIN・中身・END）。dest の 5 状態で比べる ---
+# 既存の追記のテストは先頭行・ブロック数・中身しか見ておらず、一時ファイル化で空行の数がずれても通す
+expected_append() {  # $1=元のファイル（無ければ不在）, $2=BEGIN 行, $3=中身のファイル, $4=END 行 → 期待値
+    { if [[ -f "$1" ]]; then cat "$1"; fi; echo ""; echo "$2"; cat "$3"; echo "$4"; }
+}
+write_dest_state() {  # $1=状態, $2=ファイル
+    case "$1" in
+        none) rm -f "$2" ;;
+        empty) : >"$2" ;;
+        nl) printf '%s\n' 'personal' >"$2" ;;
+        nonl) printf '%s' 'personal' >"$2" ;;
+        blank) printf '%s\n' 'personal' '' >"$2" ;;
+    esac
+}
+for state in none empty nl nonl blank; do
+    HAP="$(new_home "append-claude-$state")"
+    mkdir -p "$HAP/.claude"
+    write_dest_state "$state" "$HAP/.claude/CLAUDE.md"
+    rm -f "$WORK/app.orig"; [[ -f "$HAP/.claude/CLAUDE.md" ]] && cp "$HAP/.claude/CLAUDE.md" "$WORK/app.orig"
+    expected_append "$WORK/app.orig" "$GB" "$REPO_SHARED/global-rules.md" "$GE" >"$WORK/app.expected"
+    (umask 022; run_setup "$HAP" install)
+    assert_eq "C-11 [追記: $state] CLAUDE.md が HEAD と同じ形になる" "0" "$(cmp -s "$WORK/app.expected" "$HAP/.claude/CLAUDE.md"; echo $?)"
+    if [[ "$state" == none ]]; then
+        assert_eq "C-11 [追記: $state] 新規の CLAUDE.md の mode は umask に従う（022 なら 644）" "644" "$(stat -f %Lp "$HAP/.claude/CLAUDE.md" 2>/dev/null)"
+    fi
+
+    HAP="$(make_codex_home "append-codex-$state")"
+    write_dest_state "$state" "$HAP/.codex/AGENTS.md"
+    rm -f "$WORK/app.orig"; [[ -f "$HAP/.codex/AGENTS.md" ]] && cp "$HAP/.codex/AGENTS.md" "$WORK/app.orig"
+    # 2 ブロック: 1 つ目の結果を元にして同じ式をもう 1 回当てる
+    expected_append "$WORK/app.orig" "$GB" "$REPO_SHARED/global-rules.md" "$GE" >"$WORK/app.mid"
+    expected_append "$WORK/app.mid" "$CB" "$REPO_ROOT/codex/codex-rules.md" "$CE" >"$WORK/app.expected"
+    (umask 022; run_setup "$HAP" install)
+    assert_eq "C-10 [追記: $state] AGENTS.md が HEAD と同じ形になる" "0" "$(cmp -s "$WORK/app.expected" "$HAP/.codex/AGENTS.md"; echo $?)"
+    if [[ "$state" == none ]]; then
+        assert_eq "C-10 [追記: $state] 新規の AGENTS.md の mode は umask に従う（022 なら 644）" "644" "$(stat -f %Lp "$HAP/.codex/AGENTS.md" 2>/dev/null)"
+    fi
+done
+
+# --- 中身が改行で終わらない src: END を独立した行にし、2 回目の install も成功してバイト不変 ---
+# END が src の最終行にくっつくと、2 回目の install で END が見つからず「並びが不正」になる
+MNL="$(make_mini_repo src-nonl)"
+printf '%s' "$(cat "$MNL/shared/global-rules.md")" >"$WORK/rules-nonl.md" && cp "$WORK/rules-nonl.md" "$MNL/shared/global-rules.md"
+assert_eq "前提: mini repo の global-rules.md は改行で終わらない" "no" "$([[ -z "$(tail -c1 "$MNL/shared/global-rules.md")" ]] && echo yes || echo no)"
+HNL="$(new_home src-nonl)"
+run_setup_with "$MNL/setup.sh" "$HNL" install
+cp "$HNL/.claude/CLAUDE.md" "$WORK/hnl.after1"
+run_setup_with "$MNL/setup.sh" "$HNL" install
+assert_eq "C-11 中身が改行で終わらない src でも、2 回目の install は成功する" "0" "$(last_rc)"
+assert_eq "C-11 中身が改行で終わらない src でも、2 回目の install で CLAUDE.md は変わらない" "0" "$(cmp -s "$WORK/hnl.after1" "$HNL/.claude/CLAUDE.md"; echo $?)"
 
 # --- AGENTS.md が dotfiles への symlink でも、リンクを通常ファイルに置き換えて壊さない ---
 HSL="$(make_codex_home symlink)"
@@ -916,6 +1251,44 @@ run_setup "$HSL" install
 assert_eq "C-10 AGENTS.md が symlink のとき、install 後も symlink のまま" "yes" "$([[ -L "$HSL/.codex/AGENTS.md" ]] && echo yes || echo no)"
 assert_eq "C-10 symlink のリンク先に、ブロックが 1 つずつ入る（2 回 install しても重複しない）" "2" \
     "$(grep -c -F -e '<!-- BEGIN gamonges-prompt:' "$WORK/dotfiles/AGENTS.md")"
+
+# --- 書き換えたファイルの mode を保つ（一時ファイルは mktemp の 0600 で作るので、写さないと変わる）---
+HMO="$(make_codex_home mode)"
+stale_self_group "$HMO/.codex/hooks.json"
+chmod 600 "$HMO/.codex/hooks.json"
+(umask 022; run_setup "$HMO" install)
+assert_eq "前提: [mode] hooks.json を書き換えた（退避が 1 件ある）" "1" \
+    "$(find "$HMO/.codex" -maxdepth 1 -name 'hooks.json.pre-install.*' | wc -l | tr -d ' ')"
+assert_eq "C-13 hooks.json を書き換えても mode（600）を保つ" "600" "$(stat -f %Lp "$HMO/.codex/hooks.json")"
+# 共通規約ブロックの中身を古くしてから 444 にする（2 回目の install が書いたことを、中身で確かめる）
+perl -i -0pe 's/(<!-- BEGIN gamonges-prompt: skills 共通規約 -->\n)/$1(stale line)\n/' "$HMO/.codex/AGENTS.md"
+assert_eq "前提: [mode] 共通規約ブロックを古くした" "1" "$(grep -c -F '(stale line)' "$HMO/.codex/AGENTS.md")"
+chmod 444 "$HMO/.codex/AGENTS.md"
+(umask 022; run_setup "$HMO" install)
+assert_eq "C-10 mode が 444 の AGENTS.md への install は成功する" "0" "$(last_rc)"
+assert_eq "C-10 mode が 444 の AGENTS.md の共通規約ブロックも最新に書き換わる" "0" \
+    "$(diff <(block_of "$HMO/.codex/AGENTS.md" "$GB" "$GE") "$REPO_SHARED/global-rules.md" >/dev/null 2>&1; echo $?)"
+assert_eq "C-10 AGENTS.md を書き換えても mode（444）を保つ" "444" "$(stat -f %Lp "$HMO/.codex/AGENTS.md")"
+(umask 022; run_setup "$HMO" uninstall)
+assert_eq "前提: [mode] uninstall が hooks.json を書き換えた（退避が 1 件ある）" "1" \
+    "$(find "$HMO/.codex" -maxdepth 1 -name 'hooks.json.pre-uninstall.*' | wc -l | tr -d ' ')"
+assert_eq "C-15 uninstall で hooks.json を書き換えても mode（600）を保つ" "600" "$(stat -f %Lp "$HMO/.codex/hooks.json")"
+
+# --- symlink のリンク先が読み取り専用: 書けなかったことを返す（✓ を出して rc=0 で終わらない）---
+HRO="$(new_home claudemd-readonly-link)"
+mkdir -p "$HRO/.claude" "$WORK/ro-dotfiles"
+{ printf '%s\n' 'my rules'; expected_append /nonexistent "$GB" "$REPO_SHARED/global-rules.md" "$GE"; } >"$WORK/ro-dotfiles/CLAUDE.md"
+perl -i -0pe 's/(<!-- END gamonges-prompt: skills 共通規約 -->)/old body\n$1/' "$WORK/ro-dotfiles/CLAUDE.md"
+chmod 444 "$WORK/ro-dotfiles/CLAUDE.md"
+cp -p "$WORK/ro-dotfiles/CLAUDE.md" "$WORK/hro.snapshot"
+ln -s "$WORK/ro-dotfiles/CLAUDE.md" "$HRO/.claude/CLAUDE.md"
+run_setup "$HRO" install
+chmod 644 "$WORK/ro-dotfiles/CLAUDE.md"
+assert_eq "C-11 リンク先が読み取り専用の CLAUDE.md への install は exit 非 0" "1" "$([[ "$(last_rc)" != "0" ]] && echo 1 || echo 0)"
+# 「✓ 共通規約…」で照合すると、~/.codex に既存ブロックのある HOME では AGENTS.md の行に当たる
+assert_not_contains "C-11 書けなかった CLAUDE.md を「更新しました」と言わない" "$(last_out)" "CLAUDE.md の共通規約ブロックを更新しました"
+assert_eq "C-11 読み取り専用のリンク先の中身は変わらない" "0" "$(cmp -s "$WORK/hro.snapshot" "$WORK/ro-dotfiles/CLAUDE.md"; echo $?)"
+assert_eq "C-11 CLAUDE.md は symlink のまま" "yes" "$([[ -L "$HRO/.claude/CLAUDE.md" ]] && echo yes || echo no)"
 
 # --- 生成元の無くなった生成物（agent の削除・改名）は install で消す。手書きは消さない ---
 HO="$(make_codex_home orphan)"
@@ -934,8 +1307,89 @@ assert_eq "C-12 hooks.json が無くても install は成功する" "0" "$(last_
 assert_eq "C-12 hooks.json が無ければ自前の hook 全件で新規に作る" "$SELF_COUNT" "$(self_hook_count "$HNJ/.codex/hooks.json" 2>/dev/null || echo 0)"
 assert_eq "C-12 新規作成では退避を作らない" "0" "$(find "$HNJ/.codex" -maxdepth 1 -name 'hooks.json.pre-install.*' | wc -l | tr -d ' ')"
 
-# --- scripts を更新したら、Codex の信頼の確認を案内する（信頼がスクリプトの中身に紐づく場合、hook がスキップされる）---
-assert_contains "C-8 scripts を更新した install は /hooks の確認を案内する（初回は全件が新規）" "$install_out" "本更新しました"
+# --- /hooks の確認の案内: hooks.json を書き換えたとき、自前 hook が指すスクリプトを更新したときだけ出す ---
+# 信頼がスクリプトの中身に紐づくか（G-1）を実測するまでは、hook のスクリプトの更新でも案内する。hook でない
+# スクリプト（statusline.py）だけの更新で毎回出すと、案内が読まれなくなる
+assert_contains "C-8 hook のスクリプトを配置した install は /hooks の確認を案内する（初回は全件が新規）" "$install_out" "/hooks を確認し"
+MG="$(make_mini_repo guide)"
+HGD="$(make_codex_home guide)"
+run_setup_with "$MG/setup.sh" "$HGD" install
+assert_eq "前提: 案内のテストの 1 回目の install は成功する" "0" "$(last_rc)"
+printf '%s\n' '# changed' >>"$MG/shared/scripts/statusline.py"
+run_setup_with "$MG/setup.sh" "$HGD" install
+# 否定の照合は "/hooks" で行う（固有の文言で否定すると、別の文言で案内する実装でも 0 件になり、案内しないことを固定できない）。
+# ~/.codex/hooks.json のパスの表示（/hooks.json）には当てない
+assert_eq "C-12 hook でないスクリプト（statusline.py）だけを更新した install は /hooks を案内しない" "0" \
+    "$(last_out | grep -cE '/hooks([^.]|$)')"
+printf '%s\n' '# changed' >>"$MG/shared/scripts/hook-block-tmp-commit.sh"
+run_setup_with "$MG/setup.sh" "$HGD" install
+assert_contains "C-12 自前 hook が指すスクリプトを更新した install は /hooks の確認を案内する" "$(last_out)" "/hooks を確認し"
+# install 済みの HOME で hooks.json だけを古くする（scripts は変わらないので、案内の理由は hooks.json の書き換えだけ）
+jq '.hooks.UserPromptSubmit[0].hooks |= map(select(.command | contains("hook-detect-correction.sh") | not))' \
+    "$HGD/.codex/hooks.json" >"$WORK/hgd.json" && cp "$WORK/hgd.json" "$HGD/.codex/hooks.json"
+run_setup_with "$MG/setup.sh" "$HGD" install
+assert_contains "C-13 hooks.json を書き換えた install は、末尾（最後の 10 行）で /hooks の確認を案内する" \
+    "$(last_out | tail -10)" "/hooks を確認し"
+
+# --- 段の失敗を集めて最後まで続行する。hooks.json の段を最初に置き、他の段の失敗でガードが入らないことを防ぐ ---
+# hooks.json の無い ~/.codex で始め、hooks.json ができていることで hooks.json の段が走ったことを確かめる
+stage_case() {  # $1=ケース名, $2=setup.sh, $3=HOME, $4=失敗一覧に出る段名
+    run_setup_with "$2" "$3" install
+    assert_eq "C-8 [$1] install は exit 非 0" "1" "$([[ "$(last_rc)" != "0" ]] && echo 1 || echo 0)"
+    assert_eq "C-12 [$1] 他の段が失敗しても、hooks.json に自前 hook が全件入る" "$SELF_COUNT" \
+        "$(self_hook_count "$3/.codex/hooks.json" 2>/dev/null || echo 0)"
+    assert_eq "C-8 [$1] 失敗した段を一覧の行（- $4）で示す" "1" "$(last_out | grep -cxF "  - $4")"
+    assert_not_contains "C-8 [$1] 完了メッセージを出さない" "$(last_out)" "セットアップが完了しました"
+}
+# agent の frontmatter に未知のキー（color:）がある。agents は実ディレクトリで持つ（make_mini_repo の shared/agents は
+# 実 repo への symlink なので、そこに fixture を置かない）
+MSA="$(make_mini_repo stage-agents)"
+rm "$MSA/shared/agents" && mkdir -p "$MSA/shared/agents/x"
+[[ -L "$MSA/shared/agents" ]] && { echo "fixture が実 repo への symlink のまま" >&2; exit 1; }
+printf '%s\n' '---' 'name: bad' 'description: has an unknown key' 'color: red' '---' 'Body.' >"$MSA/shared/agents/x/bad.md"
+HST="$(new_home stage-agents)"; mkdir -p "$HST/.codex"
+stage_case "agent に未知のキー" "$MSA/setup.sh" "$HST" "Codex の agents"
+
+HST="$(new_home stage-claudemd)"; mkdir -p "$HST/.codex" "$HST/.claude"
+printf '%s\n' 'keep me' "$GB" 'half written' >"$HST/.claude/CLAUDE.md"
+stage_case "CLAUDE.md に BEGIN しかない" "$SETUP" "$HST" "Claude の共通規約"
+
+HST="$(new_home stage-skills)"; mkdir -p "$HST/.codex" "$HST/.agents"
+ln -s "$WORK/no-such-dir" "$HST/.agents/skills"
+stage_case "~/.agents/skills が壊れた symlink" "$SETUP" "$HST" "Codex の skills"
+
+# 段の内部の失敗（関数の途中の set -e による中断）も集める。f || … の形で呼ぶと f の中の set -e が無効になり、黙って消える
+HST="$(new_home stage-inner)"; mkdir -p "$HST/.codex"
+: >"$HST/.codex/agents"
+stage_case "~/.codex/agents が通常ファイル" "$SETUP" "$HST" "Codex の agents"
+
+# --- AGENTS.md の 2 ブロックは写しに順に適用し、適用したブロックがすべて残るときだけ 1 回で置き換える ---
+for order in nested crossed; do
+    HNS="$(make_codex_home "two-blocks-$order")"
+    case "$order" in
+        nested) printf '%s\n' 'keep me' "$CB" 'c' "$GB" 'g' "$GE" "$CE" 'tail' ;;
+        crossed) printf '%s\n' 'keep me' "$GB" 'g' "$CB" 'c' "$GE" "$CE" 'tail' ;;
+    esac >"$HNS/.codex/AGENTS.md"
+    cp -p "$HNS/.codex/AGENTS.md" "$WORK/hns.snapshot"
+    run_setup "$HNS" install
+    assert_eq "C-10 [$order] 2 ブロックが入れ子・交差の AGENTS.md は exit 非 0" "1" "$([[ "$(last_rc)" != "0" ]] && echo 1 || echo 0)"
+    assert_eq "C-10 [$order] 2 ブロックが入れ子・交差の AGENTS.md は書き換えない" "0" "$(cmp -s "$WORK/hns.snapshot" "$HNS/.codex/AGENTS.md"; echo $?)"
+done
+# 中身のファイルが無いブロックは warn で飛ばし、後検査の対象にしない（「並びが不正」で失敗させない）
+MNR="$(make_mini_repo no-codex-rules)"
+rm "$MNR/codex/codex-rules.md"
+HNR="$(make_codex_home no-codex-rules)"
+run_setup_with "$MNR/setup.sh" "$HNR" install
+assert_eq "C-10 読み替え表の中身のファイルが無くても install は成功する" "0" "$(last_rc)"
+assert_contains "C-10 中身のファイルが無いことを warn で知らせる" "$(last_out)" "codex-rules.md がありません"
+assert_eq "C-10 中身のファイルが無くても共通規約のブロックは入る" "1" "$(grep -c -F "$GB" "$HNR/.codex/AGENTS.md")"
+# 適用するブロックが 1 つも無ければ dest に触れない（無かった CLAUDE.md を空で作らない）
+MNG="$(make_mini_repo no-global-rules)"
+rm "$MNG/shared/global-rules.md"
+HNG="$(new_home no-global-rules)"
+run_setup_with "$MNG/setup.sh" "$HNG" install
+assert_eq "C-11 共通規約の中身のファイルが無ければ install は成功する" "0" "$(last_rc)"
+assert_eq "C-11 共通規約の中身のファイルが無ければ CLAUDE.md を作らない" "no" "$([[ -e "$HNG/.claude/CLAUDE.md" ]] && echo yes || echo no)"
 
 # --- Claude 側の CLAUDE.md のブロック: 関数化（install_marker_block）の後も従来どおり ---
 HCL="$(new_home claudemd)"
@@ -949,11 +1403,6 @@ assert_eq "C-11 CLAUDE.md のブロックの中身が shared/global-rules.md と
 snap_claude_md="$(cat "$HCL/.claude/CLAUDE.md")"
 run_setup "$HCL" install
 assert_eq "C-11 2 回目の install で CLAUDE.md は変わらない（ブロックが重複しない）" "$snap_claude_md" "$(cat "$HCL/.claude/CLAUDE.md")"
-printf '%s\n' 'keep me' '<!-- BEGIN gamonges-prompt: skills 共通規約 -->' 'half written' >"$HCL/.claude/CLAUDE.md"
-cp -p "$HCL/.claude/CLAUDE.md" "$WORK/hcl.snapshot"
-run_setup "$HCL" install
-assert_eq "C-11 END の無い CLAUDE.md は exit 非 0（従来は BEGIN 以降を全消去していた）" "1" "$([[ "$(last_rc)" != "0" ]] && echo 1 || echo 0)"
-assert_eq "C-11 END の無い CLAUDE.md は書き換えない" "0" "$(cmp -s "$WORK/hcl.snapshot" "$HCL/.claude/CLAUDE.md"; echo $?)"
 
 # --- ~/.codex が無い HOME では Codex の処理を飛ばし、Claude 側の install は従来どおり成功する ---
 HNC="$(new_home nocodex)"
@@ -977,6 +1426,13 @@ assert_contains "C-17 status の hooks.json の自前 hook の本数が実数と
 run_setup "$HNC" status
 assert_eq "C-17 ~/.codex が無い HOME でも status は成功する" "0" "$(last_rc)"
 assert_contains "C-17 ~/.codex が無いことを status が示す" "$(last_out)" "~/.codex が存在しません"
+# 並びが不正なブロックを「入っている」と出さない。両方のブロックの BEGIN を入れ、片方だけ END を欠く
+# （BEGIN が 1 つだけだと、部分一致で数える実装でも「1/2 個」と出て否定の照合が通ってしまう）
+HSB="$(make_codex_home status-bad)"
+printf '%s\n' 'keep me' "$GB" 'a' "$GE" "$CB" 'b' >"$HSB/.codex/AGENTS.md"
+run_setup "$HSB" status
+assert_not_contains "C-17 並びが不正なブロックがあるとき、status は「ブロックが入っている」と出さない" "$(last_out)" "ブロックが入っている"
+assert_contains "C-17 並びの不正を status が示す" "$(last_out)" "並びが不正"
 
 # --- uninstall: 自分が置いたものだけを撤去し、他者のものを残す ---
 # 別 worktree を指すリンク（自分のリンク）を 1 つ作っておく。完全一致だけで判定すると撤去できず、切れたリンクが残る
@@ -998,7 +1454,33 @@ be nice" "$(grep -v '^$' "$HC/.codex/AGENTS.md")"
 assert_eq "C-15 自前 hook は撤去される" "0" "$(self_hook_count "$HC/.codex/hooks.json")"
 assert_eq "C-15 自前以外の hook（Orca・Muxy 相当）の相対的な並びは残る" \
     "$(echo "$positions_before" | jq -c '[.[] | .[3]]')" "$(non_self_positions "$HC/.codex/hooks.json" | jq -c '[.[] | .[3]]')"
-assert_contains "C-15 uninstall は先頭の自前グループの除去で位置がずれるため、信頼し直しを案内する" "$(last_out)" "/hooks"
+assert_contains "C-15 uninstall は先頭の自前グループの除去で位置がずれるため、信頼し直しを案内する" "$(last_out)" "先頭の自前グループを取り除いたため"
+
+# --- uninstall: マーカーの並びが不正なブロックは撤去しない（撤去の awk が BEGIN 以降を消すため）---
+for shape in noend endfirst endspace; do
+    HUE="$(make_codex_home "uninstall-$shape")"
+    bad_marker_fixture "$shape" >"$HUE/.codex/AGENTS.md"
+    mkdir -p "$HUE/.claude" && cp "$HUE/.codex/AGENTS.md" "$HUE/.claude/CLAUDE.md"
+    cp -p "$HUE/.codex/AGENTS.md" "$WORK/hue.snapshot"
+    run_setup "$HUE" uninstall
+    assert_eq "C-15 [$shape] 並びが不正なブロックがあっても uninstall は成功する" "0" "$(last_rc)"
+    assert_eq "C-15 [$shape] ~/.codex/AGENTS.md を uninstall は書き換えない" "0" "$(cmp -s "$WORK/hue.snapshot" "$HUE/.codex/AGENTS.md"; echo $?)"
+    assert_eq "C-11 [$shape] ~/.claude/CLAUDE.md を uninstall は書き換えない" "0" "$(cmp -s "$WORK/hue.snapshot" "$HUE/.claude/CLAUDE.md"; echo $?)"
+    assert_contains "C-15 [$shape] 撤去しなかったことを warn で知らせる" "$(last_out)" "撤去せずに残します"
+done
+
+# --- install → uninstall で AGENTS.md・CLAUDE.md がバイト単位で元に戻る（追記で足した空行も撤去する）---
+# 空行を落として比べると、往復のたびに BEGIN の直前の空行が積み上がる回帰を通してしまう
+HRT="$(make_codex_home roundtrip)"
+mkdir -p "$HRT/.claude"
+printf '%s\n' '# my personal rules' 'be nice' '' >"$HRT/.codex/AGENTS.md"
+cp "$HRT/.codex/AGENTS.md" "$HRT/.claude/CLAUDE.md"
+cp -p "$HRT/.codex/AGENTS.md" "$WORK/hrt.snapshot"
+run_setup "$HRT" install
+assert_eq "前提: 往復の fixture に install で 2 ブロックが入った" "2" "$(grep -c -F -e '<!-- BEGIN gamonges-prompt:' "$HRT/.codex/AGENTS.md")"
+run_setup "$HRT" uninstall
+assert_eq "C-15 install → uninstall で AGENTS.md がバイト単位で元に戻る" "0" "$(cmp -s "$WORK/hrt.snapshot" "$HRT/.codex/AGENTS.md"; echo $?)"
+assert_eq "C-11 install → uninstall で CLAUDE.md がバイト単位で元に戻る" "0" "$(cmp -s "$WORK/hrt.snapshot" "$HRT/.claude/CLAUDE.md"; echo $?)"
 
 # ===========================================================================
 # C-24〜C-28: verify-skills.sh の Codex 検査（check 8・10・11・12）と対称性 check（7(1)）
@@ -1101,6 +1583,16 @@ out="$(verify_run "$HBS")"
 assert_eq "C-26 ブロックの中身が古いと check 11 が warn（見出しが在るだけでは通さない）" "1" "$(count_tag "$(verify_section "$out" 11)" '[WARN]')"
 assert_contains "C-26 warn は中身が一致しないブロックを名指しする" "$(verify_section "$out" 11)" "共通規約"
 
+# 並びが不正（END が BEGIN より前）なブロックは install では直らない（install は書き込まずに失敗する）ので、
+# その行で install を案内しない。もう片方のブロックの行の案内に当たらないよう、「共通規約」の行に絞る
+HBO="$(make_verify_home bad-order)"
+awk -v b="$GB" -v e="$GE" '$0 == e { next } $0 == b { print e } { print }' "$HBO/.codex/AGENTS.md" >"$WORK/agents-badorder.md" \
+    && cp "$WORK/agents-badorder.md" "$HBO/.codex/AGENTS.md"
+out="$(verify_run "$HBO")"
+line11="$(verify_section "$out" 11 | grep -F 共通規約)"
+assert_contains "C-26 並びが不正なブロックは check 11 が「並びが不正」と warn する" "$line11" "並びが不正"
+assert_not_contains "C-26 並びが不正なブロックの warn は ./setup.sh install を案内しない" "$line11" "./setup.sh install"
+
 
 # --- C-27 (a): hooks.json から 1 本消す / 自前グループを末尾へ移す → check 12 が warn ---
 HH1="$(make_verify_home hook1)"
@@ -1131,6 +1623,66 @@ assert_contains "C-27(b) warn の文面に UserPromptSubmit が出る" "$sec12" 
 assert_contains "C-27(b) warn の文面にグループと hook の位置 0:1 が出る" "$sec12" "0:1"
 assert_contains "C-27(b) warn は /hooks で信頼し直すことを案内する" "$sec12" "/hooks"
 
+# --- C-27: 形の崩れた hooks.json でも check 12 は途中で止まらずに warn する ---
+# 自前 hook の列挙を jq のプロセス置換で読むと、jq が途中で失敗しても見えず、そこまでの行だけを検査して PASS に見える
+drop_session_start_key() {  # $1=HOME。SessionStart の自前 hook（0:0）の信頼キーを消す
+    awk '/:session_start:0:0"\]/ { getline; next } { print }' "$1/.codex/config.toml" >"$WORK/cfg-ss.toml" \
+        && cp "$WORK/cfg-ss.toml" "$1/.codex/config.toml"
+}
+# hooks を持たないグループが先頭のイベントにある: 後ろの SessionStart の信頼キーまで検査が届く
+HH1="$(make_verify_home hookless-group)"
+jq '.hooks.UserPromptSubmit += [{matcher: "x"}]' "$HH1/.codex/hooks.json" >"$WORK/hh1.json" && cp "$WORK/hh1.json" "$HH1/.codex/hooks.json"
+drop_session_start_key "$HH1"
+assert_contains "C-27 hooks の無いグループがあっても、後ろのイベントの信頼キーまで検査する" "$(verify_section "$(verify_run "$HH1")" 12)" "SessionStart 0:0"
+# グループが文字列: 列挙が失敗したことを warn で知らせる（黙って一部だけを検査しない）
+HH2="$(make_verify_home string-group)"
+jq '.hooks.PreToolUse += ["oops"]' "$HH2/.codex/hooks.json" >"$WORK/hh2.json" && cp "$WORK/hh2.json" "$HH2/.codex/hooks.json"
+assert_contains "C-27 グループが文字列の hooks.json は、自前 hook を列挙できないと warn する" "$(verify_section "$(verify_run "$HH2")" 12)" "列挙できません"
+# 0 バイト・値が 2 つ: install は書き込まずに失敗するので、install だけを案内しない
+for bad in zero two-values; do
+    HH3="$(make_verify_home "hooks-$bad")"
+    case "$bad" in zero) : >"$HH3/.codex/hooks.json" ;; two-values) printf '%s\n' '[] {}' >"$HH3/.codex/hooks.json" ;; esac
+    sec12="$(verify_section "$(verify_run "$HH3")" 12)"
+    assert_contains "C-27 [$bad] 空・オブジェクトでない hooks.json を warn する" "$sec12" "空か、JSON のオブジェクトではありません"
+    assert_contains "C-27 [$bad] install だけでは直らないので、退避して消す手順も案内する" "$sec12" "退避して消してから"
+done
+# 他者の null・空配列のイベント（先頭に null）: 列挙を止めず、自前 hook の信頼キーの検査が走る
+HH4="$(make_verify_home null-event)"
+jq '{hooks: ({Notification: null} + .hooks | .Stop = [])}' "$HH4/.codex/hooks.json" >"$WORK/hh4.json" && cp "$WORK/hh4.json" "$HH4/.codex/hooks.json"
+drop_session_start_key "$HH4"
+sec12="$(verify_section "$(verify_run "$HH4")" 12)"
+assert_not_contains "C-27 他者の null・空配列のイベントで列挙を止めない" "$sec12" "列挙できません"
+assert_contains "C-27 他者の null のイベントがあっても、自前 hook の信頼キーを検査する" "$sec12" "SessionStart 0:0"
+# 自前 hook が 0 件（settings.json の hooks を消した repo・hooks の空な hooks.json）: 何も検査せずに PASS しない
+MNH="$(make_mini_repo settings-nohooks-v)"
+printf '%s\n' '{"env":{}}' >"$MNH/claude/settings.json"
+HNH="$(make_verify_home settings-nohooks)"
+sec12="$(verify_section "$(verify_run "$HNH" "$MNH/shared/scripts/verify-skills.sh")" 12)"
+assert_positive "C-27 settings.json に自前 hook が無ければ check 12 が warn する" "$(count_tag "$sec12" '[WARN]')"
+assert_eq "C-27 settings.json に自前 hook が無ければ check 12 は PASS しない" "0" "$(count_tag "$sec12" '[PASS]')"
+HH5="$(make_verify_home empty-hooks)"
+printf '%s\n' '{"hooks":{}}' >"$HH5/.codex/hooks.json"
+sec12="$(verify_section "$(verify_run "$HH5")" 12)"
+assert_contains "C-27 hooks.json に自前 hook が 1 件も無ければ warn する" "$sec12" "自前 hook が 1 件もありません"
+assert_eq "C-27 hooks.json に自前 hook が 1 件も無ければ check 12 は PASS しない" "0" "$(count_tag "$sec12" '[PASS]')"
+
+# 読めない ~/.codex/AGENTS.md・config.toml でも、verify は set -euo pipefail で途中で落ちずに次の check・集計まで走る
+# （「読めません」を warn した直後のサイズの計算・信頼キーの読み取りで落ちると、後ろの check と集計が出ない）
+HUV="$(make_verify_home unreadable-files)"
+chmod 000 "$HUV/.codex/AGENTS.md"
+out="$(verify_run "$HUV")"
+chmod 600 "$HUV/.codex/AGENTS.md"
+assert_contains "C-26 読めない AGENTS.md を check 11 が warn する" "$(verify_section "$out" 11)" "を読めません"
+assert_contains "C-26 読めない AGENTS.md でも verify は check 12 まで走る" "$out" "== check 12"
+chmod 000 "$HUV/.codex/config.toml"
+out="$(verify_run "$HUV")"
+chmod 600 "$HUV/.codex/config.toml"
+assert_contains "C-27 読めない config.toml を check 12 が warn する" "$(verify_section "$out" 12)" "config.toml を読めません"
+# 権限の問題を、信頼が外れた問題として案内しない（信頼キーの検査を飛ばさないと、自前 hook の全件に出る）
+assert_not_contains "C-27 読めない config.toml を「信頼が見つかりません」と取り違えない" "$(verify_section "$out" 12)" "信頼が config.toml に見つかりません"
+assert_eq "C-27 読めない config.toml でも verify は末尾の集計まで走る" "1" \
+    "$(printf '%s\n' "$out" | grep -cE 'check\(s\) failed|All checks passed|Passed with [0-9]+ warning')"
+
 # --- C-24: ~/.agents/skills/<name> が別 worktree 相当を指す（自分のリンク）→ fail / 無関係なパス → warn ---
 HW="$(make_verify_home worktree)"
 rm "$HW/.agents/skills/ask" && ln -s "$WORK/other-wt3/shared/skills/ask/" "$HW/.agents/skills/ask"
@@ -1146,6 +1698,24 @@ out="$(verify_run "$HW2")"
 assert_eq "C-24 旧 claude/skills を指す自分のリンクも、今のチェックアウトを指していなければ check 8 が fail" "1" "$(count_tag "$(verify_section "$out" 8)" '[FAIL]')"
 assert_contains "C-24 fail は該当の skill（design）を名指しする" "$(verify_section "$out" 8)" "design"
 
+# 実在する別の repo を指すリンクは他者として warn する（自分のリンクと誤判定して fail にしない）。verify は set -u なので、
+# is_own_skill_link の呼び出しが repo のルートを渡し忘れると、verify ごと異常終了する
+HVO="$(make_verify_home other-repo-link)"
+git_init "$WORK/other-repo"
+mkdir -p "$WORK/other-repo/shared/skills/ask"
+rm "$HVO/.agents/skills/ask" && ln -s "$WORK/other-repo/shared/skills/ask/" "$HVO/.agents/skills/ask"
+out="$(verify_run "$HVO")"
+assert_contains "C-24 実在する別の repo を指すリンクは check 8 が他者のリンクとして示す" "$(verify_section "$out" 8)" "foreign: ask"
+assert_contains "C-24 実在する別の repo を指すリンクがあっても verify は最後の check まで走る" "$out" "== check 12"
+# 実在する別のチェックアウト（worktree）を指す自分のリンクは、他者ではなく「今のチェックアウトを指していない」として示す。
+# repo のルートを渡し忘れると git の比較ができず、他者（foreign）に化ける（$3 の参照は $(...) の中なので、
+# set -u でも verify は止まらない）。git にした mini repo（MOWN）とその worktree を使う
+HVW="$(new_home v-own-wt)"
+mkdir -p "$HVW/.codex" "$HVW/.agents/skills"
+ln -s "$WORK/own-wt/shared/skills/adr/" "$HVW/.agents/skills/adr"
+out="$(verify_run "$HVW" "$MOWN/shared/scripts/verify-skills.sh")"
+assert_contains "C-24 実在する別 worktree を指す自分のリンクは、check 8 が今のチェックアウトを指していないと示す" "$(verify_section "$out" 8)" "wrong: adr"
+
 # --- ~/.codex が無い HOME では Codex の check を飛ばす（INFO）---
 HX="$(new_home v-nocodex)"
 HOME="$HX" bash "$SETUP" install >/dev/null 2>&1
@@ -1156,18 +1726,6 @@ done
 assert_eq "~/.codex が無くても verify は Codex のために fail しない" "0" "$(cat "$WORK/verify.rc")"
 
 # --- C-28 / 7(1): decide_ask_or_deny の対称性。repo の複製（mini repo）の hook を壊して見る ---
-make_mini_repo() {  # $1=名前 → mini repo のパス（verify はスクリプトの所在から repo ルートを導く）
-    local d="$WORK/mini-$1"
-    mkdir -p "$d/shared/scripts" "$d/claude" "$d/codex"
-    cp "$SETUP" "$d/setup.sh"
-    cp "$REPO_SHARED"/scripts/*.sh "$REPO_SHARED"/scripts/*.py "$d/shared/scripts/"
-    ln -s "$REPO_SHARED/skills" "$d/shared/skills"
-    ln -s "$REPO_SHARED/agents" "$d/shared/agents"
-    cp "$REPO_SHARED/global-rules.md" "$d/shared/"
-    cp "$REPO_ROOT/claude/settings.json" "$d/claude/"
-    cp "$REPO_ROOT"/codex/* "$d/codex/"
-    echo "$d"
-}
 HM1="$(new_home v-sym-ok)"
 MINI="$(make_mini_repo ok)"
 out="$(verify_run "$HM1" "$MINI/shared/scripts/verify-skills.sh")"
@@ -1192,6 +1750,81 @@ printf '%s\n' '' '# 5 本目の hook が ask を直書きした（Codex では�
     'echo '"'"'{"hookSpecificOutput":{"permissionDecision": "ask"}}'"'" >>"$MINI3/shared/scripts/hook-block-full-lint.sh"
 out="$(verify_run "$HM1" "$MINI3/shared/scripts/verify-skills.sh")"
 assert_contains "C-28 decide_ask_or_deny を通らない ask の直書きは check 7(1) が warn（hook 名を名指し）" "$(verify_section "$out" '7(1)')" "hook-block-full-lint.sh"
+
+# --- C-6: check 9（Codex の暗黙起動の抑止）の検出力。disable-model-invocation と agents/openai.yaml の集合のずれ ---
+# skills を改変するので、実ディレクトリのコピーにした mini repo で行う（make_mini_repo の skills は実 repo への symlink）
+c6_case() {  # $1=ケース名, $2=改変（mini repo のパスを $MC で参照する）, $3=名指しされる skill
+    local MC
+    MC="$(make_mini_repo "c6-$1")"
+    rm "$MC/shared/skills" && cp -R "$REPO_SHARED/skills" "$MC/shared/skills"
+    [[ -L "$MC/shared/skills" ]] && { echo "fixture が実 repo への symlink のまま" >&2; exit 1; }
+    eval "$2"
+    local sec9
+    sec9="$(verify_section "$(verify_run "$HM1" "$MC/shared/scripts/verify-skills.sh")" 9)"
+    assert_eq "C-6 [$1] check 9 が fail する" "1" "$(count_tag "$sec9" '[FAIL]')"
+    assert_eq "C-6 [$1] fail は ${3} を名指しする" "1" "$(printf '%s\n' "$sec9" | grep -F '[FAIL]' | grep -cF "$3")"
+}
+c6_case no-yaml 'rm "$MC/shared/skills/blog/agents/openai.yaml"' blog
+c6_case value-true 'printf "%s\n" "policy:" "  allow_implicit_invocation: true" >"$MC/shared/skills/context-index/agents/openai.yaml"' context-index
+c6_case extra-yaml 'mkdir -p "$MC/shared/skills/adr/agents" && printf "%s\n" "policy:" "  allow_implicit_invocation: false" >"$MC/shared/skills/adr/agents/openai.yaml"' adr
+c6_case outside-policy 'printf "%s\n" "interface:" "  allow_implicit_invocation: false" >"$MC/shared/skills/blog/agents/openai.yaml"' blog
+
+# --- C-28: 複製した関数の本体の一致（関数名の存在だけでは、片側だけ壊れた複製を通す）---
+sym7() {  # $1=mini repo → check 7(1) の節
+    verify_section "$(verify_run "$HM1" "$1/shared/scripts/verify-skills.sh")" '7(1)'
+}
+break_turn_id() { perl -i -pe 's/has\("turn_id"\)/has("turnid")/' "$1"; }
+
+# 1 本だけ違う: 多数決で、その 1 本を名指しする（先頭の 1 本を基準にすると、先頭が壊れたとき健全な 3 本を名指しする）
+for target in hook-lint-skill-frontmatter.sh hook-confirm-destructive-git.sh; do
+    MD="$(make_mini_repo "da-one-$target")"
+    break_turn_id "$MD/shared/scripts/$target"
+    sec7="$(sym7 "$MD")"
+    assert_contains "C-28 decide_ask_or_deny の本体が 1 本だけ違うと、その hook（${target}）を名指しする" "$sec7" "$target"
+    assert_eq "C-28 1 本だけ違うとき、名指しは 1 件だけ（健全な hook を名指ししない）" "1" "$(printf '%s\n' "$sec7" | grep -c '他の 3 本と違う')"
+done
+# 2 本に別々の改変（過半数が無い）: 「一致しない」を 1 件だけ出す
+MD="$(make_mini_repo da-two)"
+break_turn_id "$MD/shared/scripts/hook-block-tmp-commit.sh"
+perl -i -pe 's/decision="deny"/decision="deny" # x/' "$MD/shared/scripts/hook-lint-skill-frontmatter.sh"
+assert_eq "C-28 過半数の無い食い違いは「一致しない」を 1 件だけ出す" "1" "$(sym7 "$MD" | grep -c '複製が一致しません')"
+# 2 本から関数を消し、残りの 2 本の一方を改変する: 「無い」×2 と、残り 2 本を直接比べた「一致しない」×1
+MD="$(make_mini_repo da-two-left)"
+perl -i -0pe 's/decide_ask_or_deny\(\) \{/decide_removed() {/' "$MD/shared/scripts/hook-block-tmp-commit.sh" "$MD/shared/scripts/hook-confirm-destructive-git.sh"
+break_turn_id "$MD/shared/scripts/hook-lint-skill-frontmatter.sh"
+sec7="$(sym7 "$MD")"
+assert_eq "C-28 関数が無い hook を 2 本とも名指しする" "2" "$(printf '%s\n' "$sec7" | grep -c 'decide_ask_or_deny() がありません')"
+assert_eq "C-28 票が 2 本なら直接比べ、食い違いを 1 件出す" "1" "$(printf '%s\n' "$sec7" | grep -c '複製が一致しません')"
+# 3 本から関数を消す: 関数の無い hook は票から外す（空の本体どうしが多数派になると、正しい残りの 1 本を名指しする）
+MD="$(make_mini_repo da-three-gone)"
+perl -i -0pe 's/decide_ask_or_deny\(\) \{/decide_removed() {/' "$MD/shared/scripts/hook-block-tmp-commit.sh" \
+    "$MD/shared/scripts/hook-confirm-destructive-git.sh" "$MD/shared/scripts/hook-block-local-contract-link.sh"
+sec7="$(sym7 "$MD")"
+assert_eq "C-28 関数が無い 3 本を名指しする" "3" "$(printf '%s\n' "$sec7" | grep -c 'decide_ask_or_deny() がありません')"
+assert_eq "C-28 関数が残る 1 本を「他と違う」と名指ししない" "0" "$(printf '%s\n' "$sec7" | grep -c '他の 3 本と違う')"
+# 定義が 2 つある: 実行時は後勝ちなのに、先頭の定義だけを比べると PASS する
+MD="$(make_mini_repo da-twice)"
+printf '%s\n' '' 'decide_ask_or_deny() {  # 2 つ目' '  echo shadow' '}' >>"$MD/shared/scripts/hook-lint-skill-frontmatter.sh"
+assert_contains "C-28 decide_ask_or_deny の定義が 2 つあると warn" "$(sym7 "$MD")" "定義が 2 つ"
+# ask の直書きは、引用符のエスケープを含む形も拾う
+for lit in 'echo '"'"'{"hookSpecificOutput":{"permissionDecision":"ask"}}'"'" \
+           'jq -n '"'"'{hookSpecificOutput: {permissionDecision: "ask"}}'"'" \
+           'echo "{\"permissionDecision\":\"ask\"}"'; do
+    MD="$(make_mini_repo "lit-$(printf '%s' "$lit" | cksum | cut -d' ' -f1)")"
+    printf '%s\n' '' "$lit" >>"$MD/shared/scripts/hook-block-full-lint.sh"
+    assert_contains "C-28 ask の直書き（${lit:0:24}…）を warn" "$(sym7 "$MD")" "hook-block-full-lint.sh"
+done
+# setup.sh と verify に複製した判定関数（自分のリンク・git の共通ディレクトリ・マーカーの並び）は本体を比べる
+for fn in is_own_skill_link own_git_common marker_shape; do
+    MD="$(make_mini_repo "pair-$fn")"
+    perl -i -0pe "s/(^${fn}\\(\\) \\{[^\\n]*\\n)/\$1    : changed\\n/m" "$MD/setup.sh"
+    assert_eq "前提: mini repo の setup.sh の ${fn} を書き換えられた" "1" "$(grep -c '^    : changed$' "$MD/setup.sh")"
+    assert_contains "C-28 ${fn} の本体が setup.sh と verify で食い違うと warn" "$(sym7 "$MD")" "$fn"
+    # 両方を同じ名前に改名する（本体が両方とも空になる）: 空どうしの一致を PASS にしない
+    MD="$(make_mini_repo "pair-gone-$fn")"
+    perl -i -pe "s/^${fn}\\(\\) \\{/${fn}_gone() {/" "$MD/setup.sh" "$MD/shared/scripts/verify-skills.sh"
+    assert_contains "C-28 ${fn} の定義が両方から消えると「無い」と warn" "$(sym7 "$MD")" "${fn} の定義が"
+done
 
 # --- C-26: 上限 32 KiB は「~/.codex/AGENTS.md と repo 直下の AGENTS.md の合計」---
 # 片方だけを見る実装や、境界値（32767 / 32768）の取り違えを捕まえるため、repo 直下の AGENTS.md の大きさを
@@ -1237,6 +1870,121 @@ assert_eq "C-8 生成に失敗しても、既存の生成物（old.toml）を消
 # bad.toml の不在だけでは、別名の新規ファイルや .new.<PID> の残骸を捕まえられない。配置先の中身そのものを固定する
 assert_eq "C-8 生成に失敗したら、配置先に新しいファイル（別名・一時ファイルの残骸を含む）を作らない" "old.toml" \
     "$(find "$HG/.codex/agents" -mindepth 1 -maxdepth 1 -exec basename {} \; | sort | tr '\n' ' ' | sed 's/ $//')"
+
+# ===========================================================================
+# L-1〜L-6: install・uninstall・migrate のロック（~/.claude/.setup.lock）と、リンクの置き換え
+# ===========================================================================
+echo "== L: ロックとリンクの置き換え =="
+make_lock() {  # $1=HOME, $2=ロックに書く PID
+    mkdir -p "$1/.claude/.setup.lock" && printf '%s\n' "$2" >"$1/.claude/.setup.lock/pid"
+}
+skill_link_count() { find "$1/.claude/skills" -mindepth 1 -maxdepth 1 -type l | wc -l | tr -d ' '; }
+
+# L-1: 生きているプロセス（このテストのシェル）の PID のロックがあれば、どのコマンドも何も書かずに止まる。
+# 「何も書かない」は、ロックが無ければ変わる状態で見る（リンクを 1 本消しておく。uninstall なら全部外れる）
+HL="$(new_home lock-live)"
+run_setup "$HL" install
+rm "$HL/.claude/skills/adr"
+links_before="$(skill_link_count "$HL")"
+mkdir -p "$HL/.claude/sub-agents"
+ln -s "$WORK/old-checkout/claude/subagents/x.md" "$HL/.claude/sub-agents/x.md"
+make_lock "$HL" "$$"
+for cmd in install uninstall migrate; do
+    run_setup "$HL" "$cmd"
+    assert_eq "L-1 [$cmd] 実行中の setup.sh のロックがあれば exit 非 0" "1" "$([[ "$(last_rc)" != "0" ]] && echo 1 || echo 0)"
+    assert_contains "L-1 [$cmd] ロックを持つ PID を示す" "$(last_out)" "PID $$"
+    assert_eq "L-1 [$cmd] ロックがあれば Claude 側のリンクを張らない・外さない" "$links_before" "$(skill_link_count "$HL")"
+done
+assert_eq "L-1 [migrate] ロックがあれば旧配置先のリンクを撤去しない" "yes" "$([[ -L "$HL/.claude/sub-agents/x.md" ]] && echo yes || echo no)"
+assert_eq "L-1 他者のロックを消さない" "yes" "$([[ -d "$HL/.claude/.setup.lock" ]] && echo yes || echo no)"
+
+# L-2: 動いていない PID のロック（強制終了の残骸）は自動で奪わず、消し方を案内する（2 本が同時に奪う窓を作らない）
+true & dead_pid=$!
+wait "$dead_pid"
+HL2="$(new_home lock-stale)"
+make_lock "$HL2" "$dead_pid"
+run_setup "$HL2" install
+assert_eq "L-2 動いていない PID のロックでも exit 非 0（奪わない）" "1" "$([[ "$(last_rc)" != "0" ]] && echo 1 || echo 0)"
+assert_contains "L-2 ロックの消し方を案内する" "$(last_out)" "rm -rf ~/.claude/.setup.lock"
+assert_eq "L-2 残骸のロックを自動で消さない" "yes" "$([[ -d "$HL2/.claude/.setup.lock" ]] && echo yes || echo no)"
+
+# L-3: 成功しても・失敗しても・パイプの相手が先に終わっても（SIGPIPE）、終わればロックを残さない
+HL3="$(new_home lock-release)"
+run_setup "$HL3" install
+assert_eq "L-3 [成功] install の後にロックが残らない" "no" "$([[ -e "$HL3/.claude/.setup.lock" ]] && echo yes || echo no)"
+printf '%s\n' 'keep me' "$GB" 'half written' >"$HL3/.claude/CLAUDE.md"
+run_setup "$HL3" install
+assert_eq "前提: [失敗] install が失敗した" "1" "$([[ "$(last_rc)" != "0" ]] && echo 1 || echo 0)"
+assert_eq "L-3 [失敗] 失敗した install の後にロックが残らない" "no" "$([[ -e "$HL3/.claude/.setup.lock" ]] && echo yes || echo no)"
+HOME="$HL3" bash "$SETUP" install 2>/dev/null | head -1 >/dev/null
+l3_rc="${PIPESTATUS[0]}"
+assert_eq "前提: [途中終了] install が SIGPIPE で途中終了した（終了コード 141）" "141" "$l3_rc"
+assert_eq "L-3 [途中終了] head -1 で出力を打ち切った install の後にロックが残らない" "no" "$([[ -e "$HL3/.claude/.setup.lock" ]] && echo yes || echo no)"
+
+# L-5: ~/.claude に書き込めないときは「残っています」ではなく「作れません」と出す
+HL5="$(new_home lock-readonly)"
+mkdir -p "$HL5/.claude"
+chmod 555 "$HL5/.claude"
+run_setup "$HL5" install
+chmod 755 "$HL5/.claude"
+assert_eq "L-5 ~/.claude に書き込めなければ exit 非 0" "1" "$([[ "$(last_rc)" != "0" ]] && echo 1 || echo 0)"
+assert_contains "L-5 ロックを作れないことを示す" "$(last_out)" "ロックを作れません"
+assert_not_contains "L-5 実行中・残骸のロックと取り違えない" "$(last_out)" "rm -rf ~/.claude/.setup.lock"
+
+# L-6: 強制終了の後（settings.json が無く、旧固定名の settings.json.new が残る）でも install は止まらない
+HL6="$(new_home settings-new-left)"
+mkdir -p "$HL6/.claude"
+printf '%s\n' '{}' >"$WORK/some-settings.json"
+ln -s "$WORK/some-settings.json" "$HL6/.claude/settings.json.new"
+run_setup "$HL6" install
+assert_eq "L-6 旧固定名の settings.json.new が残っていても install は成功する" "0" "$(last_rc)"
+assert_eq "L-6 settings.json は repo の settings.json へのリンクになる" "$REPO_ROOT/claude/settings.json" "$(readlink "$HL6/.claude/settings.json")"
+
+# L-4: rm → ln -s の間に別の install がリンクを作ると、BSD の ln はそのリンク先（チェックアウトの中）に
+# 自己参照リンクを作る。ln の shim で割り込みを再現する。チェックアウトの中に書きうるので、skills を実ディレクトリに
+# した mini repo で行う（make_mini_repo の shared/skills は実 repo への symlink）
+ML4="$(make_mini_repo lock-ln)"
+rm "$ML4/shared/skills" && cp -R "$REPO_SHARED/skills" "$ML4/shared/skills"
+[[ -L "$ML4/shared/skills" ]] && { echo "fixture が実 repo への symlink のまま" >&2; exit 1; }
+HL4="$(new_home lock-ln)"
+mkdir -p "$WORK/ln-shim"
+cat >"$WORK/ln-shim/ln" <<'EOF'
+#!/bin/bash
+# skills/adr（またはその一時名）を作る直前に 1 回だけ、別の install が先に skills/adr を張った状態にする
+last="${@: -1}"
+case "$last" in
+    "$SHIM_DIR/adr"|"$SHIM_DIR/adr.tmp."*|"$SHIM_DIR/.adr.tmp."*)
+        if [[ ! -e "$SHIM_MARK" ]]; then
+            : >"$SHIM_MARK"
+            /bin/ln -s "$SHIM_SRC" "$SHIM_DIR/adr" 2>/dev/null || true
+        fi
+        ;;
+esac
+exec /bin/ln "$@"
+EOF
+chmod +x "$WORK/ln-shim/ln"
+ls -A "$ML4/shared/skills/adr" >"$WORK/l4.before"
+PATH="$WORK/ln-shim:$PATH" SHIM_DIR="$HL4/.claude/skills" SHIM_SRC="$ML4/shared/skills/adr/" SHIM_MARK="$WORK/ln-shim.fired" \
+    run_setup_with "$ML4/setup.sh" "$HL4" install
+assert_eq "前提: [L-4] ln の shim が割り込んだ" "yes" "$([[ -e "$WORK/ln-shim.fired" ]] && echo yes || echo no)"
+ls -A "$ML4/shared/skills/adr" >"$WORK/l4.after"
+assert_eq "L-4 割り込みがあっても、チェックアウトの中（skills/adr）に何も作らない" "0" "$(cmp -s "$WORK/l4.before" "$WORK/l4.after"; echo $?)"
+assert_eq "L-4 skills/adr は今のチェックアウトを指す" "$ML4/shared/skills/adr/" "$(readlink "$HL4/.claude/skills/adr")"
+
+# backup モード（Claude 側）は、symlink でない既存物を退避してからリンクを張る。リンクを mv -fh で置き換えるので、
+# 実ファイルを黙って上書きしない・実ディレクトリの中へ一時リンクを入れない
+HBK="$(new_home backup-real)"
+mkdir -p "$HBK/.claude/skills" "$HBK/.claude/agents"
+printf '%s\n' 'my own file' >"$HBK/.claude/skills/adr"
+agent_md="$(basename "$(find "$REPO_SHARED/agents" -name '*.md' -type f ! -name README.md | head -1)")"
+mkdir -p "$HBK/.claude/agents/$agent_md"
+run_setup "$HBK" install
+assert_eq "C-1 skills の実ファイルがあっても install は成功する" "0" "$(last_rc)"
+assert_eq "C-1 skills の実ファイルは退避してからリンクを張る" "yes" "$([[ -L "$HBK/.claude/skills/adr" ]] && echo yes || echo no)"
+assert_eq "C-1 skills の実ファイルの退避がある" "my own file" "$(cat "$HBK/.claude/skills/"adr.backup.* 2>/dev/null)"
+assert_eq "C-1 agents の実ディレクトリは退避してからリンクを張る" "yes" "$([[ -L "$HBK/.claude/agents/$agent_md" ]] && echo yes || echo no)"
+assert_eq "C-1 agents の実ディレクトリの退避がある（中にリンクを入れない）" "1" \
+    "$(find "$HBK/.claude/agents" -maxdepth 1 -name "${agent_md}.backup.*" -type d | wc -l | tr -d ' ')"
 
 echo ""
 echo "$pass_count passed / $fail_count failed"
