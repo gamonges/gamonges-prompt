@@ -1307,23 +1307,28 @@ assert_eq "C-12 hooks.json が無くても install は成功する" "0" "$(last_
 assert_eq "C-12 hooks.json が無ければ自前の hook 全件で新規に作る" "$SELF_COUNT" "$(self_hook_count "$HNJ/.codex/hooks.json" 2>/dev/null || echo 0)"
 assert_eq "C-12 新規作成では退避を作らない" "0" "$(find "$HNJ/.codex" -maxdepth 1 -name 'hooks.json.pre-install.*' | wc -l | tr -d ' ')"
 
-# --- /hooks の確認の案内: hooks.json を書き換えたとき、自前 hook が指すスクリプトを更新したときだけ出す ---
-# 信頼がスクリプトの中身に紐づくか（G-1）を実測するまでは、hook のスクリプトの更新でも案内する。hook でない
-# スクリプト（statusline.py）だけの更新で毎回出すと、案内が読まれなくなる
-assert_contains "C-8 hook のスクリプトを配置した install は /hooks の確認を案内する（初回は全件が新規）" "$install_out" "/hooks を確認し"
+# --- /hooks の確認の案内: hooks.json を書き換えたときだけ出す ---
+# Codex の信頼ハッシュはイベント名・matcher・hook 定義から作られ、スクリプトの中身を含まない（G-1。0.160.0 の
+# hooks/src/engine/discovery.rs の hook_hash）。スクリプトの更新で案内すると、信頼が外れていないのに毎回鳴り、読まれなくなる
+# 否定の照合は "/hooks" で行う（固有の文言で否定すると、別の文言で案内する実装でも 0 件になり、案内しないことを固定できない）。
+# ~/.codex/hooks.json のパスの表示（/hooks.json）には当てない
+assert_eq "C-12 hooks.json に書き込まない初回 install は、hook のスクリプトが全件新規でも /hooks を案内しない" "0" \
+    "$(printf '%s\n' "$install_out" | grep -cE '/hooks([^.]|$)')"
 MG="$(make_mini_repo guide)"
 HGD="$(make_codex_home guide)"
 run_setup_with "$MG/setup.sh" "$HGD" install
 assert_eq "前提: 案内のテストの 1 回目の install は成功する" "0" "$(last_rc)"
 printf '%s\n' '# changed' >>"$MG/shared/scripts/statusline.py"
 run_setup_with "$MG/setup.sh" "$HGD" install
-# 否定の照合は "/hooks" で行う（固有の文言で否定すると、別の文言で案内する実装でも 0 件になり、案内しないことを固定できない）。
-# ~/.codex/hooks.json のパスの表示（/hooks.json）には当てない
 assert_eq "C-12 hook でないスクリプト（statusline.py）だけを更新した install は /hooks を案内しない" "0" \
     "$(last_out | grep -cE '/hooks([^.]|$)')"
 printf '%s\n' '# changed' >>"$MG/shared/scripts/hook-block-tmp-commit.sh"
 run_setup_with "$MG/setup.sh" "$HGD" install
-assert_contains "C-12 自前 hook が指すスクリプトを更新した install は /hooks の確認を案内する" "$(last_out)" "/hooks を確認し"
+assert_eq "前提: 自前 hook のスクリプトを更新した install は成功する" "0" "$(last_rc)"
+assert_contains "前提: 自前 hook のスクリプトの更新が配置される（更新が届かないまま案内の有無を見ても空振りする）" \
+    "$(tail -1 "$HGD/.claude/scripts/hook-block-tmp-commit.sh")" "# changed"
+assert_eq "C-12 自前 hook が指すスクリプトだけを更新した install は /hooks を案内しない（信頼はスクリプトの中身に紐づかない）" "0" \
+    "$(last_out | grep -cE '/hooks([^.]|$)')"
 # install 済みの HOME で hooks.json だけを古くする（scripts は変わらないので、案内の理由は hooks.json の書き換えだけ）
 jq '.hooks.UserPromptSubmit[0].hooks |= map(select(.command | contains("hook-detect-correction.sh") | not))' \
     "$HGD/.codex/hooks.json" >"$WORK/hgd.json" && cp "$WORK/hgd.json" "$HGD/.codex/hooks.json"

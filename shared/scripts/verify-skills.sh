@@ -866,7 +866,6 @@ PY
     elif [ -z "$own_rows" ]; then
         warn "hooks.json に自前 hook が 1 件もありません — ./setup.sh install"
     fi
-    newer_scripts=0
     while IFS=$'\t' read -r ev group_idx hook_idx script_name; do
         [ -n "$ev" ] || continue
         if [ "$keys_ok" -eq 1 ]; then
@@ -877,17 +876,7 @@ PY
                 *) warn "${ev} ${group_idx}:${hook_idx} (${script_name}) の信頼が config.toml に見つかりません。Codex の /hooks で信頼し直してください（位置や定義が変わった hook は信頼が外れ、スキップされます）" ;;
             esac
         fi
-        if [ -f "$codex_config" ] && [ -f "$HOME/.claude/scripts/$script_name" ] && [ "$HOME/.claude/scripts/$script_name" -nt "$codex_config" ]; then
-            newer_scripts=$((newer_scripts + 1))
-        fi
     done <<< "$own_rows"
-
-    # G-1（信頼ハッシュがスクリプトの中身を含むか）は未実測。含む場合、scripts を更新すると信頼が外れて
-    # hook がスキップされる。含まない場合は無害なので、実測までは warn にせず INFO に留める
-    # （常時点灯する warn は無視されるようになる）
-    if [ "$newer_scripts" -gt 0 ]; then
-        echo -e "${BLUE}[INFO]${NC} 自前 hook のスクリプト ${newer_scripts} 本が config.toml より新しい。Codex の信頼がスクリプトの中身に紐づく場合、/hooks で信頼し直すまで hook がスキップされる可能性がある（未実測のため warn にしない）"
-    fi
 
     if [ "$warn_count" -eq "$hook_warn_before" ]; then
         pass "Codex の自前 hook は各イベントの先頭に登録され、信頼キーも config.toml にあります"

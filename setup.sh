@@ -60,8 +60,6 @@ REPO_CODEX_RULES="${SCRIPT_DIR}/codex/codex-rules.md"
 REPO_GEN_AGENTS="${SCRIPT_DIR}/codex/gen-agents.py"
 # gen-agents.py が出力する TOML の 1 行目の先頭。「自分が置いたもの」の目印（uninstall・orphan 判定）
 GEN_HEADER_PREFIX="# generated-by: gamonges-prompt setup.sh"
-# install_scripts が更新した（内容が変わった・新規の）スクリプトの名前。Codex の /hooks の案内に使う
-UPDATED_SCRIPTS=()
 # install の段のうち失敗したものの名前（run_stage が積む）
 STAGE_FAILURES=()
 # install・uninstall・migrate を直列化するロック（acquire_lock）
@@ -441,13 +439,6 @@ install_scripts() {
                 cp "$target" "${target}.backup.$(date +%Y%m%d%H%M%S).$$"
                 log_warning "  ! ${name} はローカル改変あり。バックアップしました"
             fi
-        fi
-
-        # 内容が変わる（または新規の）ものを記録する。Codex の hook が指すスクリプトなら、install_codex が
-        # /hooks の確認を案内する。ここでは jq も settings.json も読まない（settings.json が壊れているとき、
-        # set -e の効くこの関数で jq が失敗すると、Claude 側の install まで止まる）
-        if [[ ! -f "$target" ]] || ! cmp -s "$script" "$target"; then
-            UPDATED_SCRIPTS+=("$name")
         fi
 
         # hook は常時発火するため、上書き中のファイルが別セッションから実行されうる。
@@ -1049,7 +1040,7 @@ codex_hooks_cksum() {  # hooks.json の cksum（無ければ none）。書き換
 # 段は run_stage のサブシェルで走るので、案内の判定（変数）はこの親シェルで行う。||・if の条件の中で呼ばない
 install_codex() {
     log_info "Codex への展開を行います（~/.codex が在るため）..."
-    local hooks_before hooks_after name
+    local hooks_before hooks_after
     hooks_before=$(codex_hooks_cksum)
     run_stage "Codex の hooks.json" install_codex_hooks
     hooks_after=$(codex_hooks_cksum)
@@ -1060,16 +1051,10 @@ install_codex() {
     echo ""
     run_stage "Codex の規約ファイル" install_codex_agents_md
 
-    # G-1（信頼ハッシュがスクリプトの中身を含むか）が未実測の間は、hook スクリプトの更新でも信頼の確認を案内する
+    # 信頼ハッシュはイベント名・matcher・hook 定義から作られ、スクリプトの中身を含まない（G-1）。
+    # 信頼が外れうるのは hooks.json を書き換えたときだけなので、スクリプトの更新では案内しない
     if [[ "$hooks_before" != "$hooks_after" ]]; then
         CODEX_TRUST_NOTICE=true
-    fi
-    if [[ -f "$CODEX_HOOKS_JSON" ]]; then
-        for name in "${UPDATED_SCRIPTS[@]}"; do
-            if grep -qF "/.claude/scripts/${name}\"" "$CODEX_HOOKS_JSON"; then
-                CODEX_TRUST_NOTICE=true
-            fi
-        done
     fi
 }
 
@@ -1501,7 +1486,7 @@ main() {
             echo ""
             # 案内と失敗一覧は、各段の出力に埋もれないよう最後に出す
             if [[ "$CODEX_TRUST_NOTICE" == true ]]; then
-                log_warning "Codex を開いて /hooks を確認し、「要レビュー」の hook があれば信頼し直してください（信頼が hook のスクリプトの中身に紐づくかを確かめるまで、hook のスクリプトを更新したときも案内します）"
+                log_warning "Codex を開いて /hooks を確認し、「要レビュー」の hook があれば信頼し直してください（hooks.json の自前 hook を書き換えたため）"
                 echo ""
             fi
             if [[ ${#STAGE_FAILURES[@]} -gt 0 ]]; then

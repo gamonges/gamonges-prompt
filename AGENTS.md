@@ -87,7 +87,7 @@ export OTEL_EXPORTER_OTLP_HEADERS="DD-API-KEY=$CLAUDE_CODE_TELEMETRY_DD_API_KEY"
 - **自前グループは各イベントの先頭に固定する。** Codex の hook の信頼は `config.toml` の `[hooks.state."<hooks.json の絶対パス>:<event の snake_case>:<グループ index>:<hook index>"]` で、位置が 1 つずれると中身が同じでも「要レビュー」になりスキップされる（= ガードが黙って開く）。Orca・Muxy のグループは自前グループの後ろに居るので、先頭を同じ数で差し替えれば位置は動かない（実機の並びなら初回の install から書き込まない）。数が変わるときだけ、そのイベントの全件を `/hooks` で信頼し直す（install が案内する）。先頭以外に自前の hook があるときは、推測で並べ替えず失敗する
 - **Codex では `ask` を `deny` に変える。** Codex は確認プロンプトに未対応で、未対応の値は hook の失敗として扱われ操作が続行する。入力に `turn_id` があれば Codex（Claude Code の入力には無い）。判定は各 hook に複製した `decide_ask_or_deny` で行い、共通ファイルは `source` しない（`source` の失敗は exit 2 以外になりガードが開く）。複製の欠落・本体の不一致と、関数を通さない ask の直書きは verify の check 7(1) が検知する。理由には `[要確認]` を付け、モデルはユーザーに確認して、ユーザー自身に実行してもらう（SKILL.md の lint の frontmatter の deny は、直した内容で再実行する）
 - **`apply_patch` で書かれる SKILL.md も lint する。** Codex は SKILL.md を Write / Edit ではなく `apply_patch` で編集し、入力に `file_path` が無い（patch 本文は `tool_input.command`）。以前は lint が黙って開いていた。patch の書式は Codex 0.160.0 に同梱の文法に従い、patch を解釈できないとき・現ファイルに当てられないときは、SKILL.md に触れる疑いがあれば止める（fail-closed）
-- **未確定（G-1）: 信頼ハッシュがスクリプトの中身を含むか。** 含む場合、scripts を更新すると信頼が外れて hook がスキップされる。実測するまで、install は自前 hook が指すスクリプトを更新したら `/hooks` の確認を案内し、verify の check 12 は mtime の比較を INFO に留める
+- **信頼ハッシュはスクリプトの中身を含まない（G-1。2026-10-07 に Codex 0.160.0 のソースで確認）。** `trusted_hash` はイベント名・matcher・hook 定義（command 文字列など）を TOML にしたものの sha256（`codex-rs/hooks/src/engine/discovery.rs` の `hook_hash`）。scripts を更新しても信頼は外れないので、install が `/hooks` を案内するのは hooks.json を書き換えたときだけ。Codex を上げたら、この前提が変わっていないかを同じ関数で確かめる
 
 ### portability 課題（Claude Code 固有。F-7 で対応予定）
 
