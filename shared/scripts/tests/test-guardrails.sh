@@ -1772,6 +1772,21 @@ EOF
 )" "")"
 assert_ap "AP-20 絶対パスの patch は .cwd が無くても検査できる" deny "$out" "必須フィールド"
 
+# AP-RX: Codex 0.160.0 の実機から採取した PreToolUse の入力（2026-10-07。値は伏せ字）。tool_input は command だけを持つ
+# オブジェクトで、model・permission_mode・transcript_path 等も付く。上の合成した入力（キーが最小限）では見えない形を固定する
+RX_FIXTURE="$SCRIPT_DIR/fixtures/codex-pretooluse-apply-patch.json"
+rx_input() {  # $1=差し替える patch（空なら fixture のまま）→ __ROOT__ を $AP にした入力
+    jq -c --arg root "$AP" --arg p "${1-}" '
+        (if $p != "" then .tool_input.command = $p else . end)
+        | .cwd |= sub("__ROOT__"; $root) | .tool_input.command |= gsub("__ROOT__"; $root)' "$RX_FIXTURE"
+}
+assert_equal "前提: AP-RX の fixture は Codex の入力（turn_id あり・tool_input がオブジェクト）" "true" \
+    "$(jq -c 'has("turn_id") and (.tool_input | type == "object")' "$RX_FIXTURE" 2>/dev/null)"
+out="$(printf '%s' "$(rx_input "")" | bash "$LINT_HOOK" 2>/dev/null; echo "${PIPESTATUS[1]}" >"$RC_FILE")"
+assert_ap "AP-RX1 実機の入力の形で、本文に 1 行足す patch は素通し" "" "$out"
+out="$(printf '%s' "$(rx_input "$(printf '%s\n' '*** Begin Patch' "*** Update File: $AP/skills/demo/SKILL.md" '@@' ' ---' '-name: demo' ' description: Does a thing. 使用する時に呼ぶ。' ' ---' '*** End Patch')")" | bash "$LINT_HOOK" 2>/dev/null; echo "${PIPESTATUS[1]}" >"$RC_FILE")"
+assert_ap "AP-RX2 実機の入力の形で、name 行を消す patch は止める" deny "$out" "必須フィールド"
+
 # AP-21: ask 系（トリガー語なし）も Codex では deny。Claude Code の入力（apply_patch を使わない）には影響しない
 out="$(run_ap "$(cat <<'EOF'
 *** Begin Patch
