@@ -37,8 +37,8 @@ if [ ! -f "$ORIGIN" ]; then
 fi
 
 IFS=$'\t' read -r repo_dir _branch _sha < "$ORIGIN" || exit 0
-# install 元のチェックアウトが shared/ 移行前の古いブランチにある間は shared/scripts が無い。
-# 移行後は claude/scripts が互換 symlink なので、shared/scripts を優先して両方を探す。
+# install 元のチェックアウトが shared/ 移行前の古いブランチにある間は shared/scripts が無く、
+# claude/scripts が実ディレクトリとしてある。shared/scripts を優先して両方を探す。
 # どちらも解決できないと次行で黙って終わり、未同期の警告が出なくなる
 if [ -d "${repo_dir}/shared/scripts" ]; then
     REPO_SCRIPTS="${repo_dir}/shared/scripts"

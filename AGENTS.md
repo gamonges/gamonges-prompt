@@ -19,7 +19,7 @@ Claude Code と Codex で使用する Skills、SubAgents のコレクション�
 
 **他端末への展開時の手順**: `git pull && ./setup.sh migrate && ./setup.sh install`
 
-**ディレクトリの役割**: 共通資産（skills・agents・scripts・global-rules.md）は `shared/` が正本。`claude/` に残るのは Claude Code 固有の `settings.json` と、旧パス `claude/{skills,agents,scripts}` を解決する互換 symlink（`→ ../shared/…`。移行期間用で、後続の PR で削除する）だけ。Codex 固有のもの（読み替え表 `codex-rules.md`・agents の TOML 生成器 `gen-agents.py`）は `codex/`。新しいファイルは `shared/` に置く。
+**ディレクトリの役割**: 共通資産（skills・agents・scripts・global-rules.md）は `shared/` が正本。`claude/` に残るのは Claude Code 固有の `settings.json` だけ（旧パス `claude/{skills,agents,scripts}` の互換 symlink は移行の後に外した。旧パスを指すリンクは `./setup.sh migrate` が張り替える）。Codex 固有のもの（読み替え表 `codex-rules.md`・agents の TOML 生成器 `gen-agents.py`）は `codex/`。新しいファイルは `shared/` に置く。
 
 配置方式は 2 通り（`~/.codex` が在れば、Codex にも同じ資産を展開する。3 つ目の方式ではなく、下の 2 方式の Codex 版）:
 
@@ -33,7 +33,7 @@ Claude Code と Codex で使用する Skills、SubAgents のコレクション�
 
 **install はメインチェックアウトから実行する。** settings.json と skills は symlink のままなので install 元のチェックアウトを全プロジェクトのランタイムが参照する。worktree から install すると、その worktree を削除した瞬間に deny リスト・hook 定義・全 skill・`~/.claude/agents/` の subagent がまとめて失われる（hook と違って何も失敗しないので気づけない）。linked worktree から実行すると `./setup.sh install` が警告する。
 
-構造的検証は `./shared/scripts/verify-skills.sh`（fail があれば exit 1、warn のみなら exit 0。check 4 が scripts の同期・orphan・install 元を、check 5 が listing budget を見る。Codex 側は check 8（skills）・9（暗黙起動の抑止）・10（TOML の同期）・11（AGENTS.md のブロックとサイズ）・12（hooks.json の位置と信頼）、7(1) が `decide_ask_or_deny` の複製と「自分のリンク」・マーカーの並びの判定の本体の一致を見る）。
+構造的検証は `./shared/scripts/verify-skills.sh`（fail があれば exit 1、warn のみなら exit 0。check 4 が scripts の同期・orphan・install 元を、check 5 が listing budget を見る。Codex 側は check 8（skills）・9（暗黙起動の抑止）・10（TOML の同期）・11（AGENTS.md のブロックとサイズ）・12（hooks.json の位置と信頼）・13（Codex の版が前提を確かめた版と同じか）、7(1) が `decide_ask_or_deny` の複製と「自分のリンク」・マーカーの並びの判定の本体の一致を見る）。
 
 **ガードレールの挙動検証は `bash shared/scripts/tests/test-guardrails.sh`（`shared/scripts/` を編集したら実行する）。** 対象はいずれも fail-open 型（ガードが黙って開く / error が黙って消える）で、壊れても何も起きないため通常の動作確認では検知できない。Claude Code の入力と Codex の入力（`turn_id` あり）の両方を検査する。CI が無い本リポジトリでは、このテストが回帰を捉える唯一の手段になる。`./shared/scripts/verify-skills.sh --with-behavior-tests` からも呼べる。`setup.sh` と `verify-skills.sh` の**配置処理**（リンク先・実体コピー・前回 sha の判定）は、sandbox HOME で実プロセスを走らせる `bash shared/scripts/tests/test-setup-codex.sh` が検証する（`setup.sh` を編集したら実行する）。
 
@@ -87,7 +87,7 @@ export OTEL_EXPORTER_OTLP_HEADERS="DD-API-KEY=$CLAUDE_CODE_TELEMETRY_DD_API_KEY"
 - **自前グループは各イベントの先頭に固定する。** Codex の hook の信頼は `config.toml` の `[hooks.state."<hooks.json の絶対パス>:<event の snake_case>:<グループ index>:<hook index>"]` で、位置が 1 つずれると中身が同じでも「要レビュー」になりスキップされる（= ガードが黙って開く）。Orca・Muxy のグループは自前グループの後ろに居るので、先頭を同じ数で差し替えれば位置は動かない（実機の並びなら初回の install から書き込まない）。数が変わるときだけ、そのイベントの全件を `/hooks` で信頼し直す（install が案内する）。先頭以外に自前の hook があるときは、推測で並べ替えず失敗する
 - **Codex では `ask` を `deny` に変える。** Codex は確認プロンプトに未対応で、未対応の値は hook の失敗として扱われ操作が続行する。入力に `turn_id` があれば Codex（Claude Code の入力には無い）。判定は各 hook に複製した `decide_ask_or_deny` で行い、共通ファイルは `source` しない（`source` の失敗は exit 2 以外になりガードが開く）。複製の欠落・本体の不一致と、関数を通さない ask の直書きは verify の check 7(1) が検知する。理由には `[要確認]` を付け、モデルはユーザーに確認して、ユーザー自身に実行してもらう（SKILL.md の lint の frontmatter の deny は、直した内容で再実行する）
 - **`apply_patch` で書かれる SKILL.md も lint する。** Codex は SKILL.md を Write / Edit ではなく `apply_patch` で編集し、入力に `file_path` が無い（patch 本文は `tool_input.command`）。以前は lint が黙って開いていた。patch の書式は Codex 0.160.0 に同梱の文法に従い、patch を解釈できないとき・現ファイルに当てられないときは、SKILL.md に触れる疑いがあれば止める（fail-closed）
-- **信頼ハッシュはスクリプトの中身を含まない（G-1。2026-10-07 に Codex 0.160.0 のソースで確認）。** `trusted_hash` はイベント名・matcher・hook 定義（command 文字列など）を TOML にしたものの sha256（`codex-rs/hooks/src/engine/discovery.rs` の `hook_hash`）。scripts を更新しても信頼は外れないので、install が `/hooks` を案内するのは hooks.json を書き換えたときだけ。Codex を上げたら、この前提が変わっていないかを同じ関数で確かめる
+- **信頼ハッシュはスクリプトの中身を含まない（G-1。2026-10-07 に Codex 0.160.0 のソースで確認）。** `trusted_hash` はイベント名・matcher・hook 定義（command 文字列など）を TOML にしたものの sha256（`codex-rs/hooks/src/engine/discovery.rs` の `hook_hash`）。scripts を更新しても信頼は外れないので、install が `/hooks` を案内するのは hooks.json を書き換えたときだけ。Codex を上げたら、この前提が変わっていないかを同じ関数で確かめ、`codex/verified-codex-version` を更新する（verify の check 13 が版の違いを warn で知らせる）
 
 ### portability 課題（Claude Code 固有。F-7 で対応予定）
 
