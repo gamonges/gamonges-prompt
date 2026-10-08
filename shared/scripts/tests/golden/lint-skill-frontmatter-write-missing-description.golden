@@ -1,0 +1,8 @@
+rc=0
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "deny",
+    "permissionDecisionReason": "SKILL.md frontmatter に必須フィールド (description) が欠落しています。詳細は shared/skills/_template/reference/skill-frontmatter-spec.md を参照。"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "cwd": "__ROOT__",
+  "hook_event_name": "PreToolUse",
+  "model": "gpt-6.1-sol",
+  "permission_mode": "bypassPermissions",
+  "session_id": "00000000-0000-0000-0000-000000000000",
+  "tool_input": {
+    "command": "*** Begin Patch\n*** Update File: __ROOT__/skills/demo/SKILL.md\n@@\n Line A\n+<!-- dry-run -->\n*** End Patch\n"
+  },
+  "tool_name": "apply_patch",
+  "tool_use_id": "exec-0",
+  "transcript_path": "/home/user/.codex/sessions/2026/10/07/rollout-sample.jsonl",
+  "turn_id": "00000000-0000-0000-0000-000000000001"
+}

@@ -1,0 +1,8 @@
+rc=0
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "ask",
+    "permissionDecisionReason": "commit 対象の package.json に link: / file: のローカル依存宣言が含まれています。ローカル結合のまま commit すると CI の --frozen-lockfile が壊れます。unlink-contract.sh で復元してから commit するか、正規の file: 依存であることを確認のうえ承認してください。"
+  }
+}
