@@ -27,12 +27,13 @@ description: 要件・コンテキストから実装計画 plan.md を新規作�
 | `./reference/acceptance-criteria.md` | 受入条件を Given/When/Then 形式で書く時 |
 | `../brief/reference/modes.md` | コンテキストファイルの frontmatter に `mode:` がある時 |
 | `../brief/reference/modes/<mode>.md` の `## design の観点` | 上記で既知のモードに解決した時 |
+| `../brief/reference/entry.md` | 引数が実在するファイルを指していない時（引数なしを含む）。入力を文章・会話の依頼・既定のファイルのどれから得るかを決める |
 
 「念のため全部読む」は禁止。条件付きの表はトリガー条件に該当する場合のみ読み込む。
 
 ## パラメーター
 
-`$ARGUMENTS` でコンテキストファイルのパスを指定できる。省略時は `./tmp/context.md` を使用する。
+`$ARGUMENTS` でコンテキストファイルのパス、または要件の文章を渡せる。省略時は `./tmp/context.md` を使用する。どの入力を使うか（パス・文章・会話の依頼・既定のファイル）は、入口の正典 `../brief/reference/entry.md` に従う。
 
 ## ワークフロー上の位置付け
 
@@ -44,14 +45,14 @@ description: 要件・コンテキストから実装計画 plan.md を新規作�
 
 以下のファイルを参照する:
 
-- `$ARGUMENTS`（指定がない場合は `./tmp/context.md`）— 要件・コンテキスト情報
+- コンテキストファイル（入口の正典で解決したもの）— 要件・コンテキスト情報
 - `./tmp/research.md`（任意）— `/ask` の調査結果
 - `./tmp/scenario.md`（任意）— `grill` Phase 0 の業務シナリオ。不在ならフェーズ 1.2 で判定し、必要なら生成する
 - `./tmp/coupling-precheck.md`（任意）— `/coupling-precheck` の結合バランス整理結果
 - `openspec/specs/`（任意）— 既存仕様
 - `openspec/config.yaml`（任意）— プロジェクト固有ルール
 
-コンテキストファイルが存在しない場合: プロセスを即座に停止し、ユーザーに報告する。
+コンテキストファイルを解決できない場合は、正典の「止まるとき」に従って止まる（本題に入らず、口頭で答えて終わらない）。
 
 ## 実行プロセス
 
