@@ -37,8 +37,7 @@ NC='\033[0m' # No Color
 
 # パス定義
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# 共通資産（Claude Code・Codex の両方が使うもの）は shared/ に置く。claude/ に残るのは settings.json と、
-# 旧パスを解決するための互換 symlink（claude/{skills,agents,scripts} → ../shared/…）だけ
+# 共通資産（Claude Code・Codex の両方が使うもの）は shared/ に置く。claude/ に残るのは Claude Code 固有の settings.json だけ
 REPO_SKILLS_DIR="${SCRIPT_DIR}/shared/skills"
 REPO_SCRIPTS_DIR="${SCRIPT_DIR}/shared/scripts"
 REPO_GLOBAL_RULES="${SCRIPT_DIR}/shared/global-rules.md"
@@ -369,20 +368,13 @@ warn_if_worktree() {
     fi
 }
 
-# 前回 install 時の commit の中で scripts/<name> がどこにあるかを返す（見つからなければ非 0）。
-# claude/ から shared/ への移行をまたぐと、前回 sha には旧パス claude/scripts/ しか無く、逆に
-# 移行後の sha には新パス shared/scripts/ しか無い。片方だけを探すと「ファイルが無い = 初回」と
-# 誤判定し、ローカル改変を退避せずに上書きする（黙って失われる）。旧パスの探索は移行期間用で、
-# 互換 symlink と同時に外す（後続の PR）
+# 前回 install 時の commit の中の shared/scripts/<name> のパスを返す（無ければ非 0 で、初回として扱う）。
+# 前回 sha が shared/ 移行前（claude/scripts/ だけを持つ）なら見つからず、ローカル改変を退避せずに上書きする。
+# 移行前の sha からの install は移行の PR（#25）の時点で済んでいるので、旧パスは探さない
 prev_tree_path() {  # $1=sha, $2=スクリプト名
-    local p
-    for p in "shared/scripts/$2" "claude/scripts/$2"; do
-        if git -C "$SCRIPT_DIR" cat-file -e "$1:$p" 2>/dev/null; then
-            printf '%s\n' "$p"
-            return 0
-        fi
-    done
-    return 1
+    local p="shared/scripts/$2"
+    git -C "$SCRIPT_DIR" cat-file -e "$1:$p" 2>/dev/null || return 1
+    printf '%s\n' "$p"
 }
 
 # Scripts のインストール（実体コピー）
@@ -512,7 +504,7 @@ is_own_skill_link() {  # $1=リンク, $2=skill 名, $3=本 repo のルート
     target=$(readlink "$1" 2>/dev/null) || return 1
     # 相対パスはリンクのディレクトリ基準で解く（cwd 基準で解くと、自分の repo を指す相対リンクを他者と判定する）
     [[ $target == /* ]] || target="$(dirname "$1")/$target"
-    # 今のチェックアウトそのもの（互換 symlink 経由・/tmp と /private/tmp の表記違いを含む）なら git を起動しない
+    # 今のチェックアウトそのもの（/tmp と /private/tmp の表記違いを含む）なら git を起動しない
     if [[ -e "$1" && "$(realpath "$target" 2>/dev/null)" == "$(realpath "$3/shared/skills/$2" 2>/dev/null)" ]]; then
         return 0
     fi
@@ -646,8 +638,7 @@ migrate() {
 
     echo ""
     install_skills
-    # 旧 claude/agents/ を指す agents のリンクも shared/agents/ に張り替える。skills だけだと、
-    # 互換 symlink が消えた時点で agents のリンクだけが切れる
+    # 旧 claude/agents/ を指す agents のリンク（互換 symlink を外した後は切れている）も shared/agents/ に張り替える
     echo ""
     install_md_links "Agents" "$REPO_AGENTS_DIR" "$CLAUDE_AGENTS_DIR"
     echo ""

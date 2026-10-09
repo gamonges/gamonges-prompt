@@ -260,23 +260,7 @@ assert_eq "無関係な先を指す symlink（grill）は Claude 側では張り
     "$REPO_SHARED/skills/grill/" "$(readlink "$H3/.claude/skills/grill" 2>/dev/null)"
 
 # ===========================================================================
-# C-2: pull しただけ（install 前）でも旧パス claude/{skills,agents,scripts} が解決できる
-# ===========================================================================
-echo "== C-2: 互換 symlink（旧パスが解決できる）=="
-
-# 期待値は readlink の文字列ではなく「解決できるか」。../ の数を間違えると文字列は一見正しくても切れる
-# 解決できるかを yes / no で返す。`test -f …; assert … "$?"` は、$? が直前の条件の結果であることに依存して壊れやすい
-resolves() { [[ -f "$1" ]] && echo yes || echo no; }
-assert_eq "旧パス claude/skills/ask/SKILL.md が解決できる" "yes" "$(resolves "$REPO_ROOT/claude/skills/ask/SKILL.md")"
-if [[ -n "$AGENT_SRC" ]]; then
-    assert_eq "旧パス claude/agents/<カテゴリ>/test-auditor.md が解決できる" "yes" "$(resolves "$REPO_ROOT/claude/agents/$AGENT_REL")"
-else
-    fail "旧パス claude/agents/ の解決を確かめられない（AGENT_SRC が空）"
-fi
-assert_eq "旧パス claude/scripts/hook-confirm-destructive-git.sh が解決できる" "yes" "$(resolves "$REPO_ROOT/claude/scripts/hook-confirm-destructive-git.sh")"
-
-# ===========================================================================
-# C-3: scripts の実体コピーと、前回 sha の判定（前回 sha が旧/新どちらのレイアウトでもローカル改変を判定する）
+# C-3: scripts の実体コピーと、前回 sha の判定（前回 sha の内容と比べてローカル改変を判定する）
 # ===========================================================================
 echo "== C-3: scripts の実体コピー =="
 
@@ -293,24 +277,18 @@ assert_count_eq "コピーされた scripts は実行可能" "$EXPECTED_SCRIPTS"
 assert_eq ".installed-from の 1 列目は install 元のチェックアウト" "$REPO_ROOT" \
     "$(cut -f1 "$H1/.claude/scripts/.installed-from" 2>/dev/null)"
 
-# 前回 sha の判定用の最小 repo を作る。本物の setup.sh を複製し、レイアウトだけを持つ
-# $1=dir, $2=hook の中身, $3="old" なら claude/scripts、"new" なら shared/scripts に置く
+# 前回 sha の判定用の最小 repo を作る。本物の setup.sh を複製し、shared/scripts だけを持つ
+# $1=dir, $2=hook の中身
 f13_commit() {
-    local dir="$1" body="$2" layout="$3"
-    rm -rf "$dir/claude/scripts" "$dir/shared/scripts"
-    if [[ "$layout" == old ]]; then
-        mkdir -p "$dir/claude/scripts"
-        printf '%s\n' "$body" >"$dir/claude/scripts/hook-a.sh"
-    else
-        mkdir -p "$dir/shared/scripts"
-        printf '%s\n' "$body" >"$dir/shared/scripts/hook-a.sh"
-    fi
+    local dir="$1" body="$2"
+    mkdir -p "$dir/shared/scripts"
+    printf '%s\n' "$body" >"$dir/shared/scripts/hook-a.sh"
     git -C "$dir" add -A >/dev/null 2>&1
-    git -C "$dir" commit -q -m "f13 $layout $body" >/dev/null 2>&1
+    git -C "$dir" commit -q -m "f13 $body" >/dev/null 2>&1
     git -C "$dir" rev-parse --short HEAD
 }
 
-# 結果はグローバルの F13_REPO / F13_SHA_OLD / F13_SHA_NEW / F13_SHA_NEW2 に入れる。
+# 結果はグローバルの F13_REPO / F13_SHA_NEW / F13_SHA_NEW2 に入れる。
 # $(f13_setup …) で呼ぶとサブシェルになり、代入が親に戻らず sha が空のまま空振りする
 f13_setup() {  # $1=名前
     local dir="$WORK/f13-$1"
@@ -321,9 +299,8 @@ f13_setup() {  # $1=名前
     printf '%s\n' '---' 'name: demo' 'description: demo' '---' >"$dir/shared/skills/demo/SKILL.md"
     printf '%s\n' '{}' >"$dir/claude/settings.json"
     : >"$dir/shared/global-rules.md"
-    F13_SHA_OLD="$(f13_commit "$dir" 'echo v1' old)"
-    F13_SHA_NEW="$(f13_commit "$dir" 'echo v2' new)"
-    F13_SHA_NEW2="$(f13_commit "$dir" 'echo v3' new)"
+    F13_SHA_NEW="$(f13_commit "$dir" 'echo v2')"
+    F13_SHA_NEW2="$(f13_commit "$dir" 'echo v3')"
 }
 
 f13_home() {  # $1=名前, $2=repo, $3=.installed-from の sha, $4=インストール済みの hook の中身
@@ -339,23 +316,16 @@ f13_home() {  # $1=名前, $2=repo, $3=.installed-from の sha, $4=インスト�
 f13_backups() { find "$1/.claude/scripts" -maxdepth 1 -name 'hook-a.sh.backup.*' | wc -l | tr -d ' '; }
 
 f13_setup base
-assert_positive "前回 sha の判定用の fixture repo に 3 つの commit がある（sha が空でない）" "$([[ -n "$F13_SHA_OLD" && -n "$F13_SHA_NEW" && -n "$F13_SHA_NEW2" ]] && echo 1 || echo 0)"
+assert_positive "前回 sha の判定用の fixture repo に 2 つの commit がある（sha が空でない）" "$([[ -n "$F13_SHA_NEW" && -n "$F13_SHA_NEW2" ]] && echo 1 || echo 0)"
 SETUP_BACKUP="$SETUP"
 SETUP="$F13_REPO/setup.sh"
 
-# (i) 前回 sha が旧レイアウト（claude/scripts）で、インストール済みが前回から改変されている → 退避する
-H="$(f13_home old "$F13_REPO" "$F13_SHA_OLD" 'echo local-edit')"
-run_setup "$H" install
-assert_eq "前回 sha の判定(i) 旧レイアウトの sha: install は成功する" "0" "$(last_rc)"
-assert_eq "前回 sha の判定(i) 旧レイアウトの sha: ローカル改変を退避する" "1" "$(f13_backups "$H")"
-assert_eq "前回 sha の判定(i) 旧レイアウトの sha: 新しい内容に置き換わる" "echo v3" "$(cat "$H/.claude/scripts/hook-a.sh" 2>/dev/null)"
-
-# (ii) 前回 sha が新レイアウト（shared/scripts）で、インストール済みが前回から改変されている → 退避する。
-#      旧パスだけを探す実装は「ファイルが無い = 初回」と誤判定し、改変を黙って上書きする
+# (ii) インストール済みが前回 sha の内容から改変されている → 退避する。
+#      前回 sha の中のパスを誤ると「ファイルが無い = 初回」と誤判定し、改変を黙って上書きする
 H="$(f13_home new "$F13_REPO" "$F13_SHA_NEW" 'echo local-edit')"
 run_setup "$H" install
-assert_eq "前回 sha の判定(ii) 新レイアウトの sha: install は成功する" "0" "$(last_rc)"
-assert_eq "前回 sha の判定(ii) 新レイアウトの sha: ローカル改変を退避する" "1" "$(f13_backups "$H")"
+assert_eq "前回 sha の判定(ii) 改変あり: install は成功する" "0" "$(last_rc)"
+assert_eq "前回 sha の判定(ii) 改変あり: ローカル改変を退避する" "1" "$(f13_backups "$H")"
 
 # (iii) 前回 sha の内容とインストール済みが一致（repo が更新されただけ）→ 退避しない。
 #       常時点灯する警告は無視されるようになるので、標準運用（編集 → install）で退避を積まない
@@ -368,14 +338,14 @@ assert_eq "前回 sha の判定(iii) 改変なし: 新しい内容に置き換�
 SETUP="$SETUP_BACKUP"
 
 # ===========================================================================
-# C-4: verify-skills.sh は互換 symlink 経由でも shared/ 直でも repo ルートを正しく導出する
+# C-4: verify-skills.sh は repo ルートを正しく導出する
 # ===========================================================================
 echo "== C-4: verify-skills.sh のパス導出 =="
 
 EXPECTED_OVERRIDES="$(count_expected_overrides)"
 assert_positive "settings.json の skillOverrides に repo skill の隠し指定がある（check 5 の観測点）" "$EXPECTED_OVERRIDES"
 
-for entry in claude/scripts/verify-skills.sh shared/scripts/verify-skills.sh; do
+for entry in shared/scripts/verify-skills.sh; do
     out="$(HOME="$H1" bash "$REPO_ROOT/$entry" 2>&1)"
     rc=$?
     assert_eq "verify（${entry}）は fail なしで終わる" "0" "$rc"
@@ -1738,6 +1708,60 @@ for n in 8 10 11 12; do
     assert_contains "~/.codex が無いと check ${n} は省略される" "$(verify_section "$out" "$n")" "省略"
 done
 assert_eq "~/.codex が無くても verify は Codex のために fail しない" "0" "$(cat "$WORK/verify.rc")"
+
+# --- C-29: check 13（Codex の版が、前提を確かめた版と同じか）---
+# 信頼ハッシュの作り方・apply_patch の文法は、特定の版のソースとバイナリで確かめた前提。版が上がっても何も失敗しない
+# ので、verify が知らせる。実機の codex の版に左右されないよう、版を返す偽の codex を PATH の先頭に置く
+VERIFIED_CODEX="$(tr -d '[:space:]' <"$REPO_ROOT/codex/verified-codex-version" 2>/dev/null)"
+assert_eq "前提: codex/verified-codex-version に x.y.z の版がある" "1" \
+    "$([[ "$VERIFIED_CODEX" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && echo 1 || echo 0)"
+fake_codex() {  # $1=ディレクトリ, $2=--version の出力（空なら何も出さずに失敗する codex）
+    mkdir -p "$1"
+    if [[ -n "$2" ]]; then
+        printf '#!/bin/sh\necho "%s"\n' "$2" >"$1/codex"
+    else
+        printf '#!/bin/sh\nexit 1\n' >"$1/codex"
+    fi
+    chmod +x "$1/codex"
+}
+HVC="$(make_verify_home codexver)"
+fake_codex "$WORK/fc-same" "codex-cli $VERIFIED_CODEX"
+sec13="$(verify_section "$(PATH="$WORK/fc-same:$PATH" verify_run "$HVC")" 13)"
+assert_positive "C-29 確かめた版と同じなら check 13 は pass" "$(count_tag "$sec13" '[PASS]')"
+assert_eq "C-29 確かめた版と同じなら check 13 は warn を出さない" "0" "$(count_tag "$sec13" '[WARN]')"
+
+fake_codex "$WORK/fc-new" "codex-cli 9.9.9"
+out="$(PATH="$WORK/fc-new:$PATH" verify_run "$HVC")"
+sec13="$(verify_section "$out" 13)"
+assert_eq "C-29 版が上がっても verify は fail にしない（前提の確認待ちは warn）" "0" "$(cat "$WORK/verify.rc")"
+assert_positive "C-29 版が違えば check 13 は warn を出す" "$(count_tag "$sec13" '[WARN]')"
+assert_contains "C-29 warn は今の版を示す" "$sec13" "9.9.9"
+assert_contains "C-29 warn は前提を確かめた版を示す" "$sec13" "$VERIFIED_CODEX"
+assert_contains "C-29 warn は確かめる中身（信頼ハッシュの作り方）を示す" "$sec13" "hook_hash"
+assert_contains "C-29 warn は確かめた後に更新するファイルを示す" "$sec13" "codex/verified-codex-version"
+
+fake_codex "$WORK/fc-broken" ""
+sec13="$(verify_section "$(PATH="$WORK/fc-broken:$PATH" verify_run "$HVC")" 13)"
+assert_positive "C-29 codex の版を読めなければ check 13 は warn を出す（黙って pass しない）" "$(count_tag "$sec13" '[WARN]')"
+
+# codex が PATH に無い（~/.codex だけがある）: 版を比べようがないので省略を知らせ、warn にしない。
+# 今の PATH の実行ファイルを codex だけ除いてリンクする（使うコマンドを列挙すると、verify が別のコマンドを
+# 使い始めたときに途中で止まり、check 13 まで届かないまま「省略を知らせない」で落ちる）
+NOCODEX_BIN="$WORK/nocodex-bin"
+mkdir -p "$NOCODEX_BIN"
+IFS=: read -r -a path_dirs <<<"$PATH"
+for d in "${path_dirs[@]}"; do
+    [[ -d "$d" ]] || continue
+    for f in "$d"/*; do
+        n="${f##*/}"
+        [[ "$n" == codex || -e "$NOCODEX_BIN/$n" || ! -x "$f" || -d "$f" ]] && continue
+        ln -s "$f" "$NOCODEX_BIN/$n"
+    done
+done
+assert_eq "前提: codex を除いた PATH では codex が見つからない" "no" "$(PATH="$NOCODEX_BIN" command -v codex >/dev/null 2>&1 && echo yes || echo no)"
+sec13="$(verify_section "$(PATH="$NOCODEX_BIN" verify_run "$HVC")" 13)"
+assert_contains "C-29 codex が無ければ check 13 は省略を知らせる" "$sec13" "codex コマンドが見つからない"
+assert_eq "C-29 codex が無ければ check 13 は warn を出さない" "0" "$(count_tag "$sec13" '[WARN]')"
 
 # --- C-28 / 7(1): decide_ask_or_deny の対称性。repo の複製（mini repo）の hook を壊して見る ---
 HM1="$(new_home v-sym-ok)"

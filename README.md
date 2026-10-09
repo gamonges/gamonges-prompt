@@ -30,12 +30,12 @@ shared/                  # 共通資産（正本）。Claude Code と Codex の�
 └── global-rules.md      # 全プロジェクト共通の規約（~/.claude/CLAUDE.md と ~/.codex/AGENTS.md にマーカーブロックで配置）
 
 claude/                  # Claude Code 固有
-├── settings.json        # hook 定義・deny リスト等（~/.claude/settings.json へ symlink）
-└── skills / agents / scripts   # 旧パスの互換 symlink（→ ../shared/…。移行期間用。後続の PR で削除する）
+└── settings.json        # hook 定義・deny リスト等（~/.claude/settings.json へ symlink）
 
 codex/                   # Codex 固有
 ├── codex-rules.md       # Codex 専用の読み替え表（~/.codex/AGENTS.md にマーカーブロックで配置）
-└── gen-agents.py        # agents の .md から Codex の TOML を生成する（setup.sh と verify-skills.sh の check 10 が使う）
+├── gen-agents.py        # agents の .md から Codex の TOML を生成する（setup.sh と verify-skills.sh の check 10 が使う）
+└── verified-codex-version  # 信頼ハッシュ・apply_patch の文法を確かめた Codex の版（verify-skills.sh の check 13 が今の版と比べる）
 ```
 
 > **注**: Anthropic 公式により Custom Commands は Skills に統合されました（出典: https://code.claude.com/docs/en/custom-skills.md ）。本リポジトリでも旧 `claude/commands/` を廃止し、すべて `shared/skills/<name>/SKILL.md` 形式に統一しています。

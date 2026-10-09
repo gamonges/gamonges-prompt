@@ -23,6 +23,7 @@
 # 11. ~/.codex/AGENTS.md の 2 ブロックのマーカーの並びが正しく、中身が最新で、repo 直下と合わせて 32 KiB に収まること (同上)
 # 12. ~/.codex/hooks.json が JSON のオブジェクトで、自前 hook（settings.json・hooks.json のどちらかで 0 本なら warn）が
 #     各イベントの先頭にあり、config.toml に信頼キーがあること (同上)
+# 13. Codex の版が、前提（信頼ハッシュ・apply_patch の文法）を確かめた版（codex/verified-codex-version）と同じであること (同上)
 #
 # 依存: check 5・10・12(b) が python3 を、check 12 が jq を使う。利用できない場合はその check をスキップして続行する。
 #
@@ -54,8 +55,6 @@ for arg in "$@"; do
 done
 
 # 自スクリプトの所在から派生させる。$0 と ${BASH_SOURCE[0]} を混在させず 1 箇所で算出する。
-# 互換 symlink（claude/scripts → ../shared/scripts）経由で起動しても、dirname は解決前のパスで、
-# cd は論理パスのまま .. をたどる。そのため ../.. はどちらの経路でも repo ルートになる
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # 共通資産（skills / agents / scripts）は shared/、settings.json は Claude Code 固有なので claude/
 REPO_SHARED="${REPO_ROOT}/shared"
@@ -574,7 +573,7 @@ is_own_skill_link() {  # $1=リンク, $2=skill 名, $3=本 repo のルート
     target=$(readlink "$1" 2>/dev/null) || return 1
     # 相対パスはリンクのディレクトリ基準で解く（cwd 基準で解くと、自分の repo を指す相対リンクを他者と判定する）
     [[ $target == /* ]] || target="$(dirname "$1")/$target"
-    # 今のチェックアウトそのもの（互換 symlink 経由・/tmp と /private/tmp の表記違いを含む）なら git を起動しない
+    # 今のチェックアウトそのもの（/tmp と /private/tmp の表記違いを含む）なら git を起動しない
     if [[ -e "$1" && "$(realpath "$target" 2>/dev/null)" == "$(realpath "$3/shared/skills/$2" 2>/dev/null)" ]]; then
         return 0
     fi
@@ -907,6 +906,30 @@ PY
 
     if [ "$warn_count" -eq "$hook_warn_before" ]; then
         pass "Codex の自前 hook は各イベントの先頭に登録され、信頼キーも config.toml にあります"
+    fi
+fi
+
+# --- check 13: Codex の版が、前提を確かめた版と同じか ---
+# 信頼ハッシュがスクリプトの中身を含まないこと（hook_hash）と apply_patch の文法は、codex/verified-codex-version の
+# 版のソースとバイナリで確かめた前提。Codex を上げても何も失敗しないので、版が変わったことをここで知らせる
+echo ""
+echo -e "${BLUE}== check 13: Codex の版（前提を確かめた版との一致）==${NC}"
+verified_file="${REPO_ROOT}/codex/verified-codex-version"
+if [ ! -d "$HOME/.codex" ]; then
+    echo -e "${BLUE}[INFO]${NC} ~/.codex が無いので check 13 を省略します（Codex に展開されていない）"
+elif ! command -v codex >/dev/null 2>&1; then
+    echo -e "${BLUE}[INFO]${NC} codex コマンドが見つからないので check 13 を省略します（版を比べられない）"
+else
+    verified_ver=$(tr -d '[:space:]' < "$verified_file" 2>/dev/null || true)
+    current_ver=$(codex --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
+    if [ -z "$verified_ver" ]; then
+        warn "codex/verified-codex-version を読めません（前提を確かめた Codex の版が分からない）"
+    elif [ -z "$current_ver" ]; then
+        warn "codex --version から版を読めません。check 13 を判定できません"
+    elif [ "$current_ver" = "$verified_ver" ]; then
+        pass "Codex ${current_ver} は前提を確かめた版と同じです"
+    else
+        warn "Codex が ${current_ver} です（前提を確かめた版は ${verified_ver}）。信頼ハッシュがスクリプトの中身を含まないか（codex-rs/hooks/src/engine/discovery.rs の hook_hash）と apply_patch の文法が変わっていないかを確かめ、codex/verified-codex-version を更新してください"
     fi
 fi
 
