@@ -361,18 +361,21 @@ case "$TOOL_NAME" in
   Edit)
     OLD=$(echo "$INPUT" | jq -r '.tool_input.old_string // ""')
     NEW=$(echo "$INPUT" | jq -r '.tool_input.new_string // ""')
+    # replace_all のときは全置換する。1 回だけ置換して検査すると、全置換で消えるフィールドを見落とす
+    REPLACE_ALL=$(echo "$INPUT" | jq -r 'if .tool_input.replace_all == true then 1 else 0 end')
     if [[ ! -f "$FILE_PATH" ]]; then
       # 既存ファイルが無い場合は素通し（Edit は通常存在前提）
       exit 0
     fi
     # quote 付き heredoc + 環境変数渡しで bash 変数展開を抑止 (injection 経路を遮断)
     # 失敗時は permissionDecision: ask で明示的にユーザーへ通知（silent abort を防ぐ）
-    if ! CONTENT=$(FILE_PATH="$FILE_PATH" OLD="$OLD" NEW="$NEW" python3 - <<'PY' 2>"${ERR_FILE:-/dev/null}"
+    if ! CONTENT=$(FILE_PATH="$FILE_PATH" OLD="$OLD" NEW="$NEW" REPLACE_ALL="$REPLACE_ALL" python3 - <<'PY' 2>"${ERR_FILE:-/dev/null}"
 import os, sys
 try:
     with open(os.environ["FILE_PATH"], encoding="utf-8", errors="replace") as f:
         content = f.read()
-    content = content.replace(os.environ["OLD"], os.environ["NEW"], 1)
+    count = -1 if os.environ["REPLACE_ALL"] == "1" else 1
+    content = content.replace(os.environ["OLD"], os.environ["NEW"], count)
     sys.stdout.write(content)
 except Exception as e:
     sys.stderr.write(f"lint-prep-failed: {e}\n")
@@ -396,7 +399,8 @@ try:
         content = f.read()
     edits = json.loads(os.environ["EDITS_JSON"])
     for e in edits:
-        content = content.replace(e.get("old_string", ""), e.get("new_string", ""), 1)
+        count = -1 if e.get("replace_all") is True else 1
+        content = content.replace(e.get("old_string", ""), e.get("new_string", ""), count)
     sys.stdout.write(content)
 except Exception as e:
     sys.stderr.write(f"lint-prep-failed: {e}\n")
