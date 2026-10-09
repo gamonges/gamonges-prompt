@@ -61,18 +61,25 @@ GIT="git[[:space:]]+(${GIT_GLOBAL_OPT}[[:space:]]+)*"
 #   - git clean -f
 #   - git checkout --force
 #   - git branch -D
+# オプションの後ろの境界。空白・行末に加えて、シェルの区切り（; | & )）と wrapper・コマンド置換の閉じ（` " '）を
+# 含める。空白と行末だけだと、`git push --force; …`・`bash -lc 'git push -f'` が素通しになる（ガードが開く）
+OPT_END='([[:space:];|&)`"'"'"']|$)'
+# サブコマンドの後ろの、空白で始まるオプションの直前まで。オプションの直前に空白を要求して、値の中の -f
+# （ブランチ名 feat-f 等）を拾わない。短いオプションはまとめ書き（-df・-fu）も拾う
+ARGS='[[:space:]](.*[[:space:]])?'
 match=0
-if matches "$COMMAND" "${GIT}"'push[[:space:]].*(-f([[:space:]]|$)|--force([[:space:]]|$)|--force-with-lease)'; then
+if matches "$COMMAND" "${GIT}push${ARGS}(-[a-zA-Z]*f[a-zA-Z]*|--force)${OPT_END}" \
+  || matches "$COMMAND" "${GIT}"'push[[:space:]].*--force-with-lease'; then
   match=1
 elif matches "$COMMAND" "${GIT}"'reset[[:space:]].*--hard'; then
   match=1
 elif matches "$COMMAND" "${GIT}"'worktree[[:space:]]+remove[[:space:]].*--force'; then
   match=1
-elif matches "$COMMAND" "${GIT}"'clean[[:space:]].*(-f([dqxX]+)?([[:space:]]|$)|--force)'; then
+elif matches "$COMMAND" "${GIT}clean${ARGS}(-[a-zA-Z]*f[a-zA-Z]*|--force)${OPT_END}"; then
   match=1
-elif matches "$COMMAND" "${GIT}"'checkout[[:space:]].*(-f([[:space:]]|$)|--force)'; then
+elif matches "$COMMAND" "${GIT}checkout${ARGS}(-[a-zA-Z]*f[a-zA-Z]*|--force)${OPT_END}"; then
   match=1
-elif matches "$COMMAND" "${GIT}"'branch[[:space:]].*-D([[:space:]]|$)'; then
+elif matches "$COMMAND" "${GIT}branch${ARGS}-[a-zA-Z]*D[a-zA-Z]*${OPT_END}"; then
   match=1
 fi
 

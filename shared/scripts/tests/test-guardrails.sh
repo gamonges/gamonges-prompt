@@ -1972,6 +1972,113 @@ for layout in old new both; do
     assert_hook_empty "SY-4 [$layout] 同期済みなら何も出さず exit 0（毎セッション鳴る通知は無視される）" "$out"
 done
 
+# --- DG: 破壊的 git の判定（Claude 側。turn_id なし）。検出の分岐ごとに ask の例と素通しの例を置く ---
+# 分岐を 1 つ消しても他の分岐のテストは通るので、分岐ごとに両側を持たないと、その分岐が黙って消えても気づけない
+dg() { t_expect "DG $1" "$2" "$3" "$CONFIRM_HOOK"; }
+dg "clean -f は ask" ask 'git clean -f'
+dg "clean -fdx は ask" ask 'git clean -fdx'
+dg "clean --force は ask" ask 'git clean --force'
+dg "clean -n（dry run）は素通し" pass 'git clean -n'
+dg "branch -D は ask" ask 'git branch -D foo'
+dg "branch -d は素通し" pass 'git branch -d foo'
+dg "checkout -f は ask" ask 'git checkout -f main'
+dg "checkout --force は ask" ask 'git checkout --force main'
+dg "checkout -b は素通し" pass 'git checkout -b feature'
+dg "worktree remove --force は ask" ask 'git worktree remove --force /x'
+dg "worktree remove（--force なし）は素通し" pass 'git worktree remove /x'
+dg "push -f は ask" ask 'git push -f origin main'
+dg "push の末尾の -f は ask" ask 'git push origin main -f'
+dg "push --force-with-lease は ask" ask 'git push --force-with-lease'
+dg "push（強制なし）は素通し" pass 'git push origin main'
+dg "push --no-force は素通し" pass 'git push --no-force'
+dg "push --follow-tags は素通し" pass 'git push --follow-tags'
+dg "reset --soft は素通し" pass 'git reset --soft HEAD~1'
+dg "reset の -- hard-file.txt（パス）は素通し" pass 'git reset HEAD -- hard-file.txt'
+# 位置と接頭辞: 行のどこに出ても、git とサブコマンドの間にグローバルオプションがあっても拾う
+dg "&& の後ろの reset --hard は ask" ask 'gh pr view && git reset --hard'
+dg "パイプの後ろの reset --hard は ask" ask 'echo hi | git reset --hard'
+dg "wrapper の中の reset --hard は ask" ask "bash -lc 'git reset --hard'"
+dg "-C の引数が空白入りのクォートでも ask" ask 'git -C "/a b" reset --hard'
+dg "-c x=y 付きでも ask" ask 'git -c core.x=y reset --hard'
+dg "--no-pager 付きでも ask" ask 'git --no-pager reset --hard'
+dg "resetx（別のサブコマンド）は素通し" pass 'git resetx --hard'
+
+# --- DG-X: 境界の文字とまとめ書きのオプション（-f / --force の後ろに ; | & ) ` " ' が来る形、-df / -fu）---
+# 境界を「空白か行末」だけにすると、区切りや wrapper の閉じクォートの直前で素通しになる（ガードが開く）
+dg "X push --force; の後ろに続くコマンドがあっても ask" ask 'git push --force; echo done'
+dg "X wrapper の閉じクォート直前の push -f は ask" ask "bash -lc 'git push -f'"
+dg "X \$( ) の中の push --force は ask" ask '$(git push --force)'
+dg "X パイプ直前の push --force は ask" ask 'git push --force|tee log'
+dg "X clean -f; の後ろに続くコマンドがあっても ask" ask 'git clean -f; ls'
+dg "X checkout -f; は ask" ask 'git checkout -f;'
+dg "X clean -df（f が後ろ）は ask" ask 'git clean -df'
+dg "X clean -xfd は ask" ask 'git clean -xfd'
+dg "X push -fu は ask" ask 'git push -fu origin main'
+# 直前に空白を要求するので、値の中の -f（ブランチ名 feat-f）は拾わない
+dg "X push の値の中の -f（feat-f）は素通し" pass 'git push -u origin feat-f'
+dg "X checkout -b の値の中の -f（fix-f）は素通し" pass 'git checkout -b fix-f'
+
+# --- LG: SKILL.md の lint の判定（Claude 側。Write / Edit / MultiEdit）---
+LG_DIR="$WORK/lg/skills/demo"
+mkdir -p "$LG_DIR"
+lg_reset() { printf '%s\n' '---' 'name: demo' 'description: Does a thing. 使用する時に呼ぶ。' '---' 'body' >"$LG_DIR/SKILL.md"; }
+lg_reset
+lg_run() {  # $1=tool_input の JSON（file_path を含む）, $2=tool_name → hook の出力。終了コードは RC_FILE
+    printf '%s' "$(claude_payload "$(jq -nc --arg t "$2" --argjson i "$1" '{tool_name:$t,tool_input:$i}')")" | bash "$LINT_HOOK" 2>/dev/null
+    echo "${PIPESTATUS[1]}" >"$RC_FILE"
+}
+lg_edit() { jq -nc --arg p "$LG_DIR/SKILL.md" --arg o "$1" --arg n "$2" '{file_path:$p,old_string:$o,new_string:$n}'; }
+lg_write() { jq -nc --arg p "$1" --arg c "$2" '{file_path:$p,content:$c}'; }
+assert_lg() {  # $1=ラベル, $2=期待（deny|ask|pass）, $3=出力
+    if [[ "$2" == pass ]]; then assert_hook_empty "LG $1" "$3"; else assert_equal "LG $1" "$2" "$(decision_of "$3")"; fi
+}
+# Edit・MultiEdit は、現ファイルに編集を当てた「結果」を検査する。結果を見ない実装（検査を飛ばす・置換前の
+# ファイルを見る）では、正しい現ファイルに対する不正な編集が素通しになる
+assert_lg "Edit で description 行を消すと deny" deny "$(lg_run "$(lg_edit $'description: Does a thing. 使用する時に呼ぶ。\n' '')" Edit)"
+assert_lg "Edit でトリガー語を消すと ask" ask "$(lg_run "$(lg_edit '使用する時に呼ぶ。' '')" Edit)"
+assert_lg "Edit で本文だけ変えると素通し" pass "$(lg_run "$(lg_edit 'body' 'changed')" Edit)"
+assert_lg "存在しない SKILL.md への Edit は素通し" pass "$(lg_run "$(jq -nc --arg p "$WORK/lg/skills/none/SKILL.md" '{file_path:$p,old_string:"a",new_string:"b"}')" Edit)"
+lg_multi() { jq -nc --arg p "$LG_DIR/SKILL.md" --argjson e "$1" '{file_path:$p,edits:$e}'; }
+assert_lg "MultiEdit の 2 つ目が description を消すと deny" deny \
+    "$(lg_run "$(lg_multi '[{"old_string":"body","new_string":"x"},{"old_string":"description: Does a thing. 使用する時に呼ぶ。\n","new_string":""}]')" MultiEdit)"
+assert_lg "MultiEdit は順に当てる（1 つ目の結果を 2 つ目が消す）と deny" deny \
+    "$(lg_run "$(lg_multi '[{"old_string":"name: demo","new_string":"name: tmp"},{"old_string":"name: tmp\n","new_string":""}]')" MultiEdit)"
+assert_lg "MultiEdit で本文だけ変えると素通し" pass "$(lg_run "$(lg_multi '[{"old_string":"body","new_string":"changed"}]')" MultiEdit)"
+# disable-model-invocation: true の skill は description が listing に載らないので、トリガー語を求めない
+LGW=/fx/skills/demo/SKILL.md
+assert_lg "disable-model-invocation: true ならトリガー語なしでも素通し" pass \
+    "$(lg_run "$(lg_write "$LGW" $'---\nname: d\ndescription: Does.\ndisable-model-invocation: true\n---\n')" Write)"
+assert_lg "disable-model-invocation: false ならトリガー語を求めて ask" ask \
+    "$(lg_run "$(lg_write "$LGW" $'---\nname: d\ndescription: Does.\ndisable-model-invocation: false\n---\n')" Write)"
+assert_lg "disable-model-invocation: true でも description が無ければ deny" deny \
+    "$(lg_run "$(lg_write "$LGW" $'---\nname: d\ndisable-model-invocation: true\n---\n')" Write)"
+assert_lg "disable-model-invocation が本文にしか無ければ ask（frontmatter だけを見る）" ask \
+    "$(lg_run "$(lg_write "$LGW" $'---\nname: d\ndescription: Does.\n---\ndisable-model-invocation: true\n')" Write)"
+# frontmatter の範囲: 必須フィールドとトリガー語は frontmatter の中の該当フィールドだけを見る
+assert_lg "description が本文にしか無ければ deny" deny "$(lg_run "$(lg_write "$LGW" $'---\nname: d\n---\ndescription: 使用する時\n')" Write)"
+assert_lg "Write で name が無ければ deny" deny "$(lg_run "$(lg_write "$LGW" $'---\ndescription: 使用する時\n---\n')" Write)"
+assert_lg "トリガー語が description 以外のフィールドにしか無ければ ask" ask \
+    "$(lg_run "$(lg_write "$LGW" $'---\nname: d\ndescription: Does a thing.\nargument-hint: 使用する時に\n---\n')" Write)"
+assert_lg "複数行の description の 2 行目のトリガー語も拾って素通し" pass \
+    "$(lg_run "$(lg_write "$LGW" $'---\nname: d\ndescription: |\n  Does a thing.\n  Use when X.\n---\n')" Write)"
+assert_lg "英語のトリガー語（Use when）は素通し" pass "$(lg_run "$(lg_write "$LGW" $'---\nname: d\ndescription: Does a thing. Use when X.\n---\n')" Write)"
+assert_lg "when を含むだけの語（whenever）はトリガー語と見なさず ask" ask "$(lg_run "$(lg_write "$LGW" $'---\nname: d\ndescription: Does whenever needed\n---\n')" Write)"
+# 除外は「直上のディレクトリが _ で始まる」だけ。範囲を広げる回帰（名前に _ を含む・祖先が _）を捕まえる
+NO_TRIG=$'---\nname: d\ndescription: Does a thing.\n---\n'
+assert_lg "名前に _ を含む skill（a_b）は検査して ask" ask "$(lg_run "$(lg_write /fx/skills/a_b/SKILL.md "$NO_TRIG")" Write)"
+assert_lg "祖先のディレクトリが _ で始まっても検査して ask" ask "$(lg_run "$(lg_write /fx/_work/skills/demo/SKILL.md "$NO_TRIG")" Write)"
+assert_lg "直上が _ で始まる雛形（_example）は素通し" pass "$(lg_run "$(lg_write /fx/skills/_example/SKILL.md "$NO_TRIG")" Write)"
+
+# --- LG-X: replace_all（Edit・MultiEdit）。1 回だけ置換して検査すると、全置換で消えるフィールドを見落とす ---
+printf '%s\n' '---' 'name: description-writer' 'description: Does a thing. 使用する時に呼ぶ。' '---' 'body' >"$LG_DIR/SKILL.md"
+assert_lg "X replace_all の Edit で description を消すと deny" deny \
+    "$(lg_run "$(jq -nc --arg p "$LG_DIR/SKILL.md" '{file_path:$p,old_string:"description",new_string:"desc",replace_all:true}')" Edit)"
+assert_lg "X replace_all の MultiEdit で description を消すと deny" deny \
+    "$(lg_run "$(lg_multi '[{"old_string":"description","new_string":"desc","replace_all":true}]')" MultiEdit)"
+assert_lg "X replace_all なしの Edit は 1 回だけ置換する（name だけ変わり素通し）" pass \
+    "$(lg_run "$(jq -nc --arg p "$LG_DIR/SKILL.md" '{file_path:$p,old_string:"description",new_string:"desc"}')" Edit)"
+lg_reset
+
 echo
 echo "${pass_count} passed / ${fail_count} failed"
 [[ "$fail_count" -eq 0 ]] || exit 1
