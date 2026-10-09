@@ -113,7 +113,9 @@ git pull
 - `disable-model-invocation: true` の skill は、Claude Code では `/` 呼び出しのみ。Codex では frontmatter のこのフィールドが効かないので、skill ごとの `agents/openai.yaml`（`policy: allow_implicit_invocation: false`）で自然文からの起動を止めている。`verify-skills.sh` の check 9 が一致を検査する
 - **hook の信頼**: Codex は hook の信頼を「配列上の位置と定義」に紐づけ、変わった hook は `/hooks` で信頼し直すまでスキップする（= ガードが黙って開く）。install は自前の hook だけを各イベントの先頭に置いて、Orca・Muxy の位置を動かさない。`./setup.sh install` が hooks.json を書き換えたら（install が最後に案内する。信頼は定義に紐づき、スクリプトの中身には紐づかないので、スクリプトの更新だけでは外れない）、Codex で `/hooks` を開いて「要レビュー」が出ていないか確認する（check 12 が位置と信頼キーを検査する）。install の hooks.json の段が「先頭の自前グループの後ろに自前の hook があります」で失敗したら（hooks.json には書き込まない）、自前の hook を先頭のグループにまとめてから install をやり直し、`/hooks` でそのイベントの全件を信頼し直す
 - Codex は `ask`（確認プロンプト）に未対応なので、確認が要る操作の hook は Codex では `deny` で止め、理由に `[要確認]` と付ける。モデルはユーザーに確認して、ユーザー自身に実行してもらう（SKILL.md の lint の frontmatter の deny は、直した内容で再実行する）
-- Codex の「Claude 取り込み機能」が `~/.codex/AGENTS.md`・`hooks.json`・repo 直下の `AGENTS.md` を書き換えることがある。ずれたら `./shared/scripts/verify-skills.sh` と `git status` で気づける
+- **Codex の Claude からの取り込み**（`/import` と、起動時の案内）は、ユーザーが進めたときだけ動く。移すのは `~/.claude/CLAUDE.md`・repo の `CLAUDE.md`・hook・skills・subagent・設定・MCP・最近の会話で、**既にある `AGENTS.md`・`hooks.json`・skills・subagent は上書きしない**（移し先が無いか空のときだけ書く。0.160.0・0.162.0 のソースと、2026-10-09 の実機で確認）。書くときは「Claude → Codex」の語の機械的な置き換えがかかるので、パス（`~/.claude/scripts/` 等）が壊れる。次の 2 つに注意する
+  - `~/.codex/AGENTS.md` や `hooks.json` を消した・空にした後に取り込むと、置き換えの入った版が書き戻される。取り込みの前に `./setup.sh install` を済ませておく（install がブロックと自前 hook を入れるので、移し先が空でなくなる）
+  - `shared/agents/` に足した agent を install する前に取り込むと、生成ヘッダの無い TOML ができ、install が手書きと見なして上書きしない（古いまま残る）。足したら先に `./setup.sh install` する
 - `~/.agents/skills` は他のツール（skills CLI 等）も書き込む共有の場所。同名の実体（例: Bugbot 用の `review`）があると install は触らず warn する。その名前を Codex で呼ぶと、repo の skill ではなく既存の実体が起動する（例: `$review` は Bugbot のレビューを走らせ、`tmp/review/unified.md` を作らないので `/fix` へ続かない）。repo 側を使うなら、既存の実体を別名に退避してから install し直す
 - Codex が読む指示は `~/.codex/AGENTS.md` と repo 直下の `AGENTS.md` の合計で 32 KiB まで。超えると後から読まれる repo 直下の `AGENTS.md` が欠ける（check 11 が検査する）
 - **ガードが効かない経路**（hook では塞げないので、書き方で避ける。避け方は読み替え表にある）
