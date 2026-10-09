@@ -96,7 +96,7 @@ scheduled task から repo skill を回している場合は `/schedule` の一�
 
 1. `shared/skills/<skill-name>/SKILL.md` を作成（YAML frontmatter に `name` と `description` 必須）
 2. `disable-model-invocation: true` を付けたら、同じ skill に `agents/openai.yaml`（`policy:` の下に `allow_implicit_invocation: false` の 2 行）も置く。Codex は frontmatter のこのフィールドを読まず、自然文での暗黙起動を止めるのはこのファイルだけ（`verify-skills.sh` の check 9 が過不足を検査する）
-3. 入力ファイル（既定 `./tmp/context.md`）で質問・要件を受け取る skill は、入口を `../brief/reference/entry.md` に従わせる（質問を文章や会話の依頼で渡されたときも同じ手順に入れるため。`verify-skills.sh` の check 2(b) が、文言「省略時は `./tmp/context.md`」で見つけた skill の参照漏れを検査する）
+3. 入力ファイル（既定 `./tmp/context.md`）で質問・要件を受け取る skill は、入口を `../brief/reference/entry.md` に従わせる（質問を文章や会話の依頼で渡されたときも同じ手順に入れるため。`verify-skills.sh` の check 2(b) が、パラメーター節の既定のファイルの書き方で対象を見つけ、参照漏れを検査する）
 4. `./setup.sh install` を再実行
 5. `./shared/scripts/verify-skills.sh` で構造検証
 

@@ -1554,9 +1554,10 @@ assert_positive "C-27 健全: check 12 が実際に走った" "$(count_tag "$sec
 sec2b="$(verify_section "$out" '2(b)')"
 assert_eq "C-30 健全: check 2(b)（入口の正典の参照）に fail が無い" "0" "$(count_tag "$sec2b" '[FAIL]')"
 assert_positive "C-30 健全: check 2(b) が実際に走った" "$(count_tag "$sec2b" '[PASS]')"
-# 対象が 0 件でも pass する実装だと、文言の言い換えで全 skill が対象から外れても気づけない
-assert_positive "C-30 健全: check 2(b) が対象にした skill が 1 件以上ある" \
-    "$(printf '%s\n' "$sec2b" | grep -F '[PASS]' | grep -oE '[0-9]+ 件' | grep -oE '[0-9]+' | head -1)"
+# 入口を持つ skill の代表（ask）が対象に入っていること。対象が 0 件でも pass する実装や、文言の言い換えで
+# 入口を持つ skill が対象から黙って外れる回帰を捕まえる（全件の名前の書き写しはしない）
+assert_contains "C-30 健全: check 2(b) の対象に入口を持つ skill（ask）が入っている" \
+    "$(printf '%s\n' "$sec2b" | grep -F '[PASS]')" "ask"
 
 # --- C-8: 実物の判定役 test-auditor の TOML は read-only で、preload の指示を持つ ---
 # 35 件の集計に埋もれると、判定役が書き込める agent で動く（read-only の取り違え）・基準なしで判定する回帰を見逃す
@@ -1783,7 +1784,7 @@ c6_case extra-yaml 'mkdir -p "$MC/shared/skills/adr/agents" && printf "%s\n" "po
 c6_case outside-policy 'printf "%s\n" "interface:" "  allow_implicit_invocation: false" >"$MC/shared/skills/blog/agents/openai.yaml"' blog
 
 # --- C-30: check 2(b)（入口の正典の参照）の検出力。対象は文言（省略時は ./tmp/context.md）で決まり、skill 名で固定しない ---
-c30_case() {  # $1=ケース名, $2=改変（mini repo のパスを $MC で参照する）, $3=fail が名指しする語
+c30_case() {  # $1=ケース名, $2=改変（mini repo のパスを $MC で参照する）, $3=fail が名指しする語, $4=名指ししない語（任意）
     local MC
     MC="$(make_mini_repo "c30-$1")"
     rm "$MC/shared/skills" && cp -R "$REPO_SHARED/skills" "$MC/shared/skills"
@@ -1792,11 +1793,14 @@ c30_case() {  # $1=ケース名, $2=改変（mini repo のパスを $MC で参�
     local sec2b
     sec2b="$(verify_section "$(verify_run "$HM1" "$MC/shared/scripts/verify-skills.sh")" '2(b)')"
     assert_eq "C-30 [$1] check 2(b) が fail する" "1" "$(count_tag "$sec2b" '[FAIL]')"
-    assert_positive "C-30 [$1] fail は ${3} を名指しする" "$(printf '%s\n' "$sec2b" | grep -cF "$3")"
+    assert_positive "C-30 [$1] fail は ${3} を名指しする" "$(printf '%s\n' "$sec2b" | grep -F '[FAIL]' | grep -cF "$3")"
+    if [[ -n "${4-}" ]]; then
+        assert_not_contains "C-30 [$1] fail は参照の残る ${4} を名指ししない" "$(printf '%s\n' "$sec2b" | grep -F '[FAIL]')" "$4"
+    fi
 }
-c30_case drop-ref 'perl -i -pe "s#\.\./brief/reference/entry\.md#../brief/reference/modes.md#g" "$MC/shared/skills/coupling-precheck/SKILL.md"' coupling-precheck
+c30_case drop-ref 'perl -i -pe "s#\.\./brief/reference/entry\.md#../brief/reference/modes.md#g" "$MC/shared/skills/coupling-precheck/SKILL.md"' coupling-precheck design
 c30_case new-skill 'printf "%s\n" "" "## パラメーター" "" "\`\$ARGUMENTS\` でパスを指定できる。省略時は \`./tmp/context.md\` を使用する。" >>"$MC/shared/skills/adr/SKILL.md"' adr
-c30_case no-entry 'rm "$MC/shared/skills/brief/reference/entry.md"' entry.md
+c30_case no-entry 'rm "$MC/shared/skills/brief/reference/entry.md"' 'entry.md がありません'
 
 # --- C-28: 複製した関数の本体の一致（関数名の存在だけでは、片側だけ壊れた複製を通す）---
 sym7() {  # $1=mini repo → check 7(1) の節

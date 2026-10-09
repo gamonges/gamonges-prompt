@@ -159,7 +159,7 @@ if [ ! -f "$entry_doc" ]; then
 elif [ ${#entry_missing[@]} -gt 0 ]; then
     fail "入口の正典（../brief/reference/entry.md）を参照していない skill: ${entry_missing[*]}"
 else
-    pass "既定の入力が ./tmp/context.md の skill ${#entry_targets[@]} 件が、入口の正典を参照しています"
+    pass "既定の入力が ./tmp/context.md の skill ${#entry_targets[@]} 件（${entry_targets[*]}）が、入口の正典を参照しています"
 fi
 
 # 3. symlink integrity (_ プレフィックスは雛形扱いで対象外)
