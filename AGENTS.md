@@ -33,7 +33,7 @@ Claude Code と Codex で使用する Skills、SubAgents のコレクション�
 
 **install はメインチェックアウトから実行する。** settings.json と skills は symlink のままなので install 元のチェックアウトを全プロジェクトのランタイムが参照する。worktree から install すると、その worktree を削除した瞬間に deny リスト・hook 定義・全 skill・`~/.claude/agents/` の subagent がまとめて失われる（hook と違って何も失敗しないので気づけない）。linked worktree から実行すると `./setup.sh install` が警告する。
 
-構造的検証は `./shared/scripts/verify-skills.sh`（fail があれば exit 1、warn のみなら exit 0。check 2(b) が、既定の入力が `tmp/context.md` の skill が入口の正典 `shared/skills/brief/reference/entry.md` を参照しているかを、check 4 が scripts の同期・orphan・install 元を、check 5 が listing budget を見る。Codex 側は check 8（skills）・9（暗黙起動の抑止）・10（TOML の同期）・11（AGENTS.md のブロックとサイズ）・12（hooks.json の位置と信頼）、7(1) が `decide_ask_or_deny` の複製と「自分のリンク」・マーカーの並びの判定の本体の一致を見る）。
+構造的検証は `./shared/scripts/verify-skills.sh`（fail があれば exit 1、warn のみなら exit 0。check 4 が scripts の同期・orphan・install 元を、check 5 が listing budget を見る。Codex 側は check 8（skills）・9（暗黙起動の抑止）・10（TOML の同期）・11（AGENTS.md のブロックとサイズ）・12（hooks.json の位置と信頼）、7(1) が `decide_ask_or_deny` の複製と「自分のリンク」・マーカーの並びの判定の本体の一致を見る）。
 
 **ガードレールの挙動検証は `bash shared/scripts/tests/test-guardrails.sh`（`shared/scripts/` を編集したら実行する）。** 対象はいずれも fail-open 型（ガードが黙って開く / error が黙って消える）で、壊れても何も起きないため通常の動作確認では検知できない。Claude Code の入力と Codex の入力（`turn_id` あり）の両方を検査する。CI が無い本リポジトリでは、このテストが回帰を捉える唯一の手段になる。`./shared/scripts/verify-skills.sh --with-behavior-tests` からも呼べる。`setup.sh` と `verify-skills.sh` の**配置処理**（リンク先・実体コピー・前回 sha の判定）は、sandbox HOME で実プロセスを走らせる `bash shared/scripts/tests/test-setup-codex.sh` が検証する（`setup.sh` を編集したら実行する）。
 
@@ -133,6 +133,8 @@ Skills は開発ワークフローの各ステップを担う。**下図の矢�
   - **上書きが契約の skill は対象外**: `revise`（対象計画を上書きし、旧版を archive に残す）、`review-plan`（`tmp/plan-review.md` を毎回作り直す。`plan-lgtm` がそのファイルの mtime で完了を判定する）、`review`（`tmp/review/` を作り直す）。これらは本文で扱いを決めている
 
 > skill / subagent を書くときのプロンプト規約（Claude 5 向けの変換ルール T1–T8、維持リスト K、起動制御フィールドの選び方、追加手順）は `shared/skills/skill-authoring/SKILL.md` に集約している。
+
+質問・要件を入力ファイル（既定 `tmp/context.md`）で受け取る skill（ask・design・coupling-precheck・outline）は、文章や会話の依頼で渡されたときの扱いを入口の正典 `shared/skills/brief/reference/entry.md` に従う。参照漏れは `verify-skills.sh` の check 2(b) が検査する。
 
 ## OpenSpec（仕様管理）
 
