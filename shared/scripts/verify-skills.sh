@@ -7,6 +7,7 @@
 # 検証項目:
 # 1. SKILL.md ファイル数の一致 (リポ vs インストール先)
 # 2. 各 SKILL.md の frontmatter に name フィールドが存在すること
+#    (b) 既定の入力が ./tmp/context.md の skill が、入口の正典 brief/reference/entry.md を参照していること
 # 3. 各 ~/.claude/skills/<name> が本リポを指す symlink であること
 # 4. shared/scripts/ と ~/.claude/scripts/ の同期状態 (実体コピー方式のため。warn 止まり)
 # 5. skill listing の description 総文字数 (budget 監視。warn 止まり)
@@ -138,7 +139,33 @@ else
     fail "${#mismatch[@]} skills have directory name != frontmatter 'name'"
 fi
 
+# 2(b). 既定の入力が ./tmp/context.md の skill（文言「省略時は `./tmp/context.md`」で見つける）は、入口の正典
+# brief/reference/entry.md を参照すること。参照しないと、質問を文章で渡す・自然文で頼む入口で即停止するか、
+# 正典の無い独自の解釈で動く。skill 名で固定しないのは、同じ形の skill を足したときに漏れないため
+echo ""
+echo -e "${BLUE}== check 2(b): 入口の正典の参照（既定の入力が ./tmp/context.md の skill）==${NC}"
+entry_doc="${REPO_SKILLS}/brief/reference/entry.md"
+entry_targets=()
+entry_missing=()
+for skill_md in "$REPO_SKILLS"/*/SKILL.md; do
+    dir=$(basename "$(dirname "$skill_md")")
+    [[ "$dir" == _* ]] && continue
+    grep -qF '省略時は `./tmp/context.md`' "$skill_md" || continue
+    entry_targets+=("$dir")
+    grep -qF '../brief/reference/entry.md' "$skill_md" || entry_missing+=("$dir")
+done
+if [ ! -f "$entry_doc" ]; then
+    fail "入口の正典 shared/skills/brief/reference/entry.md がありません（${#entry_targets[@]} 件の skill が参照する先）"
+elif [ ${#entry_missing[@]} -gt 0 ]; then
+    fail "入口の正典（../brief/reference/entry.md）を参照していない skill: ${entry_missing[*]}"
+else
+    pass "既定の入力が ./tmp/context.md の skill ${#entry_targets[@]} 件（${entry_targets[*]}）が、入口の正典を参照しています"
+fi
+
 # 3. symlink integrity (_ プレフィックスは雛形扱いで対象外)
+# 見出しは 2(b) の節の終わりの目印も兼ねる（テストは見出しから次の見出しまでを 1 つの check として切り出す）
+echo ""
+echo -e "${BLUE}== check 3: ~/.claude/skills のリンク ==${NC}"
 broken=()
 for skill_dir in "$REPO_SKILLS"/*/; do
     name=$(basename "$skill_dir")

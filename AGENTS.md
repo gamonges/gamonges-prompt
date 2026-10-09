@@ -134,6 +134,8 @@ Skills は開発ワークフローの各ステップを担う。**下図の矢�
 
 > skill / subagent を書くときのプロンプト規約（Claude 5 向けの変換ルール T1–T8、維持リスト K、起動制御フィールドの選び方、追加手順）は `shared/skills/skill-authoring/SKILL.md` に集約している。
 
+質問・要件を入力ファイル（既定 `tmp/context.md`）で受け取る skill（ask・design・coupling-precheck・outline）は、文章や会話の依頼で渡されたときの扱いを入口の正典 `shared/skills/brief/reference/entry.md` に従う。参照漏れは `verify-skills.sh` の check 2(b) が検査する。
+
 ## OpenSpec（仕様管理）
 
 ```

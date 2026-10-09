@@ -7,7 +7,7 @@
 | Claude の語 | Codex での読み替え |
 |---|---|
 | `/name`（skill の呼び出し） | `$name`。「`/name` 呼び出しで使用」は `$name` の明示呼び出しを指す |
-| `$ARGUMENTS` | skill 名の後にユーザーが書いた文字列。無ければ「引数なし」として skill の既定に従う |
+| `$ARGUMENTS` | skill 名の後にユーザーが書いた文字列。無ければ「引数なし」として skill の既定に従う。自然文から SKILL.md を読んだときも引数なしで、会話の依頼は skill の入口の規則で扱う |
 | `Skill` ツールで X を起動する | `~/.agents/skills/X/SKILL.md` を読み、その手順に従う。ファイルが無ければ止めて報告する |
 | `Agent(subagent_type: X)`・「X subagent に委譲」 | custom agent `X` を spawn する。`~/.codex/agents/X.toml` が無ければ汎用 agent で代えず、停止して報告する（読み取り専用の判定役を、書き込める agent で代えると判定と修正が混ざるため） |
 | 役割だけを渡す subagent（`/review` の各レビュアー等）・`run_in_background` | 役割の文面を渡して汎用 agent を spawn する。独立した役割は並列に起動し、全員の完了を待つ |
