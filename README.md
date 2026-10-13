@@ -90,6 +90,7 @@ install が失敗したとき・並行して実行したとき:
 ```bash
 bash shared/scripts/tests/test-guardrails.sh     # hook の挙動（Claude Code・Codex の両入力）。shared/scripts/ を編集したら
 bash shared/scripts/tests/test-setup-codex.sh    # setup.sh・verify・agents の TOML 生成の挙動（sandbox HOME）。setup.sh や codex/ を編集したら
+bash shared/scripts/tests/test-series-sync.sh    # series-sync の同期スクリプトの挙動（偽の gh。python3 と /usr/bin/python3）。series_sync.py を編集したら
 ```
 
 ### アンインストール
@@ -145,6 +146,7 @@ git pull
 | `/review` | PR レビュー（並列サブエージェント） |
 | `/fix` | 修正項目から fix-plan.md を生成 |
 | `/create-pr` | 既定ブランチ向けドラフト PR を作成（ベースは `gh repo view` から取得） |
+| `/series-init` / `/series-sync` | 複数の PR に分けた対応の全体像。横断計画からシリーズの契約と引き継ぎを作り、各 PR の本文の全体像を同期する |
 | `/spec-check` / `/spec-propose` / `/spec-archive` / `/document-spec` | OpenSpec 仕様管理 |
 | `/review-comments` | PR レビューコメントの妥当性評価 + 返信 + resolve |
 | `/retrospective` | 日次 PR 振り返り |

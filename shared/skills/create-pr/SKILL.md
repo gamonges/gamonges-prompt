@@ -14,7 +14,13 @@ disable-model-invocation: true
 |------------------|----------------|
 | `./reference/pr-description-template.md` | Phase 5 で PR 本文を生成する時（起動したら必ず通る） |
 
-「念のため全部読む」は禁止。上記以外の補助ファイルを増やす場合は「条件付きで読む」表を別に作り、トリガー条件を書く。
+**条件付きで読む**:
+
+| 補助ドキュメント | 読むタイミング |
+|------------------|----------------|
+| `../series-sync/SKILL.md` の「スクリプトの I/F」と「同期の手順」 | `./tmp/context.md` の frontmatter に `series:` があり、Phase 6.5 に入る時 |
+
+「念のため全部読む」は禁止。上記以外の補助ファイルを増やす場合は「条件付きで読む」表に足し、トリガー条件を書く。
 
 ## Notion Page ID によるリファレンス付与
 
@@ -171,7 +177,7 @@ diff_stats=$(git diff "origin/${base_branch}...HEAD" --stat)
 
 ### Phase 4.5: PR 本文の素材収集
 
-以下 2 つは PR 種別の判定ではなく **Phase 5（PR 本文生成）の前処理**であるため、Phase 4 から分けている。
+以下 3 つは PR 種別の判定ではなく **Phase 5（PR 本文生成）の前処理**であるため、Phase 4 から分けている。
 
 #### 4.5.1 `tmp/` の確定事項との照合
 
@@ -194,6 +200,16 @@ diff_stats=$(git diff "origin/${base_branch}...HEAD" --stat)
 
 `./tmp/plan.md` の `## フォローアップタスク` に **`[マージ後]` と付いた項目**がある場合、PR 本文の `## マージ後 TODO` へ転記します（フラグの定義は `../design/reference/plan-template.md`）。フラグが無い古い計画では「マージ後の実施が必要」または「他者への依頼を含む」ものを転記対象とします。`./tmp/plan.md` はコミットされないため、**転記されて初めてマージ後に残ります**。
 
+#### 4.5.3 全体像の材料
+
+`./tmp/context.md` の**先頭の** frontmatter の `series:` を見て、3 つに分ける（判定はこの値の有無だけで行う）:
+
+| `series:` | series.md | 扱い |
+|-----------|-----------|------|
+| 無い（context.md が無い場合を含む） | — | **単独の PR**。`./tmp/plan.md`（概要・ステップ依存関係）、`./tmp/scenario.md`（`S-n` の入口・出口）、差分から、この PR が触る処理の流れを決め、Phase 5 で図にする。図にする処理の流れが無い変更（文言・依存の版・設定値だけの変更など）では図を省き、Phase 8 で省いた理由を 1 行報告する。series.md・横断計画は読まず、Phase 6.5 も行わない |
+| ある | ファイルがある | **シリーズの PR**。本文に全体像を入れない（PR 番号が作成前に分からず、兄弟の PR も同時に更新するため。Phase 6.5 の同期が入れる） |
+| ある | ファイルが無い | 止めて「全体像なしで PR を作る（後で `/series-sync`）／キャンセル」を尋ねる（黙って単独として扱うと、兄弟の PR が更新されないまま進むため）。作るを選んだら、本文に全体像を入れず、Phase 6.5 も行わない |
+
 ### Phase 5: Generate PR Description
 
 `.github/PULL_REQUEST_TEMPLATE.md`のフォーマットに従って PR 本文を生成します。
@@ -205,6 +221,7 @@ PR 本文の構成と Notion Page ID の挿入位置は `./reference/pr-descript
 - 目的（複数該当する場合はすべてチェック）
 - 変更点の概要（コミットメッセージと変更ファイルから生成）
 - Phase 4.5 で収集した `## grill 決定からの変更` と `## マージ後 TODO`（該当時のみ）
+- 単独の PR で処理の流れがある場合（Phase 4.5.3）、本文の先頭（ref 行があればその下）に `./reference/pr-description-template.md` の「全体像ブロック」の形で図を入れる（目印は付けない）。シリーズの PR では入れない
 - Notion Page IDが指定されていた場合、関連リンクにも記載する
 
 関連リンクは手動で追加する必要があることをユーザーに通知します。
@@ -223,6 +240,21 @@ gh pr create \
 
 ドラフト PR として作成し、ユーザーが内容を確認してから公開できるようにします。
 
+### Phase 6.5: シリーズへの登録と同期
+
+Phase 4.5.3 で**シリーズの PR**（`series:` があり series.md もある）と判定したときだけ行う。`$S` は `series:` の値、`$SYNC` は `python3 ~/.claude/skills/series-sync/scripts/series_sync.py`（`$SYNC` は本文の略記。実行するときは毎回展開して書く。シェル変数に入れて `$SYNC check …` とすると、zsh では引数に分かれずに失敗する）（`disable-model-invocation: true` の skill は `Skill` ツールで呼べないので、`../series-sync/SKILL.md` を読んでスクリプトを直接実行する）。
+
+```bash
+repo=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
+$SYNC register "$S" --repo "$repo" --branch "$current_branch" --pr <作った PR の番号> --worktree "$(git rev-parse --show-toplevel)"
+```
+
+| register の結果 | 次の行動 |
+|----------------|---------|
+| exit 0（`registered:`／`unchanged:`） | `../series-sync/SKILL.md` の「同期の手順」に従う。手順が止まった・キャンセルされたときも、その結果を持って Phase 7 へ進む |
+| exit 3（曖昧・衝突・候補なし） | 候補（0 件なら「候補なし」）を見せ、「段を選ぶ（`--stage <段>` を付けて再実行）／シリーズに登録しない」を尋ねる。登録しないを選んだら同期せずに Phase 7 へ進む（PR は作成済みで、本文は全体像なしのまま。単独の図を後から足すことはしない）。`--stage` の再実行も exit 3 なら、登録しないと同じ扱いにする（再度は尋ねない） |
+| exit 1（series.md の解析・ロックの失敗など） | エラーと「PR は作成済み・未登録。series.md を直した後に `/series-sync` で登録（`warning:` から `register --stage`）と同期ができる」を報告して Phase 7 へ進む（再試行しない） |
+
 ### Phase 7: Open PR in Browser
 
 ```bash
@@ -237,6 +269,10 @@ gh pr view --web
 - 作成された PR の番号と URL
 - PR のタイトル
 - 生成された PR 本文の主要な内容
+- 全体像（Phase 4.5.3 の分岐ごと）:
+  - 単独の PR: 図を入れたか。省いたなら理由を 1 行
+  - シリーズの PR: 登録した段と同期の結果（`../series-sync/SKILL.md` の「同期の手順」の手順 7 の項目: 書いた PR・unchanged・skipped・mismatch・failed・error・plan の DIR）。キャンセルしたなら「後で `/series-sync` を実行すれば全体像が入る」
+  - 登録しなかった・できなかった・series.md が無かった: その旨と、後から `/series-sync` で登録・同期する手順
 - 次のステップ:
   - 関連リンクを追加する
   - 動作確認チェックリストを確認する
