@@ -11,7 +11,7 @@
 | `implement` | Phase 1 = 発火判定、Phase 4 = DoD 検査 |
 | `spec-propose` | フェーズ 5.2 = openspec へ昇格 |
 | `verification-authoring` | 順流 = 出口ごとの `Driving it` エントリ生成 |
-| `create-pr` | PR 本文生成 = `tmp/` 確定事項との照合 |
+| `create-pr` | PR 本文生成 = `tmp/` 確定事項との照合、単独の PR の図の材料（`S-n` の入口・出口） |
 | `ask` | 読むだけ = 状態の判定と、題材が一致する `S-n` を調査の前提に使う（判定・生成はしない） |
 
 **なぜ 1 箇所に固定するか**: 発火判定は `grill` / `design` / `implement` の 3 経路が行い、記述書式は上表の 7 skill が読む。基準や項目名を各 skill に書くと、片方に判定や項目を足したときもう片方がずれる。**基準と書式は本ファイルに 1 回だけ置き、適用手順（列挙の集約・判定の帰結・反復の打ち切り）は各 skill 側に置く。**

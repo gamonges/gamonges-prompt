@@ -9,6 +9,9 @@ settings.json.pre-migrate.*
 .claude/settings.local.json
 claude/settings.local.json
 
+# Python のバイトコード（skill の scripts をテストで走らせると作られる）
+__pycache__/
+
 # OS / editor
 .DS_Store
 *.swp
