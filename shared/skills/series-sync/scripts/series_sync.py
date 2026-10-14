@@ -24,6 +24,8 @@ END = "<!-- series-overview:end -->"
 # 異体字セレクタ U+FE0F の有無に依らず拾うため、地図の絵文字 U+1F5FA までで判定する
 HEADING_PREFIX = "## \U0001F5FA"
 BODY_LIMIT = 65536
+# status が未登録の PR を探す件数の上限（gh pr list --limit）
+PR_LIST_LIMIT = 100
 
 STAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
@@ -61,27 +63,42 @@ def split_lines(text):
     return text.split("\n")
 
 
+def fence_open(line):
+    """囲みの開始の行なら囲みの印（``` や ~~~）を、でなければ None を返す。
+
+    CommonMark では、バッククォートの囲みの info string はバッククォートを含められない
+    （```foo``` で始まる行はインラインのコードで、囲みを開始しない）。
+    """
+    m = FENCE_RE.match(line)
+    if m is None or (m.group(1)[0] == "`" and "`" in m.group(2)):
+        return None
+    return m.group(1)
+
+
+def scan_fences(lines):
+    """行ごとの「囲みの外か」（囲みの行そのものは False）と、閉じていない囲みの印を返す。"""
+    result = []
+    fence = None
+    for line in lines:
+        if fence is None:
+            fence = fence_open(line)
+            result.append(fence is None)
+        else:
+            m = FENCE_RE.match(line)
+            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) \
+                    and m.group(2).strip() == "":
+                fence = None
+            result.append(False)
+    return result, fence
+
+
 def outside_fences(lines):
     """行ごとに、コードの囲みの外なら True（囲みの行そのものは False）。
 
     本文の終わりまで閉じていない囲みがあれば、すべて True にする（囲みの後ろにある
     既存のブロックを見落として 2 つ目を足すより、囲みの中の目印を数える方が安全なため）。
     """
-    result = []
-    fence = None
-    for line in lines:
-        m = FENCE_RE.match(line)
-        if fence is None:
-            if m:
-                fence = m.group(1)
-                result.append(False)
-                continue
-            result.append(True)
-        else:
-            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) \
-                    and m.group(2).strip() == "":
-                fence = None
-            result.append(False)
+    result, fence = scan_fences(lines)
     if fence is not None:
         return [True] * len(lines)
     return result
@@ -92,20 +109,9 @@ def heading_indexes(lines):
 
     完成形の中にも `## 🗺️` があるため、囲みを追わずに数えると節が切れる。
     """
-    result = []
-    fence = None
-    for i, line in enumerate(lines):
-        m = FENCE_RE.match(line)
-        if fence is None:
-            if m:
-                fence = m.group(1)
-                continue
-            if line.startswith("## "):
-                result.append((i, line[3:].strip()))
-        elif m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) \
-                and m.group(2).strip() == "":
-            fence = None
-    return result
+    outside = outside_fences(lines)
+    return [(i, line[3:].strip()) for i, line in enumerate(lines)
+            if outside[i] and line.startswith("## ")]
 
 
 def section_span(lines, name):
@@ -137,7 +143,8 @@ def split_row(line):
         s = s[1:]
     if s.endswith("|"):
         s = s[:-1]
-    return [c.strip() for c in s.split("|")]
+    # GFM の表では、セルの中の | を \| と書く。\| は区切りにせず、セルの文字列のまま持つ
+    return [c.strip() for c in re.split(r"(?<!\\)\|", s)]
 
 
 def parse_table(lines, span):
@@ -181,6 +188,11 @@ class Series(object):
                 self.errors.append("## 段 の表に列が無い: " + ", ".join(missing))
             else:
                 for row in rows:
+                    if len(row) > len(header):
+                        # 見出しの無いセルは持てず、register・write の書き直しで消えるので止める
+                        self.errors.append("## 段 の行のセルが見出しより多い: 段 "
+                                           + row[header.index("段")])
+                        continue
                     # 必須でない列も行ごとに持つ（register・write が表を書き直すときに消さないため）
                     self.stages.append(dict(zip(header, row + [""] * len(header))))
         table = parse_table(self.lines, section_span(self.lines, "強調"))
@@ -242,10 +254,28 @@ def mermaid_nodes(template):
 
 # ---------------------------------------------------------------- 検査
 
+def duplicate_prs(stages):
+    """同じ (リポジトリ, PR) を持つ段の組を、問題の文として返す（register の twin の検査と同じ規則）。"""
+    seen = {}
+    problems = []
+    for s in stages:
+        if not s["PR"]:
+            continue
+        key = (s["リポジトリ"], s["PR"])
+        if key in seen:
+            problems.append("%s#%s が段 %s と段 %s の 2 つにある"
+                            % (key[0], key[1], seen[key], s["段"]))
+        else:
+            seen[key] = s["段"]
+    return problems
+
+
 def check(series):
     errors = list(series.errors)
     if not series.fm.get("outline"):
         errors.append("frontmatter に outline が無い")
+    if scan_fences(series.lines)[1] is not None:
+        errors.append("閉じていないコードの囲みがある")
     if section_span(series.lines, "進捗") is None:
         errors.append("## 進捗 の節が無い（status が書く先）")
     names = [s["段"] for s in series.stages]
@@ -260,6 +290,7 @@ def check(series):
     for name in set(names):
         if names.count(name) > 1:
             errors.append("段名が重複している: " + name)
+    errors.extend(duplicate_prs(series.stages))
     template = series.template
     if template is None:
         return errors
@@ -628,14 +659,20 @@ def cmd_write(args):
         conflicts = []
         inherited = []
         dropped = []
+        reset = []
         for row in draft.stages:
             old = cur.stage(row["段"])
             if old is None:
                 continue
-            if old["PR"] and old["リポジトリ"] != row["リポジトリ"]:
-                conflicts.append("段 %s のリポジトリが変わった（%s → %s）が、PR %s#%s が登録済み"
-                                 % (row["段"], old["リポジトリ"], row["リポジトリ"],
-                                    old["リポジトリ"], old["PR"]))
+            if old["リポジトリ"] != row["リポジトリ"]:
+                if old["PR"]:
+                    conflicts.append("段 %s のリポジトリが変わった（%s → %s）が、PR %s#%s が登録済み"
+                                     % (row["段"], old["リポジトリ"], row["リポジトリ"],
+                                        old["リポジトリ"], old["PR"]))
+                elif old["ブランチ"]:
+                    # 古いリポジトリのブランチなので、新しいリポジトリの行には引き継がない
+                    reset.append("段 %s のブランチ %s（%s のもの）を引き継がない"
+                                 % (row["段"], old["ブランチ"], old["リポジトリ"]))
                 continue
             took = []
             # worktree は series-init の持ち分なので、引き継がずに下書きの値（空を含む）を書く。
@@ -658,6 +695,8 @@ def cmd_write(args):
                 dropped.append(ref)
             else:
                 conflicts.append("下書きに無い段に PR が登録済み: " + ref)
+        # 下書きの check は引き継ぐ前の表に当たるので、引き継いだ後の表でもう一度見る
+        conflicts.extend(duplicate_prs(draft.stages))
         if conflicts:
             for c in conflicts:
                 print("conflict: " + c)
@@ -665,12 +704,23 @@ def cmd_write(args):
         text = replace_stage_table(draft.text, draft.stages)
         for name in ("進捗", "メモ"):
             body = section_lines(cur.text, name)
-            if body is not None:
+            if body is None:
+                continue
+            if section_span(split_lines(text), name) is not None:
                 text = replace_section(text, name, body)
+            else:
+                # ## メモ は人の任意の節なので、下書きに無くても今の内容を残す
+                # （## 進捗 は check が下書きにも求めるので、ここには来ない）
+                text = text.rstrip("\n") + "\n\n## " + name + "\n" + "\n".join(body)
+        # timestamp は status の持ち分で、引き継いだ ## 進捗 の取得時刻と対になる
+        if cur.fm.get("timestamp"):
+            text = set_frontmatter(text, "timestamp", cur.fm["timestamp"])
         atomic_write(args.series, text)
     print("written: " + args.series)
     for item in inherited:
         print("inherited: " + item)
+    for item in reset:
+        print("reset: " + item)
     for item in dropped:
         print("dropped: " + item)
     return 0
@@ -773,7 +823,10 @@ def cmd_status(args):
             for prefix in prefixes:
                 found = gh(["pr", "list", "-R", repo, "--search", "head:" + prefix,
                             "--state", "all", "--json", "number,headRefName",
-                            "--limit", "100"])
+                            "--limit", str(PR_LIST_LIMIT)])
+                if len(found) >= PR_LIST_LIMIT:
+                    warnings.append("%s の %s の PR が %d 件以上あり、それ以降は調べていない"
+                                    % (repo, prefix, PR_LIST_LIMIT))
                 for p in found:
                     # head: の検索は前方一致より広く当たるので、接頭辞で絞り直す
                     if not p.get("headRefName", "").startswith(prefix):

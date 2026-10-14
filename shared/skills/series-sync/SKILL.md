@@ -39,7 +39,7 @@ disable-model-invocation: true
 | `check <series.md>` | 読まない | 読む | 問題を 1 行 1 件 `error: …` | 0 / 1 |
 | `render <series.md> --stage S [--body-file F] [--migrate]` | 読まない | 読む | `--body-file` 無し: ブロック。あり: F にブロックを当てた本文 | 0 / 1（当てられない） |
 | `register <series.md> --repo O/R --branch B --pr N [--stage S] [--worktree P]` | 読まない | 段の行を書く | `registered: …` / `unchanged: …` / 候補の一覧 | 0 / 1（表を壊す値・`--repo` の形） / **3**（曖昧・衝突・候補なし・別の段に同じ PR。人が段を決める） |
-| `write <series.md> --from F [--drop S …]` | 読まない | 全体を書く（series-init 専用） | `written: …`・`inherited: …`・`dropped: <段> <O/R#N>` | 0 / 1（F が check を通らない） / **3**（登録済みの段が F にも `--drop` にも無い。F のブランチ・PR が今の値と違う。PR が登録済みの段のリポジトリが変わった） |
+| `write <series.md> --from F [--drop S …]` | 読まない | 全体を書く（series-init 専用） | `written: …`・`inherited: …`・`reset: 段 <段> のブランチ <B>（<旧 O/R> のもの）を引き継がない`・`dropped: <段> <O/R#N>` | 0 / 1（F が check を通らない。今の series.md の表が壊れている） / **3**（登録済みの段が F にも `--drop` にも無い。F のブランチ・PR が今の値と違う。PR が登録済みの段のリポジトリが変わった。引き継いだ後に同じ PR が 2 つの段に入る） |
 | `status <series.md>` | 読む | `## 進捗` と `timestamp` を書く | 進捗の表と `warning: …` | 0 / 1（GitHub の読み取りに失敗） |
 | `plan <series.md> [--out DIR] [--migrate]` | 読む（GET） | 読む | PR ごとに `O/R#N <状態> <insert\|replace\|migrate\|none\|error> [理由]`、`changes: X / errors: Y`、`dir: <DIR>` | 0 / 1（check の失敗、error の PR がある） |
 | `apply --plan DIR [--only O/R#N …]` | 読む・**書く**（PATCH） | 読まない | PR ごとに `written` / `unchanged` / `skipped` / `mismatch` / `failed` | 0 / 1（skipped・mismatch・failed がある。`--only` の PR が plan に無い） |
@@ -54,7 +54,7 @@ disable-model-invocation: true
 この節が同期の手順の正典で、create-pr の Phase 6.5 と stack-pr-submit のステップ 5.5 もこの手順に従う（手順が止まった・キャンセルされたときも、呼び出し元はその結果を持って自分の報告へ進む）。`$S` は series.md のパス、`$SYNC` は `python3 ~/.claude/skills/series-sync/scripts/series_sync.py`（`$SYNC` は本文の略記。実行するときは毎回展開して書く。シェル変数に入れて `$SYNC check …` とすると、zsh では引数に分かれずに失敗する）。
 
 1. `$SYNC check "$S"`。exit 1 → 止めて `error:` の行を報告する（series.md を直すか、`/series-init` で組み直す）
-2. `$SYNC status "$S"`。進捗の表を見せる。`warning:` の未登録の PR があれば報告し、登録するかを尋ねる（登録は `$SYNC register "$S" --stage <段> --repo <O/R> --branch <B> --pr <N>`）。exit 1 → GitHub の読み取りの失敗を報告して止める
+2. `$SYNC status "$S"`。進捗の表を見せる。`warning:` の未登録の PR があれば報告し、登録するかを尋ねる（登録は `$SYNC register "$S" --stage <段> --repo <O/R> --branch <B> --pr <N>`）。`… 件以上あり、それ以降は調べていない` の warning は登録の候補ではなく、未登録の PR を調べ切れていないこととして報告する。exit 1 → GitHub の読み取りの失敗を報告して止める
 3. `$SYNC plan "$S"`（ユーザーが移行を明示したときだけ `--migrate`）。exit 1 でも出力に `dir:` の行があれば手順 4 へ進む（error の PR があるだけで、他の PR の plan は書かれている）。`dir:` の行が無ければ check の失敗として止めて報告する
 4. 書く PR が無いとき:
    - `changes: 0` かつ `errors: 0` → 「本文の変更なし」と報告して終わる（変わらない同期では何も書かない）

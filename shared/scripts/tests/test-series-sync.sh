@@ -215,6 +215,16 @@ run_check_tests() {
         "- 順序の理由: 受付が先" "- 順序の理由: ステップ1 が先"
     check_case "強調の行が無い段がある" "強調" $'| C | NOTIFY |\n' ""
     check_case "強調のノードが空の段がある" "強調" "| C | NOTIFY |" "| C | |"
+    check_case "同じ PR が 2 つの段にある" "acme/api#12" "| 2 | /wt/api-a |  |  |" "| 2 | /wt/api-a | x | 12 |"
+    # 余分なセルは書き直しで消えるので、書き直す前に止める
+    check_case "段の行のセルが見出しより多い" "見出しより多い: 段 B" \
+        "| 2 | /wt/api-a |  |  |" "| 2 | /wt/api-a |  |  | EXTRA |"
+    # 列の並びは問わないので、段名は「段」の列から取る（段の列が先頭でない表）
+    check_case "段の列が先頭でない表で、セルの多い行の段名を出す" "見出しより多い: 段 A" \
+        "| 段 | リポジトリ |" "| リポジトリ | 段 |" \
+        "| A | acme/api | S-1・S-2 | develop | 1 | /wt/api-a | feat/order-import-recv | 12 |" \
+        "| acme/api | A | S-1・S-2 | develop | 1 | /wt/api-a | feat/order-import-recv | 12 | EXTRA |" \
+        "| B | acme/api |" "| acme/api | B |" "| C | acme/web |" "| acme/web | C |"
 
     # 数字だけの語（PR 番号・順序の列）や、別の番号のステップでは止めない
     check_ok_case "含むステップが数字でも、完成形の数字だけには当てない" \
@@ -1171,6 +1181,143 @@ run_code_review_regression_tests() {
     done
 }
 
+# ============================================================ SS-11: コードレビューの指摘 2 巡目（regression）
+
+run_code_review2_regression_tests() {
+    local s="$WORK/cr2.md" f="$WORK/cr2-draft.md" out rc now
+    local row_b_empty="| B | acme/api | S-3 | 段 A に積む | 2 | /wt/api-a |  |  |"
+
+    # R-1 下書きに ## メモ が無くても、今のメモを見出しごと残す（## メモ は人の任意の節）
+    mk_series "$s" 12 "" ""
+    mk_series "$WORK/cr2-0.md" "" "" ""
+    mutate "$WORK/cr2-0.md" "$f" "## メモ"$'\n\n'"手で書いたメモ"$'\n' "" \
+        "直すもの | 解決する事象" "直すもの | 解決する事象（新）"
+    out="$(ss write "$s" --from "$f" 2>&1)"; rc=$?
+    now="$(cat "$s")"
+    if [[ "$rc" == 0 && "$now" == *"解決する事象（新）"* ]]; then
+        pass "SS-11 regression: ## メモ の無い下書きを write できる"
+        assert_has "SS-11 regression: ## メモ の見出しが残る" "$now" $'\n## メモ\n'
+        assert_has "SS-11 regression: 今のメモが残る" "$now" "手で書いたメモ"
+    else
+        fail "SS-11 regression: ## メモ の無い下書きの write（rc=${rc}）: ${out:0:200}"
+    fi
+
+    # R-2 リポジトリが変わり PR の無い段は、古いリポジトリのブランチを引き継がない
+    mk_series "$WORK/cr2-0.md" "" "" ""
+    mutate "$WORK/cr2-0.md" "$s" "$row_b_empty" "| B | acme/api | S-3 | 段 A に積む | 2 | /wt/api-a | feat-b |  |"
+    mutate "$WORK/cr2-0.md" "$f" "| B | acme/api |" "| B | acme/web |"
+    out="$(ss write "$s" --from "$f" 2>&1)"; rc=$?
+    now="$(cat "$s")"
+    assert_rc "SS-11 regression: リポジトリが変わり PR の無い段の write は exit 0" 0 "$rc" "$out"
+    assert_has "SS-11 regression: 古いブランチを引き継がない" "$now" "| B | acme/web | S-3 | 段 A に積む | 2 | /wt/api-a |  |  |"
+    if [[ "$out" == *"reset: 段 B"*"feat-b"* ]]; then pass "SS-11 regression: reset: を出す"; else fail "SS-11 regression: reset: が無い: ${out:0:200}"; fi
+    assert_not_has "SS-11 regression: inherited: B を出さない" "$out" "inherited: B"
+
+    # R-3 同じ条件で、下書きのブランチ列に値があれば conflict にせずその値を書く
+    mutate "$WORK/cr2-0.md" "$s" "$row_b_empty" "| B | acme/api | S-3 | 段 A に積む | 2 | /wt/api-a | feat-b |  |"
+    mutate "$WORK/cr2-0.md" "$f" "$row_b_empty" "| B | acme/web | S-3 | 段 A に積む | 2 | /wt/api-a | feat-web |  |"
+    out="$(ss write "$s" --from "$f" 2>&1)"; rc=$?
+    now="$(cat "$s")"
+    assert_rc "SS-11 regression: 下書きのブランチがあれば exit 0" 0 "$rc" "$out"
+    assert_has "SS-11 regression: 下書きのブランチを書く" "$now" "| B | acme/web | S-3 | 段 A に積む | 2 | /wt/api-a | feat-web |  |"
+
+    # R-4 引き継いだ後に同じ PR が 2 つの段に入るなら止める（下書きの check は引き継ぐ前に当たる）
+    mk_series "$s" 12 "" ""
+    mk_series "$f" "" 12 ""
+    cp "$s" "$WORK/cr2.before"
+    out="$(ss write "$s" --from "$f" 2>&1)"; rc=$?
+    if [[ "$rc" == 3 && "$out" == *"conflict: "*"acme/api#12"* ]] && cmp -s "$WORK/cr2.before" "$s"; then
+        pass "SS-11 regression: 引き継いだ後に同じ PR が 2 段なら exit 3 で書かない"
+    else
+        fail "SS-11 regression: 同じ PR が 2 段（rc=${rc}）: ${out:0:200}"
+    fi
+
+    # R-5 register は、セルが見出しより多い行のある series.md を書き直さない
+    mk_series "$WORK/cr2-0.md" "" "" ""
+    mutate "$WORK/cr2-0.md" "$s" "| 1 | /wt/api-a |  |  |" "| 1 | /wt/api-a |  |  | EXTRA |"
+    cp "$s" "$WORK/cr2.before"
+    out="$(ss register "$s" --stage A --repo acme/api --branch feat/order-import-recv --pr 12 2>&1)"; rc=$?
+    if [[ "$rc" == 1 && "$out" == *"見出しより多い: 段 A"* ]] && cmp -s "$WORK/cr2.before" "$s"; then
+        pass "SS-11 regression: セルの多い行があれば register は exit 1 で書かない"
+    else
+        fail "SS-11 regression: セルの多い行の register（rc=${rc}）: ${out:0:200}"
+    fi
+
+    # R-6 セルの中の \| は区切りでない（GFM の表のエスケープ）
+    mutate "$WORK/cr2-0.md" "$s" "| S-1・S-2 |" '| S-1 \| S-2 |'
+    out="$(ss register "$s" --stage A --repo acme/api --branch feat/order-import-recv --pr 12 2>&1)"; rc=$?
+    now="$(cat "$s")"
+    if [[ "$rc" == 0 && "$out" == "registered:"* ]]; then
+        pass "SS-11 regression: \\| のあるセルの段を register できる"
+        assert_has "SS-11 regression: \\| を保ち、列をずらさない" "$now" \
+            '| A | acme/api | S-1 \| S-2 | develop | 1 | /wt/api-a | feat/order-import-recv | 12 |'
+    else
+        fail "SS-11 regression: \\| のあるセルの register（rc=${rc}）: ${out:0:200}"
+    fi
+
+    # R-7 write は今の timestamp を保つ（timestamp は status の持ち分）
+    local ts_old="timestamp: 2026-01-01T10:00:00+09:00" ts_cur="timestamp: 2026-09-09T09:09:09+09:00"
+    mutate "$WORK/cr2-0.md" "$WORK/cr2-cur.md" "$ts_old" "$ts_cur"
+    mutate "$WORK/cr2-0.md" "$WORK/cr2-d1.md" "$ts_old"$'\n' "" "直すもの | 解決する事象" "直すもの | 解決する事象（新）"
+    mutate "$WORK/cr2-0.md" "$WORK/cr2-d2.md" "直すもの | 解決する事象" "直すもの | 解決する事象（新）"
+    local d
+    for d in d1 d2; do
+        cp "$WORK/cr2-cur.md" "$s"
+        out="$(ss write "$s" --from "$WORK/cr2-$d.md" 2>&1)"; rc=$?
+        now="$(cat "$s")"
+        if [[ "$rc" == 0 && "$now" == *"解決する事象（新）"* && "$now" == *"$ts_cur"* && "$now" != *"$ts_old"* ]]; then
+            pass "SS-11 regression: write は今の timestamp を保つ（下書き ${d}）"
+        else
+            fail "SS-11 regression: timestamp（下書き ${d}、rc=${rc}）: $(grep -n '^timestamp' "$s")"
+        fi
+    done
+
+    # R-8 info string にバッククォートのある行は囲みを開始しない（CommonMark）
+    mk_series "$s" 12 13 5
+    printf '```foo``` x\n<!-- series-overview:begin -->\n古い\n<!-- series-overview:end -->\n\n```py\ncode\n```\n' >"$WORK/cr2-tick.md"
+    ss render "$s" --stage A --body-file "$WORK/cr2-tick.md" >"$WORK/cr2-tick.out" 2>&1; rc=$?
+    if [[ "$rc" == 0 && "$(grep -c 'series-overview:begin' "$WORK/cr2-tick.out")" == 1 ]] && ! grep -q '古い' "$WORK/cr2-tick.out"; then
+        pass "SS-11 regression: info string にバッククォートのある行の後ろのブロックを置き換える"
+    else
+        fail "SS-11 regression: バッククォートの info string（rc=${rc}）で begin が $(grep -c 'series-overview:begin' "$WORK/cr2-tick.out") 個"
+    fi
+
+    # R-9 未登録 PR の探索が上限に当たったら、調べ切れていないことを warning で示す
+    local n
+    for n in 100 99; do
+        gh_reset
+        mk_series "$s" "" "" ""
+        "$PY" -c 'import json,sys; print(json.dumps([{"number": i, "headRefName": "feat/order-import-n%d" % i} for i in range(1, int(sys.argv[1]) + 1)]))' "$n" >"$FAKE_GH_DIR/list/acme__api.json"
+        echo '[]' >"$FAKE_GH_DIR/list/acme__web.json"
+        out="$(PATH="$FAKE_BIN:$PATH" ss status "$s" 2>&1)"; rc=$?
+        if [[ "$n" == 100 ]]; then
+            if [[ "$rc" == 0 && "$out" == *"warning: acme/api の feat/order-import- の PR が 100 件以上"* ]]; then
+                pass "SS-11 regression: 探索が上限の 100 件に当たったら warning"
+            else
+                fail "SS-11 regression: 上限の warning（rc=${rc}）: $(printf '%s' "$out" | grep -v '未登録' | head -3)"
+            fi
+        else
+            if [[ "$rc" == 0 && "$out" == *"未登録の PR: acme/api#99"* && "$out" != *"件以上"* ]]; then
+                pass "SS-11 regression: 99 件では上限の warning を出さない"
+            else
+                fail "SS-11 regression: 99 件（rc=${rc}）: $(printf '%s' "$out" | grep -v '未登録' | head -3)"
+            fi
+        fi
+    done
+
+    # R-10 閉じていない囲みがあっても、series.md の節を見失わない（outside_fences と同じ規則）
+    mk_series "$WORK/cr2-0.md" 12 "" ""
+    mutate "$WORK/cr2-0.md" "$s" $'\n## 進捗\n' $'\n```\n\n## 進捗\n'
+    out="$(ss check "$s" 2>&1)"; rc=$?
+    assert_not_has "SS-11 regression: 閉じていない囲みの後ろの ## 進捗 を見失わない" "$out" "## 進捗 の節が無い"
+    # 節は見失わないが、壊れた series.md なので黙って通さない
+    if [[ "$rc" == 1 && "$out" == "error: 閉じていないコードの囲みがある" ]]; then
+        pass "SS-11 regression: 閉じていない囲みは check の error（その 1 件だけ）"
+    else
+        fail "SS-11 regression: 閉じていない囲みの check（rc=${rc}）: ${out:0:200}"
+    fi
+}
+
 # ============================================================ 実行
 
 # python3 と /usr/bin/python3 が別物なら両方で全件を回す（3.9 で動くことの検証）
@@ -1201,6 +1348,7 @@ for PY in "${PYS[@]}"; do
     run_apply_tests
     run_review_regression_tests
     run_code_review_regression_tests
+    run_code_review2_regression_tests
 done
 
 echo
