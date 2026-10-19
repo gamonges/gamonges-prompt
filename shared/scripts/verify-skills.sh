@@ -33,7 +33,7 @@
 #   ./shared/scripts/verify-skills.sh                        構造検証のみ
 #   ./shared/scripts/verify-skills.sh --with-behavior-tests   挙動テストも実行する
 #
-# 挙動テスト (tests/test-guardrails.sh・tests/test-setup-codex.sh・tests/test-series-sync.sh) を既定で走らせないのは、fixture 生成に数十秒かかり
+# 挙動テスト (tests/test-guardrails.sh・tests/test-setup-codex.sh・tests/test-series-sync.sh・tests/test-codex-run.sh) を既定で走らせないのは、fixture 生成に数十秒かかり
 # 構造検証の即応性を損なうため。ただし fail-open は挙動テストしか捉えられないので、
 # shared/scripts/ を編集したときはフラグ付きで実行する。
 set -euo pipefail
@@ -959,6 +959,14 @@ if [ "$WITH_BEHAVIOR_TESTS" -eq 1 ]; then
         pass "シリーズの同期の挙動テストがすべて通りました"
     else
         fail "シリーズの同期の挙動テストに失敗があります (上記の [FAIL] を参照)"
+    fi
+    # Codex を呼ぶラッパー。偽の companion を差し込むので、Codex には接続しない
+    echo ""
+    echo -e "${BLUE}== 挙動テスト: tests/test-codex-run.sh（Codex のラッパー）==${NC}"
+    if bash "${REPO_SHARED}/scripts/tests/test-codex-run.sh"; then
+        pass "Codex のラッパーの挙動テストがすべて通りました"
+    else
+        fail "Codex のラッパーの挙動テストに失敗があります (上記の [FAIL] を参照)"
     fi
 fi
 

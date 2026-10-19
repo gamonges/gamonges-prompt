@@ -253,7 +253,16 @@
     "serena@claude-plugins-official": true,
     "typescript-lsp@claude-plugins-official": true,
     "superpowers@claude-plugins-official": true,
-    "slack@claude-plugins-official": false
+    "slack@claude-plugins-official": false,
+    "codex@openai-codex": true
+  },
+  "extraKnownMarketplaces": {
+    "openai-codex": {
+      "source": {
+        "source": "github",
+        "repo": "openai/codex-plugin-cc"
+      }
+    }
   },
   "language": "日本語",
   "effortLevel": "xhigh",

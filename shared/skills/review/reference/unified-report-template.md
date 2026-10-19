@@ -10,6 +10,7 @@ Phase 4 で `./tmp/review/unified.md` に書き出す統合レポートのテン
 **レビュー日**: {date}
 **変更ファイル数**: {count}ファイル | **差分規模**: {small/medium/large}
 **プロジェクトタイプ**: {frontend/backend/unknown}
+**Codex レビュー**: {実施（gpt-6.1-sol、52 秒、指摘 3 件） / 未実施（理由） / 省略（実行者が Codex）}
 
 ---
 
@@ -157,3 +158,6 @@ Phase 4 で `./tmp/review/unified.md` に書き出す統合レポートのテン
 
 *レビュー by {参加エージェント名一覧}（並列実行）*
 ```
+
+- 参加エージェント名一覧には、Codex の指摘を 1 件以上写したときに `codex(<model>)` を含める
+- `**Codex レビュー**:` 行の文言は `./codex-reviewer.md` の「記録の文言」に従う

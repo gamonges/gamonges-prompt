@@ -16,6 +16,7 @@ description: 実装計画 plan.md をスタッフエンジニア視点でレビ�
 | 補助ドキュメント | 読むタイミング |
 |------------------|----------------|
 | `./reference/report-template.md` | フェーズ 4 で `plan-review.md` を出力する時 |
+| `../review/reference/codex-reviewer.md` | フェーズ 1 の後で Codex を起動する時 / フェーズ 4 の前に待ち合わせて指摘を写す時 / `--no-codex` の回の記録 |
 
 **条件付きで読む**:
 
@@ -29,6 +30,8 @@ description: 実装計画 plan.md をスタッフエンジニア視点でレビ�
 
 `$ARGUMENTS` で実装計画ファイルのパスを指定できる。省略時は `./tmp/plan.md` を使用する。
 
+`$ARGUMENTS` に `--no-codex` があれば取り除き、この回は Codex を起動しない（`/plan-lgtm` が 2 回目以降に付ける）。取り除いた残りを計画ファイルのパスとして読む（残りが空なら `./tmp/plan.md`）。フラグが無ければ Codex を起動する（単独の `/review-plan` は毎回 1 本）。
+
 ## ワークフロー上の位置付け
 
 | 前工程 | 本コマンド | 後工程 |
@@ -39,7 +42,7 @@ description: 実装計画 plan.md をスタッフエンジニア視点でレビ�
 
 以下のファイルが存在することを確認する:
 
-- `$ARGUMENTS`（指定がない場合は `./tmp/plan.md`）— 実装計画
+- 計画ファイル（`$ARGUMENTS` から `--no-codex` を取り除いた残り。空なら `./tmp/plan.md`。「パラメーター」節）— 実装計画
 - `./tmp/coupling-gate.md`（任意）— `/coupling-gate` の結合バランスチェック結果。存在する場合は指摘に統合する
 
 ファイルが存在しない場合:
@@ -92,7 +95,7 @@ description: 実装計画 plan.md をスタッフエンジニア視点でレビ�
 
 ### フェーズ 1: 実装計画の読み込み
 
-- [ ] 実装計画ファイル（`$ARGUMENTS` または `./tmp/plan.md`）を読み込む
+- [ ] 実装計画ファイル（「パラメーター」節で決めたパス。`--no-codex` は含めない）を読み込む
 - [ ] `./tmp/context.md` が存在する場合は、元の要件・コンテキストも読み込む
 - [ ] 計画の全体構造を把握する:
   - 概要・目的
@@ -100,6 +103,7 @@ description: 実装計画 plan.md をスタッフエンジニア視点でレビ�
   - 変更対象ファイル一覧
   - テスト方針
   - 影響範囲
+- [ ] Codex のレビュアーを起動する（`--no-codex` の回は起動しない）: `../review/reference/codex-reviewer.md` の「起動」に従い、`~/.claude/scripts/codex-run.sh new --out tmp/plan-review-codex.json` で `<out>` を作り、`~/.claude/scripts/codex-run.sh plan --plan <対象の計画ファイル> --out <out>` をバックグラウンドで起動して、フェーズ 2 に進む
 
 ### フェーズ 2: コードベース調査
 
@@ -118,6 +122,8 @@ description: 実装計画 plan.md をスタッフエンジニア視点でレビ�
 同じ抽象度で反復しても見逃される構造的欠陥（統合点見落とし / Decision 矛盾 / 並列性未定義 / 根拠なし断言 / 抽象 IF 放置 / 完了パス漏れ）は、**観点を意図的に切り替える**ことで検出する。
 
 **完了条件**: 下表の 3 観点すべてを通過し、かつ新規 finding が出なくなった時点。観点を跨いだ指摘が出た場合は、関連する観点に戻って再確認する。
+
+Codex はフェーズ 1 の後に 1 回だけ起動し、観点の往復のたびに呼び直さない。
 
 **打ち切り**: 観点間の往復が 3 巡しても新規 finding が止まらない場合は、収束していない旨と残る論点を `plan-review.md` の総合判定に併記して終了する（LGTM にはしない）。呼び出し元（`plan-lgtm`）が本 skill を最大 4 回呼ぶため、内側に上限がないと総コストの上界が定まらない。
 
@@ -183,6 +189,8 @@ description: 実装計画 plan.md をスタッフエンジニア視点でレビ�
 
 ### フェーズ 4: レビューレポート生成
 
+書き出す前に Codex の結果を取り込む。`--no-codex` の回は何も待たず、`tmp/plan-review-codex*.json` も読まずに「省略（--no-codex）」と記録する。起動した回は、前景の Bash で `~/.claude/scripts/codex-run.sh wait --out <out> --timeout-sec 570`（起動に使った `<out>`） を呼び（Bash ツールの `timeout` は `600000`）、`../review/reference/codex-reviewer.md` の「待ちが切れたとき」「結果の扱い」「写し方」に従って指摘を並べる。写した指摘にも上の総合判定の基準をそのまま当てる。待ちが切れても `plan-review.md` は書く。`plan-review.md` は取り込みが済んでから 1 回だけ書く（mtime の契約）。
+
 `./tmp/plan-review.md` にレポートテンプレート（`./reference/report-template.md`）へ沿って出力する。該当なしの区分はセクションごと省略する。
 
 **出力契約（変更禁止）**: 先頭ブロックに `**総合判定**: {LGTM|要修正|要再設計}` の行を**この表記のまま**含める。`plan-lgtm` がこの行を文字列一致で判定するため、表記を変えるとループが停止する。テンプレートは条件付き参照なので、この 1 行の契約だけは本文に置く（T6 の例外）。
@@ -193,6 +201,7 @@ description: 実装計画 plan.md をスタッフエンジニア視点でレビ�
 
 - **総合判定**（LGTM / 要修正 / 要再設計）
 - 各区分の指摘件数
+- `**Codex レビュー**:` の状態行（`plan-review.md` のヘッダと同じ文言）
 - 特に重要な指摘事項（Critical がある場合はその要約）
 - 次のステップの案内:
   - **LGTM の場合**: `/implement` で実装開始

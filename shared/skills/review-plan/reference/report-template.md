@@ -2,12 +2,15 @@
 
 `/review-plan` フェーズ 4 で `./tmp/plan-review.md` を出力する際の構成。該当なしの区分はセクションごと省略する。
 
+`**Codex レビュー**:` 行は `**総合判定**:` 行の後ろに置き、`**総合判定**:` 行は変えない（`plan-lgtm` がこの行を文字列一致で読む）。`**出所**:` 行は Codex の指摘を写した Critical・Warning・Note のどれにも付ける（書き方は `../../review/reference/codex-reviewer.md` の「写し方」）。
+
 ```markdown
 # 実装計画レビュー
 
 **対象**: {計画ファイルパス}
 **レビュー日**: {date}
 **総合判定**: {LGTM / 要修正 / 要再設計}
+**Codex レビュー**: {実施（gpt-6.1-sol、52 秒、指摘 1 件） / 未実施（理由） / 省略（実行者が Codex） / 省略（--no-codex）}
 
 ---
 
@@ -21,6 +24,7 @@
 
 ### C-1. {問題タイトル}
 **参照**: `plan.md:L{number}`
+**出所**: {Codex（gpt-6.1-sol） / Claude と Codex の両方}（Claude だけの指摘では行ごと省く）
 
 {詳細説明: 何が問題で、なぜ修正が必要か}
 
@@ -33,6 +37,7 @@
 
 ### W-1. {問題タイトル}
 **参照**: `plan.md:L{number}`
+**出所**: {Codex（gpt-6.1-sol） / Claude と Codex の両方}（Claude だけの指摘では行ごと省く）
 
 {詳細説明}
 
@@ -45,6 +50,7 @@
 
 ### N-1. {タイトル}
 **参照**: `plan.md:L{number}`
+**出所**: {Codex（gpt-6.1-sol） / Claude と Codex の両方}（Claude だけの指摘では行ごと省く）
 
 {詳細説明}
 
