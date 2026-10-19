@@ -99,7 +99,7 @@
   Agent(
     subagent_type: "test-auditor",
     description: "テスト変更監査",
-    prompt: "mode: change-audit\nplan_file: <絶対パス>\nrepo_root: <絶対パス>\nbase: <merge-base の SHA>\nref_plan_files: <元の plan.md の絶対パス>\n出力: test-audit の『変更監査』書式のみ（A–E。表が無い実行では A を「表なし」と書いて省略）"
+    prompt: "mode: change-audit\nplan_file: <絶対パス>\nrepo_root: <絶対パス>\nbase: <merge-base の SHA>\nref_plan_files: <元の plan.md の絶対パス>\n出力: test-audit の『変更監査』書式のみ（A–E。表が無い実行では、A の表との突き合わせを「表なし」とし、分岐の行だけを書く）"
   )
   ```
 
