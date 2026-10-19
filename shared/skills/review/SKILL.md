@@ -14,6 +14,7 @@ Perform comprehensive code review using specialized AI agents working in paralle
 | 補助ドキュメント | 読むタイミング |
 |------------------|----------------|
 | `./reference/project-detection.md` | Phase 1.5 でプロジェクト種別を判定する時 |
+| `./reference/codex-reviewer.md` | Phase 3 で Codex を起動する時 / Phase 4 で待ち合わせて指摘を写す時 |
 
 **条件付きで読む**:
 
@@ -259,7 +260,7 @@ Phase 3 で各サブエージェントには以下のみを渡す:
 
 **Unknown project** (`project_type = unknown`): 従来通り、変更ファイルの種類に基づいて全エージェントから選択する。
 
-Small scale の場合、最も関連性の高い2エージェントのみ起動する。
+Small scale の場合、最も関連性の高い2エージェントのみ起動する。この本数と上の Max agents は Claude のレビュアーだけを数える。Codex は規模によらず別に 1 本起動する（3 の末尾）。
 
 #### Backend / Database checklist (backend project only)
 
@@ -281,12 +282,15 @@ backend-reviewer / database-reviewer 起動時に渡すチェックリスト（�
 
 > **NOTE**: full diff、commit log、PR overview を prompt に inline すると agent 数 × 数百トークンの重複コストになるため、必ずスナップショット参照に統一する。
 
-Confirm every selected subagent has started. Re-launch any that failed.
+Codex のレビュアーも同じターンで起動する: `~/.claude/scripts/codex-run.sh review --base <base_branch の値> --out tmp/review/codex-review.json`（Phase 1 で取った `$base_branch` の値を書き込む。バックグラウンドの Bash は Phase 1 のシェル変数を持ち越さない。Claude のレビュアーと同じ `base...HEAD` を見る）。起動前の消去とバックグラウンドでの起動は `./reference/codex-reviewer.md` の「起動」に従う。
+
+Confirm every selected subagent has started. Re-launch any that failed. Codex は再起動の対象にしない（失敗は `--out` の `status` で返るので、Phase 4 で未実施として記録する）。
 
 ### Phase 4: Aggregate & Report
 
 #### 1. Collect & deduplicate
 
+- 最初に Codex を待ち合わせる: 前景の Bash で `~/.claude/scripts/codex-run.sh wait --out tmp/review/codex-review.json --timeout-sec 570` を呼び（Bash ツールの `timeout` は `600000`）、`./reference/codex-reviewer.md` の「待ちが切れたとき」「結果の扱い」「写し方」に従って Codex の指摘を他のレビュアーの指摘と並べてから、以下の重複統合に進む
 - Read each `./tmp/review/{agent}-review.md`
 - Merge identical issues into one finding, listing all agreeing agents: `[frontend・code-quality]`
 - Use **カテゴリタグ** for mechanical matching during deduplication
@@ -312,6 +316,7 @@ Provide the following to the user:
 1. **変更サマリ** — 修正の目的（1-2文）、アプローチ要点（2-3項目）、設計判断（該当時のみ）
 2. **👀 人間レビュー観点** — 最重要項目を最大5件（ファイルパス + 確認理由）
 3. **指摘サマリ** — Critical / Minor / Info 件数、優先対応項目
+   - `**Codex レビュー**:` の状態行（`./reference/codex-reviewer.md` の「記録の文言」。unified.md のヘッダと同じ文言）
 4. **出力ファイル** — `./tmp/review/unified.md` and `./tmp/review/*-review.md`
 
 > 成果物の HTML 化の提案とそのタイミングは AGENTS.md の Skills 共通規約に従う（本 skill では `unified.md` の生成完了が「完了報告」にあたる）。

@@ -91,6 +91,7 @@ install が失敗したとき・並行して実行したとき:
 bash shared/scripts/tests/test-guardrails.sh     # hook の挙動（Claude Code・Codex の両入力）。shared/scripts/ を編集したら
 bash shared/scripts/tests/test-setup-codex.sh    # setup.sh・verify・agents の TOML 生成の挙動（sandbox HOME）。setup.sh や codex/ を編集したら
 bash shared/scripts/tests/test-series-sync.sh    # series-sync の同期スクリプトの挙動（偽の gh。python3 と /usr/bin/python3）。series_sync.py を編集したら
+bash shared/scripts/tests/test-codex-run.sh      # codex-run.sh の挙動（偽の companion）。codex-run.sh を編集したら
 ```
 
 ### アンインストール
@@ -153,6 +154,8 @@ git pull
 | `/adr` / `/state-machine` / `/status` | ADR 生成 / 状態遷移図追加 / ワークフロー進捗表示 |
 | `/memory` / `/recall` | 記憶の保存・読み込み（実装は `agent-memory` skill に委譲） |
 | `/coupling-audit` / `/coupling-plan-diff` / `/coupling-precheck` / `/coupling-gate` | 結合(Coupling)モデルによる分析4種（既存コード棚卸し / Before-After差分分析 / 設計前整理 / plan.mdゲート） |
+
+`/review` と `/review-plan` は、Codex plugin（`codex@openai-codex`。`claude/settings.json` で有効化）で Codex のレビュアーを 1 本足す（`/plan-lgtm` の中では初回だけ）。plugin が無い・未ログインなどで使えなければ、レポートに「未実施（理由）」と書いて続行する。
 
 ### ユーティリティ系
 | スキル名 | 説明 |
