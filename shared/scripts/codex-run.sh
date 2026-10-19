@@ -1,12 +1,22 @@
 #!/usr/bin/env bash
 # /review・/review-plan から Codex plugin の companion を呼ぶラッパー。
 #
+#   codex-run.sh new    --out <基底のパス>               # 実行ごとの --out を 1 行出す（ファイルは作らない）
 #   codex-run.sh review --base <ref> --out <file>      # 差分のレビュー（skill はバックグラウンドで起動）
 #   codex-run.sh plan   --plan <file> --out <file>     # 計画のレビュー（同上）
 #   codex-run.sh wait   --out <file> [--timeout-sec N] # --out が現れるまで待つ（skill は前景で呼ぶ）
 #
-# 実行の終了コード: 0 成功 / 3 未実施 / 4 省略（実行者が Codex）/ 2 引数不正。
-# --out はどの終了でも、終わる時に 1 回だけ mv で置く。skill は「--out が在る＝実行が終わった」を
+# 実行（review・plan）の終了コード: 0 成功 / 3 未実施 / 4 省略（実行者が Codex）/ 2 引数不正。
+# new は 0 / 2、wait は 0（--out が在る）/ 3（時間切れ）/ 2（引数不正）。
+# オプションの値に -- で始まるものは取らない（空の値が展開で消えた形とみなし、引数不正にする）。
+# review・plan・wait の --out には、実行ごとに new で作ったパスを使う。時間切れが無いので前回の遅い
+# 実行が今回の実行の後で終わりうるが、別のパスにしか書かないので今回の結果を上書きしない。
+# --out の形: {"status","mode","model","elapsed_sec","reason","dropped","result"}。status は ok / skipped /
+# unavailable / usage。result と dropped（形の不正で除いた findings の件数）は ok のときだけ値を持ち、
+# 他は null。companion が成功で終わったのに出力が JSON でない・形が不正なとき、および除いた指摘が
+# あるときは、生の出力を <--out>.raw.txt に残す。
+# review・plan の --out は、--out を読み取れればどの終了でも（引数不正を含む）、終わる時に 1 回だけ
+# mv で置く。new・wait は --out を書かない。skill は「--out が在る＝実行が終わった」を
 # 前提に wait で待ち、分岐は exit code ではなく --out の status で行う（バックグラウンドの exit code は
 # 待ち合わせの時点で手元にあるとは限らないため）。
 #
@@ -24,8 +34,6 @@ MODEL="gpt-6.1-sol"
 DEFAULT_WAIT_SEC=570
 
 START=$(date +%s)
-# 実行の識別子。--out と <out>.owner に書き、wait が今回の実行の結果かを照合する
-RUN_ID="$$-$START"
 SUB=""
 OUT=""
 BASE_REF=""
@@ -34,9 +42,10 @@ WAIT_SEC="$DEFAULT_WAIT_SEC"
 STATUS=""
 REASON=""
 FINDINGS="null"
+# 形の不正で除いた指摘の件数。status:ok のときだけ数値
+DROPPED="null"
 RESULT_FILE=""
 WORKDIR=""
-OWNER=""
 
 # 文字列を JSON の文字列リテラルにする。finish は node を使わずに --out を書く
 # （node が無い経路・node より前で抜ける経路でも「在る＝終わった」を守るため）
@@ -65,9 +74,9 @@ write_log() {  # $1=elapsed
     else
         repo="$(basename "$(git rev-parse --show-toplevel 2>/dev/null || printf '%s' "$PWD")")"
     fi
-    line="$(printf '{"ts":%s,"mode":%s,"repo":%s,"model":%s,"status":%s,"reason":%s,"elapsed_sec":%d,"findings":%s}' \
+    line="$(printf '{"ts":%s,"mode":%s,"repo":%s,"model":%s,"status":%s,"reason":%s,"elapsed_sec":%d,"findings":%s,"dropped":%s}' \
         "$(json_str "$(date -u +%Y-%m-%dT%H:%M:%SZ)")" "$(json_str_or_null "$SUB")" "$(json_str "$repo")" \
-        "$(json_str "$MODEL")" "$(json_str "$STATUS")" "$(json_str_or_null "$REASON")" "$1" "$FINDINGS")"
+        "$(json_str "$MODEL")" "$(json_str "$STATUS")" "$(json_str_or_null "$REASON")" "$1" "$FINDINGS" "$DROPPED")"
     # 1 回の >> で 1 行を書く（同時に 2 本走っても行が混ざらない）
     { mkdir -p "$(dirname "$log")" && printf '%s\n' "$line" >>"$log"; } 2>/dev/null
 }
@@ -82,22 +91,15 @@ finish() {
         rc=3
     fi
     local elapsed=$(($(date +%s) - START))
-    # 後から始まった実行が持ち主になっていたら、--out を書かない。時間切れが無いので、前回の遅い
-    # 実行が今回の実行の後で終わりうる。この確認と mv の間に後の実行が始まる窓は残るので、
-    # 最終的な照合は wait が --out の run と <out>.owner を比べて行う（.owner は消さない）
-    if [[ -n "$OWNER" && "$(cat "$OWNER" 2>/dev/null)" != "$RUN_ID" ]]; then
-        STATUS="superseded"
-        OUT=""
-    fi
     if [[ -n "$OUT" ]]; then
         local result="null"
         if [[ "$STATUS" == "ok" && -s "$RESULT_FILE" ]]; then result="$(cat "$RESULT_FILE")"; fi
         mkdir -p "$(dirname "$OUT")" 2>/dev/null
         [[ -n "$WORKDIR" && -f "$WORKDIR/raw.txt" ]] && mv -f "$WORKDIR/raw.txt" "$OUT.raw.txt"
         # tmp に書いてから mv する。途中まで書かれた --out を wait が「終わった」と読まないため
-        printf '{"status":%s,"run":%s,"mode":%s,"model":%s,"elapsed_sec":%d,"reason":%s,"result":%s}\n' \
-            "$(json_str "$STATUS")" "$(json_str "$RUN_ID")" "$(json_str_or_null "$SUB")" "$(json_str "$MODEL")" "$elapsed" \
-            "$(json_str_or_null "$REASON")" "$result" >"$OUT.tmp.$$" && mv -f "$OUT.tmp.$$" "$OUT"
+        printf '{"status":%s,"mode":%s,"model":%s,"elapsed_sec":%d,"reason":%s,"dropped":%s,"result":%s}\n' \
+            "$(json_str "$STATUS")" "$(json_str_or_null "$SUB")" "$(json_str "$MODEL")" "$elapsed" \
+            "$(json_str_or_null "$REASON")" "$DROPPED" "$result" >"$OUT.tmp.$$" && mv -f "$OUT.tmp.$$" "$OUT"
     fi
     # 運用ログの失敗で rc と --out を変えない
     write_log "$elapsed" || true
@@ -119,7 +121,13 @@ bad=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --out | --base | --plan | --timeout-sec)
-            if [[ $# -lt 2 ]]; then bad="$1 に値が無い"; break; fi
+            # 空の値が展開で消えると、次のオプション名が値の位置に来る。値として取ると後ろの --out を
+            # 読めず、--out が書かれないまま wait が時間切れになる
+            if [[ $# -lt 2 || "$2" == --* ]]; then
+                bad="${bad:-$1 に値が無い}"
+                shift
+                continue
+            fi
             case "$1" in
                 --out) OUT="$2" ;;
                 --base) BASE_REF="$2" ;;
@@ -130,13 +138,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             # --out を読み取れるよう、不正があっても最後まで読む
-            bad="未知の引数: $1"
+            bad="${bad:-未知の引数: $1}"
             shift
             ;;
     esac
 done
 
 case "$SUB" in
+    new) ;;
     review) [[ -n "$BASE_REF" ]] || bad="${bad:-review には --base が要る}" ;;
     plan)
         if [[ -z "$PLAN" ]]; then
@@ -152,13 +161,37 @@ esac
 
 if [[ -n "$bad" ]]; then
     echo "codex-run.sh: ${bad}" >&2
-    echo "usage: codex-run.sh review --base <ref> --out <file> | plan --plan <file> --out <file> | wait --out <file> [--timeout-sec N]" >&2
-    if [[ -n "$OUT" && "$SUB" != "wait" ]]; then
+    echo "usage: codex-run.sh new --out <file> | review --base <ref> --out <file> | plan --plan <file> --out <file> | wait --out <file> [--timeout-sec N]" >&2
+    # new の --out は基底のパスで、wait の --out は実行の結果。どちらにも usage を書かない
+    if [[ -n "$OUT" && "$SUB" != "wait" && "$SUB" != "new" ]]; then
         trap finish EXIT
         STATUS="usage"
         REASON="$bad"
     fi
     exit 2
+fi
+
+# ------------------------------------------------------------ new
+
+# 基底のパスの basename に実行の識別子を挟む（ディレクトリ名の . では分けない）
+if [[ "$SUB" == "new" ]]; then
+    dir="$(dirname "$OUT")"
+    base="$(basename "$OUT")"
+    stem="$base"
+    ext=""
+    if [[ "$base" == ?*.* ]]; then
+        stem="${base%.*}"
+        ext=".${base##*.}"
+    fi
+    id="$(date +%Y%m%d-%H%M%S)-$$"
+    path="$dir/$stem.$id$ext"
+    n=1
+    while [[ -e "$path" ]]; do
+        path="$dir/$stem.$id-$n$ext"
+        n=$((n + 1))
+    done
+    printf '%s\n' "$path"
+    exit 0
 fi
 
 # ------------------------------------------------------------ wait
@@ -167,15 +200,9 @@ fi
 if [[ "$SUB" == "wait" ]]; then
     deadline=$(($(date +%s) + WAIT_SEC))
     while :; do
-        # .owner があれば、その実行の結果（run が一致する --out）だけを「現れた」とみなす。
-        # 前回の遅い実行が、持ち主の確認の直後に --out を置いた場合を読まないため
         if [[ -e "$OUT" ]]; then
-            owner="$(cat "$OUT.owner" 2>/dev/null || true)"
-            run="$(sed -n 's/^{"status":"[a-z]*","run":"\([^"]*\)".*/\1/p' "$OUT" | head -1)"
-            if [[ -z "$owner" || "$run" == "$owner" ]]; then
-                sed -n 's/^{"status":"\([a-z]*\)".*/\1/p' "$OUT" | head -1
-                exit 0
-            fi
+            sed -n 's/^{"status":"\([a-z]*\)".*/\1/p' "$OUT" | head -1
+            exit 0
         fi
         if [[ $(date +%s) -ge $deadline ]]; then
             echo "codex-run.sh: ${WAIT_SEC} 秒待っても --out が現れない" >&2
@@ -191,8 +218,6 @@ trap finish EXIT
 mkdir -p "$(dirname "$OUT")"
 # 前回の結果を今回のものとして読ませない
 rm -f "$OUT" "$OUT.raw.txt"
-OWNER="$OUT.owner"
-printf '%s\n' "$RUN_ID" >"$OWNER"
 
 # 完全一致で見る。Claude Code 側にも CODEX_COMPANION_* が入っているので、前方一致だと誤判定する
 if [[ -n "${CODEX_THREAD_ID:-}" ]]; then
@@ -297,44 +322,68 @@ verdict="$("$NODE" -e '
         && str(f.title) && str(f.body) && str(f.file) && line(f.line_start) && line(f.line_end)
         && typeof f.confidence === "number" && f.confidence >= 0 && f.confidence <= 1
         && typeof f.recommendation === "string";
+    // 全体の形だけを見る。要素の不正は下で 1 件ずつ除く（行番号の無い計画全体への指摘などが混ざっても、
+    // 1 件の不正で全件を捨てない）
     const valid = (r) => isObj(r) && ["approve", "needs-attention"].includes(r.verdict)
-        && Array.isArray(r.findings) && r.findings.every(finding);
+        && Array.isArray(r.findings);
     let result;
+    let rawText;
     if (mode === "review") {
         if (rc !== 0) {
             let pe = null;
             try { pe = JSON.parse(stdout).parseError; } catch (e) {}
             fail(stderr || (pe && "parseError: " + pe) || "companion が rc=" + rc + " で終わった");
         }
-        // exit 0 なのに JSON でないのは想定外（例外で落とし、EXIT trap に任せる）
-        const o = JSON.parse(stdout);
+        // exit 0 でも stdout の前に警告行が付くなどで JSON でないことがある。原因を追えるよう生の出力を残す
+        let o;
+        try { o = JSON.parse(stdout); } catch (e) {
+            fs.writeFileSync(rawF, stdout);
+            const err = stderr.split("\n")[0];
+            fail("companion の出力が JSON でない（生の出力は --out と同じ場所の .raw.txt）" + (err ? ": " + err : ""));
+        }
         if (o.parseError) fail("parseError: " + o.parseError);
         if (!valid(o.result)) {
             fs.writeFileSync(rawF, stdout);
             fail("result の形が不正（verdict・findings の項目）");
         }
         result = o.result;
+        rawText = stdout;
     } else {
         // task --json はエラー文を持たず、turn 中の失敗の文言はジョブログにだけ残る
         let o = null;
         try { o = JSON.parse(stdout); } catch (e) {}
         if (rc !== 0 || !o || o.status !== 0) fail(stderr || "turn が失敗（詳細はジョブログ）");
         const raw = String(o.rawOutput == null ? "" : o.rawOutput);
-        const m = raw.match(/```(?:json)?[ \t]*\n([\s\S]*?)\n[ \t]*```/);
+        // モデルは指示に反して前に別の囲み（text・bash など）を付けることがあるので、最初の囲みに決め打ちしない。
+        // json の囲み → 全文 → その他の囲みの順に、形が合う最初のものを使う
+        const fences = [...raw.matchAll(/```([^\n`]*)\n([\s\S]*?)\n[ \t]*```/g)];
+        const candidates = [
+            ...fences.filter((f) => f[1].trim() === "json").map((f) => f[2]),
+            raw,
+            ...fences.filter((f) => f[1].trim() !== "json").map((f) => f[2]),
+        ];
         let r = null;
-        try { r = JSON.parse(m ? m[1] : raw); } catch (e) {}
+        for (const c of candidates) {
+            let v = null;
+            try { v = JSON.parse(c); } catch (e) {}
+            if (valid(v)) { r = v; break; }
+        }
         if (!valid(r)) {
             fs.writeFileSync(rawF, raw);
             fail("出力が想定の JSON でない（生の出力は --out と同じ場所の .raw.txt）");
         }
         result = r;
+        rawText = raw;
     }
-    fs.writeFileSync(resF, JSON.stringify(result));
-    process.stdout.write(String(result.findings.length));
+    const kept = result.findings.filter(finding);
+    const dropped = result.findings.length - kept.length;
+    if (dropped > 0) fs.writeFileSync(rawF, rawText);
+    fs.writeFileSync(resF, JSON.stringify({ ...result, findings: kept }));
+    process.stdout.write(kept.length + " " + dropped);
 ' "$SUB" "$WORKDIR/run.out" "$WORKDIR/run.err" "$rc" "$RESULT_FILE" "$WORKDIR/raw.txt")" || nrc=$?
 
 case "$nrc" in
-    0) FINDINGS="$verdict"; STATUS="ok"; exit 0 ;;
+    0) FINDINGS="${verdict%% *}"; DROPPED="${verdict##* }"; STATUS="ok"; exit 0 ;;
     10) unavailable "$verdict" ;;
     *) exit "$nrc" ;;
 esac

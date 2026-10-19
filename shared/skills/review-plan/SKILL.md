@@ -103,7 +103,7 @@ description: 実装計画 plan.md をスタッフエンジニア視点でレビ�
   - 変更対象ファイル一覧
   - テスト方針
   - 影響範囲
-- [ ] Codex のレビュアーを起動する（`--no-codex` の回は起動しない）: `../review/reference/codex-reviewer.md` の「起動」に従い、`~/.claude/scripts/codex-run.sh plan --plan <対象の計画ファイル> --out tmp/plan-review-codex.json` をバックグラウンドで起動して、フェーズ 2 に進む
+- [ ] Codex のレビュアーを起動する（`--no-codex` の回は起動しない）: `../review/reference/codex-reviewer.md` の「起動」に従い、`~/.claude/scripts/codex-run.sh new --out tmp/plan-review-codex.json` で `<out>` を作り、`~/.claude/scripts/codex-run.sh plan --plan <対象の計画ファイル> --out <out>` をバックグラウンドで起動して、フェーズ 2 に進む
 
 ### フェーズ 2: コードベース調査
 
@@ -189,7 +189,7 @@ Codex はフェーズ 1 の後に 1 回だけ起動し、観点の往復のた�
 
 ### フェーズ 4: レビューレポート生成
 
-書き出す前に Codex の結果を取り込む。`--no-codex` の回は何も待たず、`tmp/plan-review-codex.json` も読まずに「省略（--no-codex）」と記録する。起動した回は、前景の Bash で `~/.claude/scripts/codex-run.sh wait --out tmp/plan-review-codex.json --timeout-sec 570` を呼び（Bash ツールの `timeout` は `600000`）、`../review/reference/codex-reviewer.md` の「待ちが切れたとき」「結果の扱い」「写し方」に従って指摘を並べる。写した指摘にも上の総合判定の基準をそのまま当てる。待ちが切れても `plan-review.md` は書く。`plan-review.md` は取り込みが済んでから 1 回だけ書く（mtime の契約）。
+書き出す前に Codex の結果を取り込む。`--no-codex` の回は何も待たず、`tmp/plan-review-codex*.json` も読まずに「省略（--no-codex）」と記録する。起動した回は、前景の Bash で `~/.claude/scripts/codex-run.sh wait --out <out> --timeout-sec 570`（起動に使った `<out>`） を呼び（Bash ツールの `timeout` は `600000`）、`../review/reference/codex-reviewer.md` の「待ちが切れたとき」「結果の扱い」「写し方」に従って指摘を並べる。写した指摘にも上の総合判定の基準をそのまま当てる。待ちが切れても `plan-review.md` は書く。`plan-review.md` は取り込みが済んでから 1 回だけ書く（mtime の契約）。
 
 `./tmp/plan-review.md` にレポートテンプレート（`./reference/report-template.md`）へ沿って出力する。該当なしの区分はセクションごと省略する。
 

@@ -3,7 +3,7 @@
 #
 # 守りたいのは「どの経路で終わっても --out を 1 回だけ書く（在る＝終わった）」「companion が
 # exit 0 でも parseError や形の不正を成功にしない」「Codex 上では companion を呼ばない」
-# 「後から始まった実行の結果を前の実行が上書きしない」。どれも壊れると skill が黙って Codex を省くか、
+# 「実行ごとに別の --out に書き、前の遅い実行が今回の結果を上書きしない」。どれも壊れると skill が黙って Codex を省くか、
 # 前回の結果を今回のものとして読むだけで、通常の動作確認では気づけない。
 #
 # 実物の Codex には一切つながない。CODEX_RUN_PLUGIN_ROOT で偽の companion（node で動く .mjs）を
@@ -59,6 +59,10 @@ assert_has() {  # $1=名前 $2=出力 $3=含むべき文字列
 
 assert_not_has() {  # $1=名前 $2=出力 $3=含まないはずの文字列
     if [[ "$2" != *"$3"* ]]; then pass "$1"; else fail "$1（「$3」がある）: ${2:0:400}"; fi
+}
+
+assert_match() {  # $1=名前 $2=出力 $3=正規表現（ERE）
+    if [[ "$2" =~ $3 ]]; then pass "$1"; else fail "$1（「${2:0:300}」が /$3/ に一致しない）"; fi
 }
 
 assert_true() {  # $1=名前 $2=条件の説明（失敗時） 以降=test の式
@@ -151,7 +155,8 @@ if (sub === "adversarial-review") {
     switch (mode) {
         case "ok": print({ ...base, result, parseError: null }); process.exit(0);
         case "slow": await sleep(3000); print({ ...base, result: { ...result, summary: "slow" }, parseError: null }); process.exit(0);
-        case "badfinding": print({ ...base, result: { ...result, findings: [{}] }, parseError: null }); process.exit(0);
+        case "badfinding": print({ ...base, result: { ...result, findings: [findings[0], {}] }, parseError: null }); process.exit(0);
+        case "badshape": print({ ...base, result: { ...result, findings: "none" }, parseError: null }); process.exit(0);
         case "parseerror": print({ ...base, result: null, parseError: "stream disconnected before completion: boom" }); process.exit(0);
         case "noresult": print({ ...base, parseError: null }); process.exit(0);
         case "fail": process.stderr.write("codex exploded: rate limited\n"); process.exit(1);
@@ -170,9 +175,15 @@ if (sub === "task") {
     const base = { threadId: "th", touchedFiles: [], reasoningSummary: null };
     switch (mode) {
         case "plan_ok": print({ ...base, status: 0, rawOutput: "```json\n" + JSON.stringify(result) + "\n```" }); process.exit(0);
+        case "plan_prefixed": print({ ...base, status: 0, rawOutput: "```text\nメモ\n```\n\n```json\n" + JSON.stringify(result) + "\n```" }); process.exit(0);
+        case "plan_order": {
+            const other = { ...result, verdict: "approve" };
+            print({ ...base, status: 0, rawOutput: "```\n" + JSON.stringify(other) + "\n```\n\n```json\n" + JSON.stringify(result) + "\n```" }); process.exit(0);
+        }
+        case "plan_bare": print({ ...base, status: 0, rawOutput: "結果:\n```\n" + JSON.stringify(result) + "\n```" }); process.exit(0);
         case "plan_notjson": print({ ...base, status: 0, rawOutput: "I could not produce JSON" }); process.exit(0);
         case "plan_badfinding": {
-            const bad = { ...result, findings: [{ ...findings[0], severity: "blocker" }] };
+            const bad = { ...result, findings: [findings[0], { ...findings[0], line_start: 0 }, { ...findings[0], file: "" }, { ...findings[0], severity: "blocker" }] };
             print({ ...base, status: 0, rawOutput: JSON.stringify(bad) }); process.exit(0);
         }
         case "plan_fail": print({ ...base, status: 1, rawOutput: "" }); process.exit(1);
@@ -197,6 +208,8 @@ assert_eq "T1 model" "$MODEL" "$(jget "$OUT" o.model)"
 assert_eq "T1 reason は null" null "$(jget "$OUT" o.reason)"
 assert_has "T1 argv" "$(calls)" "adversarial-review --json --model $MODEL --base main -C $TARGET"
 assert_has "T1 setup を先に呼ぶ" "$(calls | head -1)" "setup --json"
+assert_eq "T1 除いた指摘が無ければ dropped は 0" 0 "$(jget "$OUT" o.dropped)"
+assert_true "T1 除いた指摘が無ければ .raw.txt を作らない" "作られている" test ! -e "$OUT.raw.txt"
 
 new_case T2
 FAKE_MODE=parseerror cr review --base main --out "$OUT"
@@ -283,6 +296,24 @@ assert_eq "T10 囲みの中の JSON を取り出す" needs-attention "$(jget "$O
 assert_has "T10 argv" "$(calls)" "task --json --model $MODEL --prompt-file"
 assert_not_has "T10 --write を付けない" "$(calls)" "--write"
 assert_has "T10 プロンプトに計画ファイルの絶対パス" "$(cat "$CASE/prompt.txt" 2>/dev/null)" "$PLAN_FILE"
+assert_eq "T10 除いた指摘が無ければ dropped は 0" 0 "$(jget "$OUT" o.dropped)"
+assert_true "T10 除いた指摘が無ければ .raw.txt を作らない" "作られている" test ! -e "$OUT.raw.txt"
+
+new_case T10b
+# regression: json の囲みより前に別の囲みがあっても、json の囲みを取り出す
+FAKE_MODE=plan_prefixed cr plan --plan tmp/plan.md --out "$OUT"
+assert_rc "T10b regression: 前に text の囲みがあっても rc=0" 0 "$RC"
+assert_eq "T10b json の囲みの verdict" needs-attention "$(jget "$OUT" o.result.verdict)"
+
+new_case T10c
+FAKE_MODE=plan_bare cr plan --plan tmp/plan.md --out "$OUT"
+assert_rc "T10c 言語の付かない囲みだけでも rc=0" 0 "$RC"
+assert_eq "T10c 囲みの中の verdict" needs-attention "$(jget "$OUT" o.result.verdict)"
+
+new_case T10d
+# 形の合う候補が 2 つあるとき、前にある言語なしの囲みより json の囲みを使う
+FAKE_MODE=plan_order cr plan --plan tmp/plan.md --out "$OUT"
+assert_eq "T10d json の囲みを優先する" needs-attention "$(jget "$OUT" o.result.verdict)"
 
 new_case T11
 FAKE_MODE=plan_notjson cr plan --plan tmp/plan.md --out "$OUT"
@@ -340,6 +371,21 @@ cr plan --plan tmp/no-such-plan.md --out "$OUT"
 assert_rc "T14h 計画ファイルが無ければ rc=2" 2 "$RC"
 assert_has "T14h reason に計画ファイル" "$(jget "$OUT" o.reason)" "計画ファイルが無い"
 
+new_case T14j
+# regression: zsh で空の未クォート変数が消え、--base の値の位置に次のオプション名が来た形
+cr review --base --out "$OUT"
+assert_rc "T14j regression: --base の値が -- で始まれば rc=2" 2 "$RC"
+assert_eq "T14j 後ろの --out を読んで status:usage を書く" usage "$(jget "$OUT" o.status)"
+assert_has "T14j reason に欠けたオプション" "$(jget "$OUT" o.reason)" "--base に値が無い"
+
+new_case T14k
+cr review --base --bogus --out "$OUT"
+assert_eq "T14k 最初の不正を後の未知の引数で上書きしない" "--base に値が無い" "$(jget "$OUT" o.reason)"
+
+new_case T14l
+cr review --bogus --base --out "$OUT"
+assert_eq "T14l 値の無いオプションで、前の不正を上書きしない" "未知の引数: --bogus" "$(jget "$OUT" o.reason)"
+
 new_case T14i
 cr wait --out "$OUT" --timeout-sec abc
 assert_rc "T14i wait の --timeout-sec が整数でなければ rc=2" 2 "$RC"
@@ -359,6 +405,7 @@ assert_eq "T15 status" ok "$(jget "$CASE/line.json" o.status)"
 assert_eq "T15 findings" 2 "$(jget "$CASE/line.json" o.findings)"
 assert_eq "T15 repo" target-repo "$(jget "$CASE/line.json" o.repo)"
 assert_eq "T15 elapsed_sec は数値" number "$(jget "$CASE/line.json" 'typeof o.elapsed_sec')"
+assert_eq "T15 dropped" 0 "$(jget "$CASE/line.json" o.dropped)"
 
 new_case T15b
 # worktree から実行しても、運用ログの repo はリポジトリの名前（worktree のディレクトリ名ではない）
@@ -399,40 +446,85 @@ new_case T20
 FAKE_MODE=badjson cr review --base main --out "$OUT"
 assert_rc "T20 壊れた JSON（想定外の失敗）は rc=3" 3 "$RC"
 assert_eq "T20 --out に status:unavailable" unavailable "$(jget "$OUT" o.status)"
+assert_has "T20 regression: reason に JSON でない旨（想定外の rc=1 にしない）" "$(jget "$OUT" o.reason)" "JSON でない"
+assert_has "T20 生の出力を <out>.raw.txt に残す" "$(cat "$OUT.raw.txt" 2>/dev/null)" "{broken"
 
 new_case T27
-# 前回の遅い実行（A）が終わる前に今回の実行（B）が始まり、B が先に終わる
-(cd "$TARGET" && FAKE_MODE=slow CODEX_RUN_LOG="$CASE/runs.jsonl" "$BASH_BIN" "$CR" review --base main --out "$OUT") >/dev/null 2>&1 &
+# 前回の遅い実行（A）が終わる前に今回の実行（B）が始まり、B が先に終わる。--out は実行ごとに別
+A_OUT="$CASE/a.json"
+B_OUT="$CASE/b.json"
+(cd "$TARGET" && FAKE_MODE=slow "$BASH_BIN" "$CR" review --base main --out "$A_OUT") >/dev/null 2>&1 &
 bg=$!
 sleep 1
-cr review --base main --out "$OUT"
-assert_eq "T27 後の実行の結果が --out に在る" s "$(jget "$OUT" o.result.summary)"
-wait "$bg"
-assert_has "T27 前の実行は運用ログに superseded と残る" "$(cat "$CASE/runs.jsonl" 2>/dev/null)" '"status":"superseded"'
-assert_eq "T27 前の遅い実行は、後から終わっても --out を上書きしない" s "$(jget "$OUT" o.result.summary)"
-assert_eq "T27 持ち主の印は後の実行のまま" "$(jget "$OUT" o.run)" "$(cat "$OUT.owner" 2>/dev/null)"
-
-new_case T27b
-# 持ち主の確認の後に後の実行が始まり、前の実行が --out を置いた（確認と mv の間の窓）
-echo "later-run" >"$OUT.owner"
-echo '{"status":"ok","run":"earlier-run","mode":"review","model":"m","elapsed_sec":1,"reason":null,"result":null}' >"$OUT"
 start=$(date +%s)
+cr review --base main --out "$B_OUT"
+cr wait --out "$B_OUT" --timeout-sec 10
+elapsed=$(($(date +%s) - start))
+assert_rc "T27 今回の実行の wait は rc=0" 0 "$RC"
+assert_true "T27 今回の実行と wait が、前の遅い実行の終了を待たない（2 秒未満）" "elapsed=${elapsed}" test "$elapsed" -lt 2
+wait "$bg"
+assert_eq "T27 前の遅い実行が後から終わっても、今回の --out は今回の結果のまま" s "$(jget "$B_OUT" o.result.summary)"
+assert_eq "T27 前の遅い実行は自分の --out に書く" slow "$(jget "$A_OUT" o.result.summary)"
+
+new_case T29
+# regression: 前回の実行の .owner が残っていても、引数不正（usage）の --out を wait が読む
+echo "old-run" >"$OUT.owner"
+cr review --out "$OUT"
 cr wait --out "$OUT" --timeout-sec 2
-assert_rc "T27b run が持ち主と違う --out は「現れた」とみなさない" 3 "$RC"
-echo '{"status":"ok","run":"later-run","mode":"review","model":"m","elapsed_sec":1,"reason":null,"result":null}' >"$OUT"
-cr wait --out "$OUT" --timeout-sec 2
-assert_rc "T27b run が持ち主と一致すれば戻る" 0 "$RC"
+assert_rc "T29 regression: usage の --out を wait が rc=0 で読む" 0 "$RC"
+assert_eq "T29 stdout に usage" usage "$(cat "$CASE/stdout")"
+
+new_case T30
+# regression: 実行中に --out のディレクトリが掃除されても（/review の Phase 1）、終了時に結果を書く
+OUT="$CASE/review/out.json"
+(cd "$TARGET" && FAKE_MODE=slow "$BASH_BIN" "$CR" review --base main --out "$OUT") >/dev/null 2>&1 &
+bg=$!
+sleep 1
+find "$CASE/review" -type f -delete
+wait "$bg"
+assert_eq "T30 regression: 掃除の後も --out に status:ok" ok "$(jget "$OUT" o.status)"
+
+new_case T31
+cr new --out tmp/x.json
+assert_rc "T31 new は rc=0" 0 "$RC"
+p1="$(cat "$CASE/stdout")"
+assert_match "T31 new は <stem>.<id>.<ext> を 1 行出す" "$p1" '^tmp/x\.[0-9]{8}-[0-9]{6}-[0-9]+\.json$'
+cr new --out tmp/x.json
+assert_true "T31 呼ぶたびに違う値" "1 回目=${p1} 2 回目=$(cat "$CASE/stdout")" test "$p1" != "$(cat "$CASE/stdout")"
+assert_eq "T31 ファイルを作らない" "" "$(ls "$TARGET"/tmp/x.* 2>/dev/null)"
+cr new --out tmp/review.d/x
+assert_match "T31 stem は basename で分ける（ディレクトリの . で分けない）" "$(cat "$CASE/stdout")" '^tmp/review\.d/x\.[0-9]{8}-[0-9]{6}-[0-9]+$'
+assert_true "T31 ディレクトリを作らない" "作られている" test ! -e "$TARGET/tmp/review.d"
+CODEX_RUN_LOG="$CASE/runs.jsonl" cr new --out tmp/x.json
+assert_true "T31 運用ログを書かない" "書かれている" test ! -e "$CASE/runs.jsonl"
+cr new
+assert_rc "T31 new に --out が無ければ rc=2" 2 "$RC"
+cr new --out "$OUT" --bogus
+assert_rc "T31 new の未知の引数は rc=2" 2 "$RC"
+assert_true "T31 new の引数不正では基底のパスに usage を書かない" "書かれている" test ! -e "$OUT"
 
 new_case T28
+# regression: 1 件の不正な finding で、残りの正しい指摘まで捨てない
 FAKE_MODE=badfinding cr review --base main --out "$OUT"
-assert_rc "T28 findings の要素が不正なら rc=3" 3 "$RC"
-assert_eq "T28 status:unavailable" unavailable "$(jget "$OUT" o.status)"
+assert_rc "T28 regression: findings の一部が不正でも rc=0" 0 "$RC"
+assert_eq "T28 status:ok" ok "$(jget "$OUT" o.status)"
+assert_eq "T28 正しい指摘だけが残る" 1 "$(jget "$OUT" o.result.findings.length)"
+assert_eq "T28 dropped に除いた件数" 1 "$(jget "$OUT" o.dropped)"
 assert_has "T28 生の出力を <out>.raw.txt に残す" "$(cat "$OUT.raw.txt" 2>/dev/null)" '"findings"'
 
 new_case T28b
 FAKE_MODE=plan_badfinding cr plan --plan tmp/plan.md --out "$OUT"
-assert_rc "T28b plan で severity が想定外なら rc=3" 3 "$RC"
-assert_has "T28b 生の出力を <out>.raw.txt に残す" "$(cat "$OUT.raw.txt" 2>/dev/null)" "blocker"
+assert_rc "T28b regression: plan で line_start が 0・file が空・severity が想定外の指摘があっても rc=0" 0 "$RC"
+assert_eq "T28b 正しい指摘だけが残る" 1 "$(jget "$OUT" o.result.findings.length)"
+assert_eq "T28b dropped に除いた件数" 3 "$(jget "$OUT" o.dropped)"
+assert_has "T28b 生の出力を <out>.raw.txt に残す" "$(cat "$OUT.raw.txt" 2>/dev/null)" '"line_start":0'
+
+new_case T28c
+FAKE_MODE=badshape cr review --base main --out "$OUT"
+assert_rc "T28c findings が配列でなければ rc=3" 3 "$RC"
+assert_eq "T28c status:unavailable" unavailable "$(jget "$OUT" o.status)"
+assert_eq "T28c ok 以外の dropped は null" null "$(jget "$OUT" o.dropped)"
+assert_has "T28c 生の出力を <out>.raw.txt に残す" "$(cat "$OUT.raw.txt" 2>/dev/null)" '"none"'
 
 # ============================================================ wait
 

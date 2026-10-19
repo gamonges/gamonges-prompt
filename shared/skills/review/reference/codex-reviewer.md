@@ -4,23 +4,24 @@
 
 | | `/review` | `/review-plan` |
 |---|---|---|
-| 起動するコマンド | `codex-run.sh review --base <base_branch の値> --out tmp/review/codex-review.json` | `codex-run.sh plan --plan <対象の計画ファイル> --out tmp/plan-review-codex.json` |
+| 基底のパス | `tmp/review/codex-review.json` | `tmp/plan-review-codex.json` |
+| 起動するコマンド | `codex-run.sh review --base <base_branch の値> --out <out>` | `codex-run.sh plan --plan <対象の計画ファイル> --out <out>` |
 | 起動する位置 | Phase 3 の 3（Claude のレビュアーと同じターン） | フェーズ 1 の直後 |
 | 待ち合わせる位置 | Phase 4 の 1 の先頭（他のレビュアーの結果を読む前） | フェーズ 4 の先頭（`plan-review.md` を書く前） |
 | 書き出すファイル | `tmp/review/unified.md` | `tmp/plan-review.md` |
 
-以下、`<out>` は上表の `--out` のパス。
+以下、`<out>` は「起動」の手順 1 で `new` が出したパス（実行ごとに違う）。
 
 ## 起動
 
-1. 前景の Bash で `rm -f <out> <out>.raw.txt` を打ち、終わってから次に進む（同じメッセージで起動と並べて送らない。走り始めたラッパーの出力を消さないため）。前回の結果を今回のものとして読まないため（ラッパーも開始時に消すが、起動前に消せば起動の遅れに左右されない）
+1. 前景の Bash で `~/.claude/scripts/codex-run.sh new --out <上表の基底のパス>` を打ち、出た 1 行を `<out>` として、以後の起動と `wait` の両方に書き込む（例: `tmp/review/codex-review.20261019-203000-12345.json`）。実行ごとにパスが違うので、前回の遅い実行が後から終わっても今回の結果を上書きしない。`new` が rc≠0 か出力が空なら、起動も `wait` もせず「未実施（codex-run.sh new が rc=N）」と記録する
 2. `Bash(run_in_background: true)` で上表のコマンドを起動し（`timeout` は指定しない）、Claude 側の作業を続ける。引数は値を書き込む（バックグラウンドの Bash は別の呼び出しで、前の呼び出しのシェル変数を持ち越さない。`$base_branch` のまま渡すと空になり `status:usage` で終わる）
 
 Codex 上で動いているときも同じように起動する。ラッパーがすぐに exit 4 で `status:skipped` を書くので、結果は「省略」になる。
 
 ## 起動しなかった回
 
-`/review-plan` に `--no-codex` が付いた回（`/plan-lgtm` の 2 回目以降）は、起動・`rm -f`・`wait`・`<out>` の読み込みを**どれもしない**。記録は「省略（--no-codex）」の 1 行だけ。前回の `<out>` が残っていても読まない（残っているのは revise 前の計画に対する指摘で、今回の計画には当たらない）。
+`/review-plan` に `--no-codex` が付いた回（`/plan-lgtm` の 2 回目以降）は、`new`・起動・`wait`・`<out>` の読み込みを**どれもしない**。記録は「省略（--no-codex）」の 1 行だけ。前回の `<out>` が残っていても読まない（残っているのは revise 前の計画に対する指摘で、今回の計画には当たらない）。
 
 以下の「待ち合わせ」「待ちが切れたとき」「結果の扱い」は、起動した回だけの手順。
 
@@ -42,7 +43,7 @@ Codex 上で動いているときも同じように起動する。ラッパー�
 | 127 | 未実施（codex-run.sh が無い） |
 | その他 | 未実施（wait が rc=N） |
 
-- バックグラウンドの実行は止めない。Codex の turn は plugin の broker 側で走るので、ラッパーを止めても turn は止まらない。実行はそのまま終わり、次の実行が始まっていればその結果を上書きしない（ラッパーが持ち主を確かめる）
+- バックグラウンドの実行は止めない。Codex の turn は plugin の broker 側で走るので、ラッパーを止めても turn は止まらない。実行はそのまま終わるが、前回の実行は別のパスに書くので、今回の結果を上書きしない
 - 統合ファイルを書いた後に完了通知が届いたら、統合ファイルを書き直さず、「Codex の結果は今回のレポートに反映しない」と 1 行だけ返す
 - 統合ファイルを書かずに終えると、`plan-lgtm` が mtime で完了を確かめるところでループが止まる
 
@@ -88,7 +89,7 @@ Codex 上で動いているときも同じように起動する。ラッパー�
 
 どの結果でも、統合ファイルのヘッダと完了報告の両方に、次のどれか 1 行を書く。括弧の中は決まった文言で、`未実施` のときだけ理由を書く（`skipped` の `reason` は書き足さない）:
 
-- `**Codex レビュー**: 実施（<model>、<elapsed_sec> 秒、指摘 <件数> 件）`。件数は `result.findings` の件数（重複をまとめる前）
+- `**Codex レビュー**: 実施（<model>、<elapsed_sec> 秒、指摘 <件数> 件）`。件数は `result.findings` の件数（重複をまとめる前）。`<out>` の `dropped` が 1 以上なら、括弧の末尾に `、形の不正で除いた指摘 <dropped> 件` を足す（除いた指摘の生の出力は `<out>.raw.txt`）
 - `**Codex レビュー**: 未実施（<理由>）`
 - `**Codex レビュー**: 省略（実行者が Codex）`
 - `**Codex レビュー**: 省略（--no-codex）`

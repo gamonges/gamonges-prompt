@@ -282,7 +282,7 @@ backend-reviewer / database-reviewer 起動時に渡すチェックリスト（�
 
 > **NOTE**: full diff、commit log、PR overview を prompt に inline すると agent 数 × 数百トークンの重複コストになるため、必ずスナップショット参照に統一する。
 
-Codex のレビュアーも同じターンで起動する: `~/.claude/scripts/codex-run.sh review --base <base_branch の値> --out tmp/review/codex-review.json`（Phase 1 で取った `$base_branch` の値を書き込む。バックグラウンドの Bash は Phase 1 のシェル変数を持ち越さない。Claude のレビュアーと同じ `base...HEAD` を見る）。起動前の消去とバックグラウンドでの起動は `./reference/codex-reviewer.md` の「起動」に従う。
+Codex のレビュアーも同じターンで起動する: `~/.claude/scripts/codex-run.sh review --base <base_branch の値> --out <out>`（`<out>` は `./reference/codex-reviewer.md` の「起動」の手順 1 で `new` が出したパス。Phase 1 で取った `$base_branch` の値を書き込む。バックグラウンドの Bash は Phase 1 のシェル変数を持ち越さない。Claude のレビュアーと同じ `base...HEAD` を見る）。起動前のパスの作成（`new`）とバックグラウンドでの起動は `./reference/codex-reviewer.md` の「起動」に従う。
 
 Confirm every selected subagent has started. Re-launch any that failed. Codex は再起動の対象にしない（失敗は `--out` の `status` で返るので、Phase 4 で未実施として記録する）。
 
@@ -290,7 +290,7 @@ Confirm every selected subagent has started. Re-launch any that failed. Codex �
 
 #### 1. Collect & deduplicate
 
-- 最初に Codex を待ち合わせる: 前景の Bash で `~/.claude/scripts/codex-run.sh wait --out tmp/review/codex-review.json --timeout-sec 570` を呼び（Bash ツールの `timeout` は `600000`）、`./reference/codex-reviewer.md` の「待ちが切れたとき」「結果の扱い」「写し方」に従って Codex の指摘を他のレビュアーの指摘と並べてから、以下の重複統合に進む
+- 最初に Codex を待ち合わせる: 前景の Bash で `~/.claude/scripts/codex-run.sh wait --out <out> --timeout-sec 570`（起動に使った `<out>`） を呼び（Bash ツールの `timeout` は `600000`）、`./reference/codex-reviewer.md` の「待ちが切れたとき」「結果の扱い」「写し方」に従って Codex の指摘を他のレビュアーの指摘と並べてから、以下の重複統合に進む
 - Read each `./tmp/review/{agent}-review.md`
 - Merge identical issues into one finding, listing all agreeing agents: `[frontend・code-quality]`
 - Use **カテゴリタグ** for mechanical matching during deduplication
