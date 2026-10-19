@@ -184,6 +184,8 @@ The main agent analyzes the PR holistically before launching subagents. This ana
    - **テナント分離**: organizationId フィルタの適用漏れリスク
    - **トランザクション境界**: startTx の粒度、ネストトランザクションの有無
 
+6. **横展開の確認対象** — この PR の中で導入・適用した規約・パターン（コードやテストの書き方。判別子・網羅性チェック・例外の変換の形・並行性の対策など）を列挙する。拾う元は、レビュー指摘を直したコミット（`fix` のコミット・コミットメッセージに指摘への対応とあるもの）と、`./tmp/fix-plan.md` があればその「横展開」欄。それぞれについて、この PR で足した兄弟（同じ形のもの。範囲の決め方は `fix` フェーズ 4 の「横展開確認」の (b) と同じ）に当たっていない箇所が無いかを、サブエージェントが確かめる対象として書く。PR の前からある兄弟は対象にしない（同じ不揃いがあれば 1 行添えるだけ）。ただし並行性の対策は、`fix` の (a) と同じく、PR の前からあるものを含めて同じ共有リソースに書き込む入口すべてを対象にする（書き込みの入口は 1 つでも漏れると対策を迂回されるため）。計画・コミットメッセージ・コメントで引き継ぎと明記したものは、引き継ぎ先を添えて対象から外す。該当が無ければ「該当なし」と書く
+
 ### Phase 2.5: Snapshot Shared Context
 
 並列起動するサブエージェントに同じ context を inline で配信すると重複コストが大きい（agent 数 × 数百トークン）。共有コンテキストをスナップショットとして保存し、サブエージェントには **「これらを読め」** とパス参照のみを渡す方式に切り替える。
@@ -195,7 +197,7 @@ mkdir -p tmp/review
 echo "$full_diff" > tmp/review/_pr-diff.snapshot
 echo "$commit_log" > tmp/review/_commits.snapshot
 
-# Phase 2 の分析結果（修正の目的 / アプローチ / 設計判断 / 影響範囲 / 人間レビュー観点）
+# Phase 2 の分析結果（修正の目的 / アプローチ / 設計判断 / 影響範囲 / 人間レビュー観点 / 横展開の確認対象）
 cat > tmp/review/_overview.md <<'EOF'
 # PR Overview
 
@@ -212,6 +214,9 @@ cat > tmp/review/_overview.md <<'EOF'
 ...
 
 ## 人間レビュー観点
+...
+
+## 横展開の確認対象
 ...
 EOF
 ```
@@ -268,7 +273,7 @@ backend-reviewer / database-reviewer 起動時に渡すチェックリスト（�
 - **スナップショットパス**:
   - `tmp/review/_pr-diff.snapshot` を読んで full diff を把握する旨
   - `tmp/review/_commits.snapshot` を読んでコミット履歴を把握する旨
-  - `tmp/review/_overview.md` を読んで Phase 2 の分析結果（目的・アプローチ・設計判断・影響範囲・人間レビュー観点）を把握する旨
+  - `tmp/review/_overview.md` を読んで Phase 2 の分析結果（目的・アプローチ・設計判断・影響範囲・人間レビュー観点）を把握する旨。`## 横展開の確認対象` に項目があれば、自分の観点に関わる項目について、この PR で足した兄弟に当たっていない箇所を指摘する旨（観点で受け持ちを分けるので、特定のサブエージェントには絞らない）
 - Subagent Output Template
 - Relevant `.cursor/rules/` content（agent ごとに異なるため inline は維持）
 - **CI exclusion rule**: 「CI で検出される問題（型エラー、lint 違反、テスト失敗）は指摘対象外」
