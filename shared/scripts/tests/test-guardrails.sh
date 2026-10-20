@@ -27,6 +27,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 HOOK="$REPO_ROOT/shared/scripts/hook-block-local-contract-link.sh"
 TMP_HOOK="$REPO_ROOT/shared/scripts/hook-block-tmp-commit.sh"
 CONFIRM_HOOK="$REPO_ROOT/shared/scripts/hook-confirm-destructive-git.sh"
+CURL_HOOK="$REPO_ROOT/shared/scripts/hook-confirm-external-curl.sh"
 LINT="$REPO_ROOT/shared/skills/verify-scenario/scripts/verification-lint.mjs"
 ORPHAN="$REPO_ROOT/shared/skills/worktree-cleanup/scripts/find-orphan-collections.mjs"
 
@@ -1268,7 +1269,7 @@ assert_orphan "W-16 ~/.claude.json も環境変数も無ければ ~/.context/.en
     "$(run_orphan "$w/home16" "" --snapshot "$W_SNAPSHOT")" 0 orphans '.milvusSource == "dotenv"'
 
 # =====================================================================
-# GD / CX: ask を返す hook 4 本の Claude 側の出力（ゴールデン）と、Codex 側の ask → deny 変換
+# GD / CX: ask を返す hook 5 本の Claude 側の出力（ゴールデン）と、Codex 側の ask → deny 変換
 # =====================================================================
 # Codex は permissionDecision: "ask"（確認プロンプト）に未対応で、未対応の値は hook の失敗として
 # 扱われ操作が続行する（ガードが黙って開く）。Codex の PreToolUse 入力は turn_id を持つ
@@ -1387,6 +1388,10 @@ assert_golden "GD-10 lint: _template/SKILL.md は検査対象外で素通し" li
 assert_golden "GD-11 lint: Edit の前処理失敗は ask（理由にパスを含む）" lint-skill-frontmatter-edit-prep-failed "$LINT_HOOK" "$LINT_EDIT_FAIL"
 assert_golden "GD-12 lint: MultiEdit の前処理失敗は ask" lint-skill-frontmatter-multiedit-prep-failed "$LINT_HOOK" "$LINT_MULTI_FAIL"
 assert_golden "GD-13 lint: 正しい Edit は素通し" lint-skill-frontmatter-edit-valid "$LINT_HOOK" "$LINT_EDIT_OK"
+GD_CURL_EXTERNAL="$(jq -nc '{tool_name:"Bash",tool_input:{command:"curl -s https://example.com"}}')"
+GD_CURL_LOCAL="$(jq -nc '{tool_name:"Bash",tool_input:{command:"curl -s http://localhost:3000/health"}}')"
+assert_golden "GD-14 external-curl: localhost 以外の curl は ask" confirm-external-curl-ask "$CURL_HOOK" "$GD_CURL_EXTERNAL"
+assert_golden "GD-15 external-curl: localhost の curl は素通し" confirm-external-curl-local-pass "$CURL_HOOK" "$GD_CURL_LOCAL"
 
 # --- CX: turn_id あり（Codex）では ask を deny にする。出力箇所ごとに 1 件 ---
 assert_ask_becomes_deny "CX-1 confirm-destructive" "$CONFIRM_HOOK" "$GD_DESTRUCTIVE" "破壊的 git 操作を検出しました"
@@ -1396,6 +1401,7 @@ assert_ask_becomes_deny "CX-4 lint: frontmatter 無し" "$LINT_HOOK" "$LINT_NO_F
 assert_ask_becomes_deny "CX-5 lint: トリガー語なし" "$LINT_HOOK" "$LINT_NO_TRIGGER" "トリガー語"
 assert_ask_becomes_deny "CX-6 lint: Edit の前処理失敗" "$LINT_HOOK" "$LINT_EDIT_FAIL" "前処理に失敗しました"
 assert_ask_becomes_deny "CX-7 lint: MultiEdit の前処理失敗" "$LINT_HOOK" "$LINT_MULTI_FAIL" "前処理に失敗しました"
+assert_ask_becomes_deny "CX-8 external-curl" "$CURL_HOOK" "$GD_CURL_EXTERNAL" "localhost 以外です"
 
 # deny を返す箇所は Codex でも変えない（[要確認] は「確認すれば進める」を意味するので、確認で進めない deny に付けない）
 out="$(printf '%s' "$(jq -c '. + {turn_id: "t-test"}' <<<"$GD_ADD_ALL")" | bash "$TMP_HOOK" 2>/dev/null)"
@@ -2078,6 +2084,61 @@ assert_lg "X replace_all の MultiEdit で description を消すと deny" deny \
 assert_lg "X replace_all なしの Edit は 1 回だけ置換する（name だけ変わり素通し）" pass \
     "$(lg_run "$(jq -nc --arg p "$LG_DIR/SKILL.md" '{file_path:$p,old_string:"description",new_string:"desc"}')" Edit)"
 lg_reset
+
+# =====================================================================
+# EC: hook-confirm-external-curl.sh の宛先判定
+# =====================================================================
+# permissions.ask の Bash(curl:*) を外し、宛先がすべてローカルの curl だけを素通しにする。
+# 素通しの側は「日常的に出る確認」を、ask の側は「外部への curl がガードを抜ける」を捕まえる
+ec_run() {  # $1=command → 判定（ask / deny / pass）。rc が 0 でなければ rc=<n>
+    local out rc
+    out="$(jq -nc --arg c "$1" '{tool_name:"Bash",tool_input:{command:$c}}' | bash "$CURL_HOOK" 2>/dev/null)"
+    rc=$?
+    if [[ "$rc" -ne 0 ]]; then echo "rc=$rc"; return; fi
+    if [[ -z "$out" ]]; then echo pass; else decision_of "$out"; fi
+}
+assert_ec() {  # $1=期待（ask|pass）, $2=command
+    assert_equal "EC $1: $2" "$1" "$(ec_run "$2")"
+}
+# 素通し: ローカル宛て・curl を起動しないコマンド
+assert_ec pass 'curl http://localhost:3000/api'
+assert_ec pass 'curl -s -X POST -H "Content-Type: application/json" -d "{\"a\":1}" localhost:8080/x | jq .'
+assert_ec pass 'curl -sSfL -o out.json http://127.0.0.1:5173'
+assert_ec pass 'curl "http://[::1]:8000/health"'
+assert_ec pass 'curl http://localhost:$PORT/api'
+assert_ec pass 'PORT=3 curl --url=http://app.localhost/x'
+assert_ec pass 'curl localhost > out.txt 2>&1'
+assert_ec pass 'sudo curl http://localhost'
+assert_ec pass 'timeout 5 curl -s localhost:3000/health'
+assert_ec pass 'curl --version'
+assert_ec pass 'git commit -m "fix curl handling"'
+assert_ec pass 'rg -n curl README.md'
+# ask: 外部宛て・宛先を特定できない・宛先を向け直すオプション
+assert_ec ask 'curl https://example.com'
+assert_ec ask 'curl localhost:3000 example.com'
+assert_ec ask 'curl http://localhost && curl https://evil.com'
+assert_ec ask 'curl localhost > out.txt https://evil.com'
+assert_ec ask 'curl http://localhost.evil.com'
+assert_ec ask 'curl http://user@evil.com@localhost'
+assert_ec ask 'curl http://$HOST/x'
+assert_ec ask 'curl -x http://evil.com http://localhost'
+assert_ec ask 'curl --resolve localhost:80:1.2.3.4 http://localhost'
+assert_ec ask 'curl -K conf http://localhost'
+assert_ec ask 'bash -c "curl https://evil.com"'
+assert_ec ask 'echo $(curl https://evil.com)'
+assert_ec ask 'echo `curl -s https://evil.com`'
+assert_ec ask 'sudo -u root curl https://evil.com'
+assert_ec ask 'timeout -s KILL 5 curl https://evil.com'
+assert_ec ask 'xargs -n 1 curl < urls.txt'
+assert_ec ask 'find . -exec curl https://evil.com \;'
+assert_ec ask 'curl "unterminated'
+# 判定の python3 が落ちたら ask に倒す（素通しにするとガードが黙って開く）
+EC_FAKE="$WORK/ec-fake-python"
+mkdir -p "$EC_FAKE"
+printf '#!/bin/sh\nexit 1\n' >"$EC_FAKE/python3"
+chmod +x "$EC_FAKE/python3"
+assert_equal "EC python3 が落ちたらローカル宛てでも ask" "ask" \
+    "$(decision_of "$(jq -nc '{tool_input:{command:"curl http://localhost"}}' | PATH="$EC_FAKE:$PATH" bash "$CURL_HOOK" 2>/dev/null)")"
 
 echo
 echo "${pass_count} passed / ${fail_count} failed"

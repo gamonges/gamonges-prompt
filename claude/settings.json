@@ -63,7 +63,6 @@
       "mcp__supabase__execute_sql"
     ],
     "ask": [
-      "Bash(curl:*)",
       "Bash(git checkout:*)",
       "Bash(git config:*)",
       "Bash(git push:*)",
@@ -128,6 +127,10 @@
           {
             "type": "command",
             "command": "/Users/gamouhiroto/.claude/scripts/hook-block-local-contract-link.sh"
+          },
+          {
+            "type": "command",
+            "command": "/Users/gamouhiroto/.claude/scripts/hook-confirm-external-curl.sh"
           }
         ]
       },

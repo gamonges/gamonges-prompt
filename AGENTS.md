@@ -80,6 +80,12 @@ export OTEL_EXPORTER_OTLP_HEADERS="DD-API-KEY=$CLAUDE_CODE_TELEMETRY_DD_API_KEY"
 - **足切り（基点に `pnpm-lock.yaml` が無ければ素通し）を fail-closed より前に置く**。逆順だと変数展開を含む commit が pnpm 非使用リポジトリでも `ask` になり、**本リポジトリ自身が該当する**。日常的に出る ask は「中身を読まずに承認する習慣」を育て、fail-open とは別方向で同じくガードを無効化する
 - **第一ガードは hook ではない**。`link-contract.sh` が張る `git update-index --skip-worktree` が経路を問わず巻き込みを防ぎ、hook は 2 枚目（Bash 経路のみ。Codex の `workdir` と wrapper 経由の commit は素通し）
 
+`hook-confirm-external-curl.sh`（PreToolUse / Bash）: 宛先が localhost 以外の curl を `ask` にする（localhost・`*.localhost`・127.0.0.0/8・`::1`・0.0.0.0 宛ては素通し）。
+
+- **`permissions.ask` の `Bash(curl:*)` は外した**。ルールは deny → ask → allow の順に評価され、否定も書けないので、「localhost なら許可」を permission ルールでは表せない
+- **判定に迷うものは `ask` に倒す**: host に `$`・glob を含む・userinfo の `@` が 2 つ以上・`-x`/`--proxy`/`--resolve`/`--connect-to`/`-K` 等の向け直し・`xargs` で起動する curl・解析失敗・python3 の失敗。ラッパー（`sudo -u root curl …`）はオプションを読み飛ばさず最初の curl を起動とみなす（読み飛ばしで見落とすとガードが開く）
+- **判定の python プログラムはコマンド置換の外で読む**。bash 3.2 は `$(...)` 内のヒアドキュメントにあるバッククォートで構文エラーになり、hook が何も出さずに終わる（全件素通し）
+
 ### hook の判断記録（Codex）
 
 `~/.codex/hooks.json` の自前エントリ（command が `/.claude/scripts/` を含む hook）は、`claude/settings.json` から生成する。定義の正本は 1 か所。

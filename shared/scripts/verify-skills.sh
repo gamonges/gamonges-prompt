@@ -12,7 +12,7 @@
 # 4. shared/scripts/ と ~/.claude/scripts/ の同期状態 (実体コピー方式のため。warn 止まり)
 # 5. skill listing の description 総文字数 (budget 監視。warn 止まり)
 # 6. settings.json に登録された hook の実体が存在すること
-# 7. (1) 同期状態を見る実装の対称性（逆走査・glob 対）と、複製した判定の一致（ask を返す hook 4 本の
+# 7. (1) 同期状態を見る実装の対称性（逆走査・glob 対）と、複製した判定の一致（ask を返す hook 5 本の
 #       decide_ask_or_deny は本体を多数決で比べ、setup.sh と複製した「自分のリンク」・マーカーの並びの判定は
 #       本体を比べる。「自前 hook」の判定は基準の文字列が両方にあるかを見る）
 #    (2) ガードレール系 hook（tmp-commit・contract-link・破壊的 git の 3 本）が grep -q へ直接パイプしていないこと
@@ -453,9 +453,9 @@ fn_def_count() {  # $1=関数名, $2=ファイル → 定義の数
 # 操作が続行する（= ガードが黙って開く）。ask を返す hook は decide_ask_or_deny を通し、Codex では deny に
 # 変える。共通ファイルを source しない（source の失敗は exit 2 以外になり、ガードが開く）ので、同じ関数を
 # 各 hook に複製している。複製の欠落・本体の食い違い・関数を通さない ask の直書きは、その hook だけを Codex で
-# 素通しにする。本体は多数決で比べる（先頭の 1 本を基準にすると、先頭が壊れたときに健全な 3 本を名指しする）
+# 素通しにする。本体は多数決で比べる（先頭の 1 本を基準にすると、先頭が壊れたときに健全な残りを名指しする）
 da_votes=""
-for hook_name in hook-confirm-destructive-git.sh hook-block-local-contract-link.sh hook-block-tmp-commit.sh hook-lint-skill-frontmatter.sh; do
+for hook_name in hook-confirm-destructive-git.sh hook-block-local-contract-link.sh hook-block-tmp-commit.sh hook-lint-skill-frontmatter.sh hook-confirm-external-curl.sh; do
     hook_path="${REPO_SHARED}/scripts/${hook_name}"
     if [ ! -f "$hook_path" ]; then
         warn "${hook_name} がありません（ask を返す hook の一覧が古い）"
@@ -480,10 +480,10 @@ if [ "$da_n" -ge 3 ]; then
         while read -r da_sum da_hook; do
             [ -n "$da_sum" ] || continue
             [ "$da_sum" = "$da_major" ] && continue
-            warn "${da_hook} の decide_ask_or_deny() の本体が他の 3 本と違う（複製の片側だけを直した。Codex での判定がこの hook だけ変わる）"
+            warn "${da_hook} の decide_ask_or_deny() の本体が多数派と違う（複製の片側だけを直した。Codex での判定がこの hook だけ変わる）"
         done <<<"$da_votes"
     else
-        warn "decide_ask_or_deny() の複製が一致しません（多数派が無い。全 4 本を見比べてください）"
+        warn "decide_ask_or_deny() の複製が一致しません（多数派が無い。全 5 本を見比べてください）"
     fi
 elif [ "$da_n" -eq 2 ]; then
     if [ "$(printf '%s' "$da_votes" | awk '{ print $1 }' | sort -u | grep -c . || true)" -ne 1 ]; then
@@ -524,7 +524,7 @@ for self_file in "$REPO_ROOT/setup.sh" "${BASH_SOURCE[0]}"; do
 done
 
 if [ "$warn_count" -eq "$sym_warn_before" ]; then
-    pass "対称性: 逆走査・glob 対・ask を返す 4 本の decide_ask_or_deny・自分のリンク・マーカーの並び・自前 hook の判定は揃っています（本体が一致）"
+    pass "対称性: 逆走査・glob 対・ask を返す 5 本の decide_ask_or_deny・自分のリンク・マーカーの並び・自前 hook の判定は揃っています（本体が一致）"
 fi
 
 

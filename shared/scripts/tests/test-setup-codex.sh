@@ -1769,7 +1769,7 @@ MINI="$(make_mini_repo ok)"
 out="$(verify_run "$HM1" "$MINI/shared/scripts/verify-skills.sh")"
 sec7="$(verify_section "$out" '7(1)')"
 assert_positive "C-28 健全: check 7(1) が実際に走った（見出しを切り出せている）" "$(count_tag "$sec7" '[PASS]')"
-assert_eq "C-28 健全: check 7(1) に warn が無い（ask を返す 4 本すべてに decide_ask_or_deny があり、直書きの ask が無い）" "0" "$(count_tag "$sec7" '[WARN]')"
+assert_eq "C-28 健全: check 7(1) に warn が無い（ask を返す 5 本すべてに decide_ask_or_deny があり、直書きの ask が無い）" "0" "$(count_tag "$sec7" '[WARN]')"
 
 # 「自分のリンク」の判定パターンが setup.sh と verify で食い違う（片方だけ直した）
 MINI4="$(make_mini_repo pattern)"
@@ -1832,33 +1832,36 @@ sym7() {  # $1=mini repo → check 7(1) の節
 }
 break_turn_id() { perl -i -pe 's/has\("turn_id"\)/has("turnid")/' "$1"; }
 
-# 1 本だけ違う: 多数決で、その 1 本を名指しする（先頭の 1 本を基準にすると、先頭が壊れたとき健全な 3 本を名指しする）
+# 1 本だけ違う: 多数決で、その 1 本を名指しする（先頭の 1 本を基準にすると、先頭が壊れたとき健全な残りを名指しする）
 for target in hook-lint-skill-frontmatter.sh hook-confirm-destructive-git.sh; do
     MD="$(make_mini_repo "da-one-$target")"
     break_turn_id "$MD/shared/scripts/$target"
     sec7="$(sym7 "$MD")"
     assert_contains "C-28 decide_ask_or_deny の本体が 1 本だけ違うと、その hook（${target}）を名指しする" "$sec7" "$target"
-    assert_eq "C-28 1 本だけ違うとき、名指しは 1 件だけ（健全な hook を名指ししない）" "1" "$(printf '%s\n' "$sec7" | grep -c '他の 3 本と違う')"
+    assert_eq "C-28 1 本だけ違うとき、名指しは 1 件だけ（健全な hook を名指ししない）" "1" "$(printf '%s\n' "$sec7" | grep -c '多数派と違う')"
 done
-# 2 本に別々の改変（過半数が無い）: 「一致しない」を 1 件だけ出す
+# 5 本のうち 3 本に別々の改変（3 票そろう多数派が無い）: 「一致しない」を 1 件だけ出す
 MD="$(make_mini_repo da-two)"
 break_turn_id "$MD/shared/scripts/hook-block-tmp-commit.sh"
 perl -i -pe 's/decision="deny"/decision="deny" # x/' "$MD/shared/scripts/hook-lint-skill-frontmatter.sh"
+perl -i -pe 's/local decision="ask"/local decision="ask" # y/' "$MD/shared/scripts/hook-confirm-external-curl.sh"
 assert_eq "C-28 過半数の無い食い違いは「一致しない」を 1 件だけ出す" "1" "$(sym7 "$MD" | grep -c '複製が一致しません')"
-# 2 本から関数を消し、残りの 2 本の一方を改変する: 「無い」×2 と、残り 2 本を直接比べた「一致しない」×1
+# 3 本から関数を消し、残りの 2 本の一方を改変する: 「無い」×3 と、残り 2 本を直接比べた「一致しない」×1
 MD="$(make_mini_repo da-two-left)"
-perl -i -0pe 's/decide_ask_or_deny\(\) \{/decide_removed() {/' "$MD/shared/scripts/hook-block-tmp-commit.sh" "$MD/shared/scripts/hook-confirm-destructive-git.sh"
+perl -i -0pe 's/decide_ask_or_deny\(\) \{/decide_removed() {/' "$MD/shared/scripts/hook-block-tmp-commit.sh" "$MD/shared/scripts/hook-confirm-destructive-git.sh" \
+    "$MD/shared/scripts/hook-confirm-external-curl.sh"
 break_turn_id "$MD/shared/scripts/hook-lint-skill-frontmatter.sh"
 sec7="$(sym7 "$MD")"
-assert_eq "C-28 関数が無い hook を 2 本とも名指しする" "2" "$(printf '%s\n' "$sec7" | grep -c 'decide_ask_or_deny() がありません')"
+assert_eq "C-28 関数が無い hook を 3 本とも名指しする" "3" "$(printf '%s\n' "$sec7" | grep -c 'decide_ask_or_deny() がありません')"
 assert_eq "C-28 票が 2 本なら直接比べ、食い違いを 1 件出す" "1" "$(printf '%s\n' "$sec7" | grep -c '複製が一致しません')"
-# 3 本から関数を消す: 関数の無い hook は票から外す（空の本体どうしが多数派になると、正しい残りの 1 本を名指しする）
+# 4 本から関数を消す: 関数の無い hook は票から外す（空の本体どうしが多数派になると、正しい残りの 1 本を名指しする）
 MD="$(make_mini_repo da-three-gone)"
 perl -i -0pe 's/decide_ask_or_deny\(\) \{/decide_removed() {/' "$MD/shared/scripts/hook-block-tmp-commit.sh" \
-    "$MD/shared/scripts/hook-confirm-destructive-git.sh" "$MD/shared/scripts/hook-block-local-contract-link.sh"
+    "$MD/shared/scripts/hook-confirm-destructive-git.sh" "$MD/shared/scripts/hook-block-local-contract-link.sh" \
+    "$MD/shared/scripts/hook-confirm-external-curl.sh"
 sec7="$(sym7 "$MD")"
-assert_eq "C-28 関数が無い 3 本を名指しする" "3" "$(printf '%s\n' "$sec7" | grep -c 'decide_ask_or_deny() がありません')"
-assert_eq "C-28 関数が残る 1 本を「他と違う」と名指ししない" "0" "$(printf '%s\n' "$sec7" | grep -c '他の 3 本と違う')"
+assert_eq "C-28 関数が無い 4 本を名指しする" "4" "$(printf '%s\n' "$sec7" | grep -c 'decide_ask_or_deny() がありません')"
+assert_eq "C-28 関数が残る 1 本を「他と違う」と名指ししない" "0" "$(printf '%s\n' "$sec7" | grep -c '多数派と違う')"
 # 定義が 2 つある: 実行時は後勝ちなのに、先頭の定義だけを比べると PASS する
 MD="$(make_mini_repo da-twice)"
 printf '%s\n' '' 'decide_ask_or_deny() {  # 2 つ目' '  echo shadow' '}' >>"$MD/shared/scripts/hook-lint-skill-frontmatter.sh"
