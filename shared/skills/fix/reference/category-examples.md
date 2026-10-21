@@ -7,7 +7,14 @@
 
 ユーザーはレビュー中に以下のフォーマットで修正項目を記録する（自由形式も受け付ける）:
 
+<!-- tmp-frontmatter: tmp/fixes.md -->
 ```markdown
+---
+type: Fix Request
+title: [対象機能名] の修正項目
+description: [修正項目の要約を 1 文]
+status: stable
+---
 # 修正項目
 
 ## 修正 1: [修正タイトル]

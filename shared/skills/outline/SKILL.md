@@ -78,7 +78,14 @@ context.md の情報量に基づいて対話の要否を判定する。
 
 ## 出力テンプレート
 
+<!-- tmp-frontmatter: tmp/outline.md -->
 ```markdown
+---
+type: Outline
+title: [タイトル]
+description: [アウトラインの要約を 1 文]
+status: stable
+---
 # [タイトル]
 
 ## メタ情報

@@ -6,10 +6,14 @@
 
 ## テンプレート
 
+<!-- tmp-frontmatter: tmp/context.md -->
 ```markdown
 ---
+type: Context
 mode: refactor
 title: {題材}
+description: {依頼の要約を 1 文}
+status: stable
 base_commit: {git rev-parse HEAD}
 ---
 

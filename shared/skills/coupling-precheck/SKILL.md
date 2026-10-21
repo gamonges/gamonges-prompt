@@ -58,6 +58,18 @@ description: `/design` 着手前に扱う概念・モジュール候補・想定
 
 `./tmp/coupling-precheck.md` に `coupling-anatomy` の標準フォーマットのうち**推測ベース変種**（想定モジュール名/概念名、根拠列は `context.md:L{number}`（または `strategic-ddd.md:L{number}`）や `(推測)` タグ）で出力する。
 
+出力の先頭には次の frontmatter を置く（書式は `python3 ~/.claude/scripts/knowledge.py spec`）:
+
+<!-- tmp-frontmatter: tmp/coupling-precheck.md -->
+```yaml
+---
+type: Coupling Precheck
+title: {題材} の結合の事前チェック
+description: {総合判定の要約を 1 文}
+status: stable
+---
+```
+
 ### フェーズ6: 完了報告
 
 - 洗い出したモジュール候補・結合関係の件数

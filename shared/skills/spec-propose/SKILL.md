@@ -10,7 +10,7 @@ disable-model-invocation: true
 **重要**: 変更対象は `openspec/changes/` ディレクトリのみに限定する。ソースコード・`tmp/` の変更は禁止。
 ## パラメーター
 
-`$ARGUMENTS` で change-name を指定できる。省略時は plan.md のタイトルから kebab-case で推定する。
+`$ARGUMENTS` で change-name を指定できる。省略時は plan.md のタイトル（H1。frontmatter の `title` ではない）から kebab-case で推定する。
 
 ## ワークフロー上の位置付け
 
@@ -48,7 +48,7 @@ disable-model-invocation: true
 ### フェーズ 2: change-name の決定
 
 - [ ] `$ARGUMENTS` が指定されている場合、その値を change-name とする
-- [ ] 未指定の場合、plan.md のタイトル（`# 実装計画: {タイトル}`）から kebab-case で推定する
+- [ ] 未指定の場合、plan.md のタイトル（先頭の frontmatter の後の最初の `# 実装計画: {タイトル}` 行。frontmatter の `title` ではない）から kebab-case で推定する
 - [ ] 推定した change-name をユーザーに提示し確認する
 - [ ] 同名の change が `openspec/changes/` に既に存在する場合、ユーザーに確認する（上書き or 別名）
 

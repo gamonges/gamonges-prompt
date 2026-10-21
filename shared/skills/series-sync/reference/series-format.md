@@ -22,10 +22,13 @@ PR の本文に描く全体像の見た目（見出し・凡例・classDef・表
 
 ## 節と書き手
 
+<!-- tmp-frontmatter: tmp/series.draft.md tmp/series.md -->
 ```markdown
 ---
 type: Series
 title: 注文の取込の改善
+description: 注文の取込の改善を 3 段・2 リポジトリで進めるシリーズの契約
+status: stable
 outline: /abs/path/outline-worktree/tmp/plan.md
 branch_prefix: feat/order-import-
 timestamp: 2026-01-01T10:00:00+09:00
@@ -215,9 +218,13 @@ series.md を書く口は 3 つだけで、どれも `<series.md>.lock` を `fcn
 
 series-init は、各リポジトリの worktree の `tmp/context.md` に次を書く（worktree が無い段は `tmp/handoff/<repo>.md` に同じ内容を置く）。
 
+<!-- tmp-frontmatter: tmp/context.md tmp/handoff/<repo>.md -->
 ```markdown
 ---
+type: Context
 title: 注文の取込の改善 — api（段 A・B）
+description: シリーズ「注文の取込の改善」の api の担当（段 A・B）の引き継ぎ
+status: stable
 base_commit: <worktree の HEAD>
 series: /abs/path/outline-worktree/tmp/series.md
 outline: /abs/path/outline-worktree/tmp/plan.md

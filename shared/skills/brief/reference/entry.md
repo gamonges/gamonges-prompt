@@ -30,9 +30,13 @@
 
 3・4 では、`./tmp/context.md` に次の形で書き出してから、そのファイルを入力にして各 skill の手順に入る。
 
+<!-- tmp-frontmatter: tmp/context.md -->
 ```markdown
 ---
+type: Context
 title: {依頼の要約（1 行）}
+description: {依頼の要約を 1 文}
+status: stable
 base_commit: {git rev-parse HEAD}
 ---
 

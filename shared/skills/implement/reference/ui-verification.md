@@ -25,17 +25,17 @@
 # /playwright-cli skill を経由して dev server を起動
 /playwright-cli navigate {URL}
 /playwright-cli resize 1440 900
-/playwright-cli screenshot tmp/screenshots/before-{feature}.png
+/playwright-cli screenshot tmp/_assets/screenshots/before-{feature}.png
 ```
 
-`tmp/screenshots/` ディレクトリは `.gitignore` 配下なのでコミット対象外。
+`tmp/_assets/screenshots/` ディレクトリは `.gitignore` 配下なのでコミット対象外。画像は文書と分けて `tmp/_assets/` に置く（tmp/ の目録 `tmp/index.md` には載らない）。
 
 ### 2. 実装後: 期待結果との照合
 
 ```bash
 /playwright-cli navigate {URL}
 /playwright-cli resize 1440 900
-/playwright-cli screenshot tmp/screenshots/after-{feature}.png
+/playwright-cli screenshot tmp/_assets/screenshots/after-{feature}.png
 ```
 
 両画像を視覚的に比較し、以下を確認:

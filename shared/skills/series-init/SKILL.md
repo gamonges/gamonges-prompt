@@ -30,7 +30,7 @@ disable-model-invocation: true
 
 ## 実行条件
 
-- 横断計画の H1 が `# 実装計画` で始まり、`## PR の段` の表がある。無ければ止めて、`/revise`（既存の計画に段を足す）か `/design` を案内する
+- 横断計画の H1（先頭の frontmatter の後の最初の `# ` 行）が `# 実装計画` で始まり、`## PR の段` の表がある。無ければ止めて、`/revise`（既存の計画に段を足す）か `/design` を案内する
 - LGTM を plan-lgtm と同じ 3 点で確かめる: `./tmp/plan-review.md` に `**総合判定**: LGTM` がある・その `**対象**:` が今回の計画・plan-review.md が計画より新しい。満たさなければ理由を見せ、続けるかキャンセルかを尋ねる（止めはしない。別の形でレビューした場合があるため）
 
 `$SYNC` は `python3 ~/.claude/skills/series-sync/scripts/series_sync.py`（`$SYNC` は本文の略記。実行するときは毎回展開して書く。シェル変数に入れて `$SYNC check …` とすると、zsh では引数に分かれずに失敗する）、`$S` は作る series.md のパス。
@@ -72,7 +72,7 @@ disable-model-invocation: true
 
 ### 4. 下書き → check → write
 
-1. 組んだ内容を下書き `./tmp/series.draft.md` に Write する。`## 段` のブランチ・PR の列は**空にする**（今の値は write が引き継ぐ。下書きに値を写すと、古い値で今の登録を上書きしうるため write が exit 3 で止める）。worktree の列には手順 2 で確認したパス（既存の worktree、または手順 6 で作るパス）を書く（worktree 列は series-init の持ち分で、`register --worktree` が段を絞るのに使う）。対象外にした段と handoff に回す段は空にする（write は worktree を引き継がないので、空がそのまま書かれる）。手順 6 で作れなかった段の列には作らなかったパスが残るが、`register --worktree` の絞り込みに当たらないだけで害は無い（直すなら手順 4 をやり直す）
+1. 組んだ内容を下書き `./tmp/series.draft.md` に Write する。frontmatter は `../series-sync/reference/series-format.md` の雛形どおりに書く（`description`・`status: stable` を含む。write は下書きの frontmatter をそのまま series.md に写すので、`status: draft` にしない）。`## 段` のブランチ・PR の列は**空にする**（今の値は write が引き継ぐ。下書きに値を写すと、古い値で今の登録を上書きしうるため write が exit 3 で止める）。worktree の列には手順 2 で確認したパス（既存の worktree、または手順 6 で作るパス）を書く（worktree 列は series-init の持ち分で、`register --worktree` が段を絞るのに使う）。対象外にした段と handoff に回す段は空にする（write は worktree を引き継がないので、空がそのまま書かれる）。手順 6 で作れなかった段の列には作らなかったパスが残るが、`register --worktree` の絞り込みに当たらないだけで害は無い（直すなら手順 4 をやり直す）
 2. `$SYNC check ./tmp/series.draft.md`。通らなければ下書きを直す。直しても 3 巡で通らなければ、残る `error:` を報告して止める
 3. `$SYNC write "$S" --from ./tmp/series.draft.md [--drop <手順 1 で外すと決めた段> …]` で書く
    - **series.md を Write・Edit で直接書かない。** 同時に走る別の worktree の `register` の登録を消すため。ブランチ・PR・`## 進捗`・`## メモ`・`timestamp` の引き継ぎも write がロックの中で行う（規則は series-format.md の「書き込みの規則」）

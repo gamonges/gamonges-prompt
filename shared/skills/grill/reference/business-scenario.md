@@ -72,11 +72,13 @@ QA 指摘の再発原因は「**同一機能に複数の入口と複数の出口
 
 frontmatter（`grill.md` と同型。`type` と **`title` が必須**、他は任意 — `title` は上記の同一性判定に使うため、未記入だと判定が成立しない）:
 
+<!-- tmp-frontmatter: tmp/scenario.md -->
 ```yaml
 ---
 type: Business Scenario
 title: <題材>                        # 同一題材かの判定に使う（**本ファイルでは必須**）
 description: <この変更で何が変わるかの要約>
+status: stable
 tags: [business-scenario, ...]
 timestamp: <最終更新日時 ISO8601>    # in-place 更新のたびに現在時刻へ上書き
 ---

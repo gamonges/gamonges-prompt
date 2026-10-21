@@ -37,7 +37,14 @@ PR が確定した後（ブランチから探す経路でも、引数で PR を�
 
 **File path rules**: Always use relative paths from project root with `L{number}` line format (e.g. `src/apps/app/src/routes/_staff/file.tsx:L42-50`). Never use bare file names.
 
+<!-- tmp-frontmatter: tmp/review/{agent-name}-review.md -->
 ```markdown
+---
+type: Review Report
+title: {Agent Name} Review — PR #{number}
+description: {このレビュアーの観点と指摘の要約を 1 文}
+status: stable
+---
 # {Agent Name} Review — PR #{number}
 
 ## レビュー結果
@@ -150,6 +157,18 @@ failed_checks=$(echo "$ci_checks" | jq -c '.[] | select(.bucket == "fail")')
 2. `gh run view <run-id> --log-failed | tail -n 30` で末尾 30 行を取得
 3. job 名 / bucket / link / log の末尾 30 行をまとめて `tmp/review/_ci-failures.md` に保存
 
+出力の先頭には次の frontmatter を置く（書式は `python3 ~/.claude/scripts/knowledge.py spec`）:
+
+<!-- tmp-frontmatter: tmp/review/_ci-failures.md -->
+```yaml
+---
+type: Review Report
+title: PR #{number} の CI の失敗
+description: {失敗した job の数と名前を 1 文}
+status: stable
+---
+```
+
 `gh pr checks` 実行不可（gh 未認証等）または空配列の場合は `_ci-failures.md` を作成しないだけで処理は続行する（CI 失敗未検出として扱う）。
 
 ### Phase 1.5: Detect Project Type
@@ -200,6 +219,12 @@ echo "$commit_log" > tmp/review/_commits.snapshot
 
 # Phase 2 の分析結果（修正の目的 / アプローチ / 設計判断 / 影響範囲 / 人間レビュー観点 / 横展開の確認対象）
 cat > tmp/review/_overview.md <<'EOF'
+---
+type: Review Report
+title: PR Overview
+description: 修正の目的・アプローチ・影響範囲の要約
+status: stable
+---
 # PR Overview
 
 ## 修正の目的

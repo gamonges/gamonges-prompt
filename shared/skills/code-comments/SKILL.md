@@ -93,6 +93,19 @@ AI は「離れた依存を見落とす」「親切に勝手に直す」「セ�
 3. アンチパターン該当（経緯転写 / 言い換え / コメントアウト旧コード）を抽出する。
 4. レビュー指摘由来のコメントは蒸留の要否を判定する（蒸留した結果コードで表現できるなら、コメントではなくコード修正を提案）。
 5. 指摘を `./tmp/comment-review.md` に `file_path:L{number}` 形式で出力する（残す / 削除 / 蒸留提案の区分付き）。
+
+出力の先頭には次の frontmatter を置く（書式は `python3 ~/.claude/scripts/knowledge.py spec`）:
+
+<!-- tmp-frontmatter: tmp/comment-review.md -->
+```yaml
+---
+type: Comment Review
+title: {対象} のコメントの見直し
+description: {残す・削除・蒸留の件数の要約を 1 文}
+status: stable
+---
+```
+
 6. 深い設計レビューが必要な場合は `/review` を案内する。
 
 > 単独実行は提案の出力に留める。実際の編集は `/implement` などコード変更スキルが行う。

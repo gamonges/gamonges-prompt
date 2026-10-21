@@ -49,6 +49,18 @@ description: 実装計画(plan.md)とgit diffを対象に、実装前後で結�
 
 `./tmp/coupling-plan-diff.md` に見取り図 + Before/After結合関係テーブル + 総合判定ブロックを出力する。
 
+出力の先頭には次の frontmatter を置く（書式は `python3 ~/.claude/scripts/knowledge.py spec`）:
+
+<!-- tmp-frontmatter: tmp/coupling-plan-diff.md -->
+```yaml
+---
+type: Coupling Plan Diff
+title: {計画の題材} の結合の Before/After
+description: {総合判定の要約を 1 文}
+status: stable
+---
+```
+
 ### フェーズ6: artifact生成（`--artifact` 指定時のみ）
 
 - [ ] `../coupling-anatomy/reference/artifact-procedure.md` の手順に従う

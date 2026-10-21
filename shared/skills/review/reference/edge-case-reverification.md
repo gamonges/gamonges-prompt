@@ -37,6 +37,7 @@
 
 各カテゴリ別 subagent には以下のフォーマットで指示する:
 
+<!-- tmp-frontmatter: tmp/review/_edge-{category}-review.md -->
 ```markdown
 **役割**: {category} カテゴリのエッジケース再検証
 
@@ -48,7 +49,14 @@
 3. 既存テストがカバーしているか確認する（`tests/` を grep）
 4. カバーされていない場合、**Critical / Minor / Info** に分類する
 
-**出力**: `tmp/review/_edge-{category}-review.md` に以下フォーマットで記述
+**出力**: `tmp/review/_edge-{category}-review.md` に以下フォーマットで記述（先頭の frontmatter も含める）
+
+---
+type: Review Report
+title: Edge Case Review — {category}
+description: {category} のエッジケースの再検証の結果を 1 文
+status: stable
+---
 
 ## Edge Case Review — {category}
 

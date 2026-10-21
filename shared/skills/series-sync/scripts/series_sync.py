@@ -892,12 +892,14 @@ def cmd_plan(args):
         for e in errors:
             print("error: " + e)
         return 1
+    # dir: の行は常に絶対パスにする。相対のまま出すと、cwd の変わった次の apply で解決できない。
+    # 既定の DIR は生ログの置き場 _runs/ の下（tmp/ の文書と分ける）
     if args.out:
-        base = args.out.rstrip("/")
+        base = os.path.abspath(args.out.rstrip("/"))
     else:
         stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         base = os.path.join(os.path.dirname(os.path.abspath(args.series)),
-                            "series-sync", stamp)
+                            "_runs", "series-sync", stamp)
     out = make_dir(base)
     items = []
     changes = 0
@@ -951,6 +953,12 @@ def cmd_plan(args):
 
 
 def cmd_apply(args):
+    # --plan は DIR と DIR/plan.json のどちらでも受ける。正規化は入口の 1 回だけにし、
+    # 以降の参照（plan.json・after・patch.json）はすべて正規化した DIR を使う
+    plan_dir = os.path.abspath(args.plan)
+    if os.path.basename(plan_dir) == "plan.json":
+        plan_dir = os.path.dirname(plan_dir)
+    args.plan = plan_dir
     if not os.path.exists(os.path.join(args.plan, "plan.json")):
         print("error: plan.json が無い: " + args.plan)
         return 1

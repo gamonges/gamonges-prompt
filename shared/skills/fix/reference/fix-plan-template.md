@@ -5,7 +5,14 @@
 
 ## Claude Code 出力フォーマット
 
+<!-- tmp-frontmatter: tmp/fix-plan.md -->
 ```markdown
+---
+type: Fix Plan
+title: [対象機能名] の修正計画
+description: [修正の要約を 1 文]
+status: stable
+---
 # 修正計画: [対象機能名]
 
 ## 概要

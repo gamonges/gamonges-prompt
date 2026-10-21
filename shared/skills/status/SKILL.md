@@ -31,6 +31,8 @@ disable-model-invocation: true
 - [ ] `./tmp/fix-plan.md`
 - [ ] `./tmp/fixes.md`
 
+加えて `python3 ~/.claude/scripts/knowledge.py index --stdout` で tmp/ の目録を取得する（`tmp/index.md` は書かない）。CLI が無い・exit 0 以外なら目録は省き、上の一覧だけを出す。
+
 ### フェーズ 2: 実装進捗の確認
 
 `./tmp/plan.md` が存在する場合:
@@ -70,6 +72,10 @@ disable-model-invocation: true
 | tmp/spec-check.md | 存在 / なし | YYYY-MM-DD HH:MM |
 | tmp/review/unified.md | 存在 / なし | YYYY-MM-DD HH:MM |
 | tmp/fix-plan.md | 存在 / なし | YYYY-MM-DD HH:MM |
+
+## tmp/ の目録（knowledge.py index --stdout の種類ごとの「現行」の行。取得できなければこの節を省く）
+- Implementation Plan: [題材](plan.md) - 要約
+- frontmatter なし: N 件 / キーの不足: N 件 / 違反: N 件
 
 ## 実装進捗（plan.md）
 - [x] ステップ 1: ...

@@ -64,7 +64,14 @@ DDD の概念設計に特化した視座で設計書を評価:
 
 ## レポート出力テンプレート
 
+<!-- tmp-frontmatter: tmp/strategic-ddd-review.md -->
 ```markdown
+---
+type: Strategic DDD Review
+title: {機能名} の戦略的 DDD 設計レビュー
+description: {総合判定と主な指摘を 1 文}
+status: stable
+---
 # 戦略的 DDD 設計レビュー
 
 **対象**: ./tmp/strategic-ddd.md

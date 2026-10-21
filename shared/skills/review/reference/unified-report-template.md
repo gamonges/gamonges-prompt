@@ -2,7 +2,14 @@
 
 Phase 4 で `./tmp/review/unified.md` に書き出す統合レポートのテンプレート。
 
+<!-- tmp-frontmatter: tmp/review/unified.md -->
 ```markdown
+---
+type: Review Report
+title: PR #{number} のコードレビュー
+description: {総合判定と指摘の件数を 1 文}
+status: stable
+---
 # コードレビューレポート
 
 **PR #{number}**: {title}

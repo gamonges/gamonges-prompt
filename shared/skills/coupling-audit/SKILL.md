@@ -51,6 +51,18 @@ description: 既存コードベースの結合関係を統合強度×距離×変
 
 `./tmp/coupling-audit.md` に `coupling-anatomy` の標準出力フォーマット（結合関係テーブル + 総合判定ブロック、**事実ベース変種**: フルクラス名必須、根拠は `file:L{number}`）で出力する。
 
+出力の先頭には次の frontmatter を置く（書式は `python3 ~/.claude/scripts/knowledge.py spec`）:
+
+<!-- tmp-frontmatter: tmp/coupling-audit.md -->
+```yaml
+---
+type: Coupling Audit
+title: {対象} の結合監査
+description: {総合判定の要約を 1 文}
+status: stable
+---
+```
+
 ### フェーズ6: 完了報告
 
 - 棚卸しした結合関係の件数

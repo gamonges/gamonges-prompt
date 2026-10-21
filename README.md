@@ -24,6 +24,7 @@ shared/                  # 共通資産（正本）。Claude Code と Codex の�
 │   ├── review/
 │   └── ...
 ├── scripts/             # ユーティリティスクリプト・hook
+│   ├── knowledge.py     # tmp/ の md の frontmatter の検査・目録（tmp/index.md）・版の保存（snapshot）
 │   ├── statusline.py
 │   ├── sync-cursor-skills.sh
 │   └── verify-skills.sh
@@ -92,6 +93,7 @@ bash shared/scripts/tests/test-guardrails.sh     # hook の挙動（Claude Code�
 bash shared/scripts/tests/test-setup-codex.sh    # setup.sh・verify・agents の TOML 生成の挙動（sandbox HOME）。setup.sh や codex/ を編集したら
 bash shared/scripts/tests/test-series-sync.sh    # series-sync の同期スクリプトの挙動（偽の gh。python3 と /usr/bin/python3）。series_sync.py を編集したら
 bash shared/scripts/tests/test-codex-run.sh      # codex-run.sh の挙動（偽の companion）。codex-run.sh を編集したら
+bash shared/scripts/tests/test-knowledge.sh      # knowledge.py の規則・目録・snapshot と、skill の雛形の frontmatter（python3 と /usr/bin/python3）。knowledge.py か tmp/ に md を書く skill の雛形を編集したら
 ```
 
 ### アンインストール
@@ -114,7 +116,7 @@ git pull
 - **skill は `$name` で呼ぶ**（Claude Code の `/name` に当たる）。skill・agent の本文は Claude Code の語彙（`/name`・`AskUserQuestion`・`Skill` ツール等）で書かれており、`~/.codex/AGENTS.md` に入る読み替え表（`codex/codex-rules.md`）が Codex 向けに読み替える
 - `disable-model-invocation: true` の skill は、Claude Code では `/` 呼び出しのみ。Codex では frontmatter のこのフィールドが効かないので、skill ごとの `agents/openai.yaml`（`policy: allow_implicit_invocation: false`）で自然文からの起動を止めている。`verify-skills.sh` の check 9 が一致を検査する
 - **hook の信頼**: Codex は hook の信頼を「配列上の位置と定義」に紐づけ、変わった hook は `/hooks` で信頼し直すまでスキップする（= ガードが黙って開く）。install は自前の hook だけを各イベントの先頭に置いて、Orca・Muxy の位置を動かさない。`./setup.sh install` が hooks.json を書き換えたら（install が最後に案内する。信頼は定義に紐づき、スクリプトの中身には紐づかないので、スクリプトの更新だけでは外れない）、Codex で `/hooks` を開いて「要レビュー」が出ていないか確認する（check 12 が位置と信頼キーを検査する）。install の hooks.json の段が「先頭の自前グループの後ろに自前の hook があります」で失敗したら（hooks.json には書き込まない）、自前の hook を先頭のグループにまとめてから install をやり直し、`/hooks` でそのイベントの全件を信頼し直す
-- Codex は `ask`（確認プロンプト）に未対応なので、確認が要る操作の hook は Codex では `deny` で止め、理由に `[要確認]` と付ける。モデルはユーザーに確認して、ユーザー自身に実行してもらう（SKILL.md の lint の frontmatter の deny は、直した内容で再実行する）
+- Codex は `ask`（確認プロンプト）に未対応なので、確認が要る操作の hook は Codex では `deny` で止め、理由に `[要確認]` と付ける。モデルはユーザーに確認して、ユーザー自身に実行してもらう（SKILL.md の lint と tmp/ の md の検査の frontmatter の deny は、直した内容で再実行する）
 - **Codex の Claude からの取り込み**（`/import` と、起動時の案内）は、ユーザーが進めたときだけ動く。移すのは `~/.claude/CLAUDE.md`・repo の `CLAUDE.md`・hook・skills・subagent・設定・MCP・最近の会話で、**既にある `AGENTS.md`・`hooks.json`・skills・subagent は上書きしない**（移し先が無いか空のときだけ書く。0.160.0・0.162.0 のソースと、2026-10-09 の実機で確認）。書くときは「Claude → Codex」の語の機械的な置き換えがかかるので、パス（`~/.claude/scripts/` 等）が壊れる。次の 2 つに注意する
   - `~/.codex/AGENTS.md` や `hooks.json` を消した・空にした後に取り込むと、置き換えの入った版が書き戻される。取り込みの前に `./setup.sh install` を済ませておく（install がブロックと自前 hook を入れるので、移し先が空でなくなる）
   - `shared/agents/` に足した agent を install する前に取り込むと、生成ヘッダの無い TOML ができ、install が手書きと見なして上書きしない（古いまま残る）。足したら先に `./setup.sh install` する
@@ -122,8 +124,21 @@ git pull
 - Codex が読む指示は `~/.codex/AGENTS.md` と repo 直下の `AGENTS.md` の合計で 32 KiB まで。超えると後から読まれる repo 直下の `AGENTS.md` が欠ける（check 11 が検査する）
 - **ガードが効かない経路**（hook では塞げないので、書き方で避ける。避け方は読み替え表にある）
   - `write_stdin` で対話シェルに打ち込んだコマンドは、どの hook も通らない
-  - シェルで `apply_patch <<'EOF'` を実行すると、hook には `Bash` として届き、SKILL.md の lint に当たらない
+  - シェルで `apply_patch <<'EOF'` を実行すると、hook には `Bash` として届き、SKILL.md の lint と tmp/ の md の検査に当たらない
   - `exec_command` の `workdir` は hook に渡らず、contract-link は turn の作業ディレクトリのリポジトリを検査する。tmp-commit と破壊的 git はコマンド文字列だけで判定するので影響しない。第一ガードの `skip-worktree` は経路を問わず効くので、これは 2 枚目の穴（`workdir` が渡らないことはバイナリの解析による推定で、実機の入力では採取していない）
+
+### tmp/ の md の frontmatter 検査
+
+`tmp/` の md には OKF v0.2 の frontmatter（`type`・`title`・`description`・`status`）が要る。書式は `python3 ~/.claude/scripts/knowledge.py spec`、種類の一覧は `knowledge.py types`。今ある文書の一覧は `knowledge.py lint`（違反があれば exit 1）、目録 `tmp/index.md` は `knowledge.py index` で作り直す。上書きが契約の成果物の旧版は `knowledge.py snapshot <path>… --reason <理由>` で `<name>.archived-<YYYYMMDD-HHmm>-<理由>` に残す（元の中身と mtime は変えない）。
+
+判断記録（AGENTS.md に置かないのは、Codex の指示のサイズの上限のため）:
+
+- **既存の hook（`hook-lint-skill-frontmatter.sh`）に対象を足した。** apply_patch の解釈はこの hook にしか無く、新しい hook を足すと settings.json が変わって Codex の信頼し直しが要る。判定の本体（必須キー・対象の判定・違反の比較・雛形）は `knowledge.py check` だけが持ち、hook は書いた後と書く前の中身を作って渡すだけ
+- **対象**: `.git` のあるディレクトリ直下の `tmp/` の `.md`。`tmp/_runs/`（生ログ）・`tmp/_assets/`（画像）の下と、`index.md`・`log.md`・`SKILL.md` は外す。scratchpad（`/private/tmp/…`）は `tmp` の親に `.git` が無いので外れる
+- **今ある文書は必須にしない（grandfather）。** 書く前の中身に frontmatter が無い Edit・Update File は問わない。frontmatter を持つ文書の編集は、違反の種類（`missing:<key>`・`invalid:<key>`・`no-frontmatter`・`unsupported-syntax`）の集合が増えないものだけを通す。install 前の不完全な frontmatter（brief の context.md・`status` の無い grill.md）への追記はこれで通る。Write と Add File は書く前の中身を問わず必須。対象外の場所から `*** Move to:` で tmp/ に入る文書も免除しない
+- **fail-closed の範囲**: CLI が無い・exit 2・python が無いときは、tmp/ の md の書き込みだけを ask（Codex は `[要確認]` の deny）にする。「tmp/ の md か」は bash 側でも判定する（`.git` の確認だけ。除外は CLI に任せ、CLI が無ければ除外に当たるものも止める＝安全側）ので、scratchpad の md は CLI が無くても止まらない。apply_patch を解釈できないときは、見出し（Add File・Update File・Move to）のパスを cwd で解決して tmp/ の md に触れる疑いを見る（文字列の部分一致にすると、cwd が tmp/ の下の相対パスを見落とし、scratchpad を誤って止める）
+- **Bash で書かれた md は通る**（`cat >`・`tee`・python）。既存の deny と同じく Read/Edit/Write/apply_patch の経路だけを守る。漏れは `knowledge.py lint` で拾う
+- **止まったら**: deny の理由に付けるべき frontmatter の雛形が出るので、それを先頭に足して書き直す。ask（CLI の失敗）は `./setup.sh install` 済みか（`~/.claude/scripts/knowledge.py` があるか）を確かめる
 
 ## 📚 Skills 一覧
 
