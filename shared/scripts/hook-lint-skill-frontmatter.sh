@@ -132,19 +132,38 @@ fi
 exit 0
 }
 
-# tmp/ の md か（bash 側の判定）。.md で終わり、祖先の tmp の親に .git がある。除外（_runs/・index.md 等）は
-# 持たない — CLI が判定し、CLI が無いときは除外に当たるものも止める（安全側）。scratchpad（/private/tmp/…）は
-# tmp の親に .git が無いので、CLI が無くても止めず、python も起動しない
+# tmp/ の md か（bash 側の判定）。.md で終わり、祖先の tmp の親に .git がある。除外（_runs/・index.md 等）と
+# 正規化（.. を畳む）は持たない — CLI が判定し、CLI が無いときは除外に当たるものも止める（安全側）。この判定は
+# knowledge.py の split_tmp の上位集合で、test-guardrails.sh の TM-scope の表で確かめている。. ・.. の要素を含む
+# パスは畳まずに対象の疑いありとして CLI に回す（まだ無いディレクトリを .. で抜けるパスは、OS が途中を解決できず
+# 字面でも実体でも当たらない。外すと CLI を呼ばずに終わる）。scratchpad
+# （/private/tmp/…）は tmp の親に .git が無いので、CLI が無くても止めず、python も起動しない。
+# 字面で当たらなければ実体でも見る（順序は字面が先。tmp/ を repo の外へ向けた symlink を外さないため）。実体は
+# 無い末尾を残して祖先を解決する（symlink の先のまだ無いサブディレクトリへの Write を外さないため。外すと
+# CLI を呼ばずに終わり、検査そのものが消える）。比較は glob の文字クラスで大文字小文字を区別しない（APFS）。
+# nocasematch を使わないのは、途中の return で戻し忘れると hook の残りの判定まで変わるため
 is_tmp_md() {  # $1=絶対パス
-  local lc dir
-  lc=$(printf '%s' "$1" | LC_ALL=C tr 'A-Z' 'a-z')
-  [[ "$lc" == *.md && "$1" == /* ]] || return 1
-  dir=$(dirname "$1")
-  while [[ "$dir" != "/" && "$dir" != "." ]]; do
-    if [[ "$(basename "$dir")" == tmp && -e "$(dirname "$dir")/.git" ]]; then
+  local anc tail="" real
+  [[ "$1" == /* && "$1" == *.[Mm][Dd] ]] || return 1
+  [[ "$1" == */../* || "$1" == */./* ]] && return 0
+  tmp_dir_hit "${1%/*}" && return 0
+  anc="${1%/*}"
+  while [[ -n "$anc" && ! -d "$anc" ]]; do
+    tail="/${anc##*/}${tail}"
+    anc="${anc%/*}"
+  done
+  [[ -n "$anc" ]] || return 1
+  real=$(cd -P "$anc" 2>/dev/null && pwd -P) || return 1
+  tmp_dir_hit "${real}${tail}"
+}
+
+tmp_dir_hit() {  # $1=ディレクトリ。自身か祖先に、親に .git のある tmp があるか（プロセスを起動しない）
+  local dir="$1"
+  while [[ -n "$dir" && "$dir" != "/" ]]; do
+    if [[ "${dir##*/}" == [Tt][Mm][Pp] && -e "${dir%/*}/.git" ]]; then
       return 0
     fi
-    dir=$(dirname "$dir")
+    dir="${dir%/*}"
   done
   return 1
 }
@@ -371,16 +390,20 @@ def absolute(p):
     return os.path.join(cwd, p) if cwd else None
 
 
-def is_tmp_md(p):
-    """bash の is_tmp_md と同じ判定（.md で終わり、祖先の tmp の親に .git）。"""
-    if not p.lower().endswith(".md"):
-        return False
-    d = os.path.dirname(os.path.normpath(p))
+def tmp_dir_hit(path):
+    d = os.path.dirname(path)
     while d not in ("/", ""):
-        if os.path.basename(d) == "tmp" and os.path.exists(os.path.join(os.path.dirname(d), ".git")):
+        if os.path.basename(d).lower() == "tmp" and os.path.exists(os.path.join(os.path.dirname(d), ".git")):
             return True
         d = os.path.dirname(d)
     return False
+
+
+def is_tmp_md(p):
+    """knowledge.py の split_tmp と同じ判定（.md で終わり、祖先の tmp の親に .git。字面が先で、次に実体）。"""
+    if not p.lower().endswith(".md"):
+        return False
+    return tmp_dir_hit(os.path.normpath(p)) or tmp_dir_hit(os.path.realpath(p))
 
 
 try:
@@ -504,6 +527,8 @@ fi
 
 # 2. 検査対象テキストの構築 (Write / Edit / MultiEdit)
 CONTENT=""
+# 無いファイルへの空の old_string は新しいファイルを作る。書く前の中身が無いので Write と同じく必須にする
+NEW_FILE=0
 case "$TOOL_NAME" in
   Write)
     CONTENT=$(echo "$INPUT" | jq -r '.tool_input.content // ""')
@@ -514,12 +539,13 @@ case "$TOOL_NAME" in
     # replace_all のときは全置換する。1 回だけ置換して検査すると、全置換で消えるフィールドを見落とす
     REPLACE_ALL=$(echo "$INPUT" | jq -r 'if .tool_input.replace_all == true then 1 else 0 end')
     if [[ ! -f "$FILE_PATH" ]]; then
-      # 既存ファイルが無い場合は素通し（Edit は通常存在前提）
-      exit 0
-    fi
+      # 空でない old_string はツール自体が失敗するので素通し
+      [[ -z "$OLD" ]] || exit 0
+      NEW_FILE=1
+      CONTENT="$NEW"
     # quote 付き heredoc + 環境変数渡しで bash 変数展開を抑止 (injection 経路を遮断)
     # 失敗時は permissionDecision: ask で明示的にユーザーへ通知（silent abort を防ぐ）
-    if ! CONTENT=$(FILE_PATH="$FILE_PATH" OLD="$OLD" NEW="$NEW" REPLACE_ALL="$REPLACE_ALL" python3 - <<'PY' 2>"${ERR_FILE:-/dev/null}"
+    elif ! CONTENT=$(FILE_PATH="$FILE_PATH" OLD="$OLD" NEW="$NEW" REPLACE_ALL="$REPLACE_ALL" python3 - <<'PY' 2>"${ERR_FILE:-/dev/null}"
 import os, sys
 try:
     with open(os.environ["FILE_PATH"], encoding="utf-8", errors="replace") as f:
@@ -537,16 +563,20 @@ PY
     fi
     ;;
   MultiEdit)
-    if [[ ! -f "$FILE_PATH" ]]; then
-      exit 0
-    fi
     EDITS_JSON=$(echo "$INPUT" | jq -c '.tool_input.edits // []')
+    if [[ ! -f "$FILE_PATH" ]]; then
+      # 1 つ目の old_string が空なら新しいファイルを作る。空文字列から edits を順に当てる
+      [[ "$(echo "$EDITS_JSON" | jq -r '.[0].old_string // "x"')" == "" ]] || exit 0
+      NEW_FILE=1
+    fi
     # quote 付き heredoc + 環境変数渡しで bash 変数展開を抑止
-    if ! CONTENT=$(FILE_PATH="$FILE_PATH" EDITS_JSON="$EDITS_JSON" python3 - <<'PY' 2>"${ERR_FILE:-/dev/null}"
+    if ! CONTENT=$(FILE_PATH="$FILE_PATH" EDITS_JSON="$EDITS_JSON" NEW_FILE="$NEW_FILE" python3 - <<'PY' 2>"${ERR_FILE:-/dev/null}"
 import json, os, sys
 try:
-    with open(os.environ["FILE_PATH"], encoding="utf-8", errors="replace") as f:
-        content = f.read()
+    content = ""
+    if os.environ["NEW_FILE"] != "1":
+        with open(os.environ["FILE_PATH"], encoding="utf-8", errors="replace") as f:
+            content = f.read()
     edits = json.loads(os.environ["EDITS_JSON"])
     for e in edits:
         count = -1 if e.get("replace_all") is True else 1
@@ -571,7 +601,8 @@ if [[ "$TARGET" == skill ]]; then
   lint_content
 fi
 # tmp/ の md。Edit・MultiEdit は書く前の中身（現ファイル）と比べ、違反を増やす編集だけを止める
-if [[ "$TOOL_NAME" == Write ]]; then
+# （新しいファイルを作るものは書く前の中身が無いので Write と同じ）
+if [[ "$TOOL_NAME" == Write || "$NEW_FILE" == 1 ]]; then
   check_tmp_md "$FILE_PATH" write
 else
   check_tmp_md "$FILE_PATH" edit "$FILE_PATH"

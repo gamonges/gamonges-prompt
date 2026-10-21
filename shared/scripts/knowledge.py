@@ -22,6 +22,8 @@ import tempfile
 
 REQUIRED = ["type", "title", "description", "status"]
 STATUSES = ("draft", "stable", "deprecated")
+# 違反ではなく「キーの不足」に数える種類（install 前に作られた旧形式の文書）
+LEGACY_KINDS = set("missing:" + k for k in REQUIRED)
 
 # 種類の登録表。上から最初に一致した行を使うので、具体的な名前を glob より前に置く。
 # glob は tmp/ からの相対パスに、/ で区切った要素ごとに当てる（* は / を跨がない）
@@ -59,8 +61,9 @@ TYPES = [
 EXCLUDED_DIRS = ("_runs", "_assets")
 # OKF の予約名（index.md・log.md）と、既存の lint が見る SKILL.md。どの階層でも外す
 EXCLUDED_NAMES = ("index.md", "log.md", "skill.md")
-# 複数行の値の書き出し（| と >、その修飾子つき）。この repo では使わない
-BLOCK_SCALARS = ("|", ">")
+# 複数行の値の書き出し（| と >、その修飾子つき）。この repo では使わない。見出しだけの値
+# （|・>-・|2 等）がブロックスカラーで、> 50% のような文は値として読む
+BLOCK_SCALAR = re.compile(r"[|>][+-]?[1-9]?[+-]?(\s+#.*)?")
 
 TEMPLATE = """---
 type: {type}
@@ -69,10 +72,23 @@ description: <1 文の要約>
 status: stable
 ---"""
 
+# 写し（手で作った旧版を含む）への deny に出す雛形。deprecated と後継まで直せるように
+ARCHIVED = ".archived-"
+ARCHIVED_TEMPLATE = """---
+type: {type}
+title: <題材>
+description: <1 文の要約>
+status: deprecated
+superseded_by: {successor}
+archived_reason: <理由>
+---"""
+
 SPEC = """tmp/ の md の frontmatter（OKF v0.2 の部分集合）
 
 ファイルの先頭行の --- から次の --- までを frontmatter として読む。
 値は平坦な `key: value` に限る（字下げ・| ・> の複数行は使わない）。
+YAML パーサとの互換は保証しない。値が記号で始まる・`: `・` #` を
+含むときは '…' で引用する（' は '' と書く）。
 
 必須:
   type         種類。`knowledge.py types` の名前を使う（未知の値も許す）
@@ -88,8 +104,10 @@ status: deprecated のとき:
 
 対象: repo 直下の tmp/ の md（.git のあるディレクトリの tmp/）。
 対象外: tmp/_runs/・tmp/_assets/ の下、index.md・log.md・SKILL.md。
-今ある frontmatter の無い文書への編集は問わない。frontmatter を持つ
-文書の編集は、違反を増やさないものだけを通す。
+今ある frontmatter の無い文書への編集は、必須の 4 キーの不足を
+問わない（付けた値の誤りは止める）。frontmatter を持つ文書の編集は、
+違反を増やさないものだけを通す。Write と、新しいファイルを作る
+Edit は、書く前の中身を問わず必須。
 
 例:
 """ + TEMPLATE.format(type="Implementation Plan")
@@ -99,9 +117,13 @@ class UsageError(Exception):
     pass
 
 
+def strip_bom(text):
+    return text[1:] if text.startswith("\ufeff") else text
+
+
 def read_text(path):
     with open(path, "rb") as f:
-        return f.read().decode("utf-8", "replace")
+        return strip_bom(f.read().decode("utf-8", "replace"))
 
 
 def frontmatter_lines(text):
@@ -120,7 +142,24 @@ def frontmatter_lines(text):
 
 def unquote(value):
     if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-        return value[1:-1]
+        inner = value[1:-1]
+        # 単一引用の中の '' は ' （yaml_value が書く形と対にする）
+        return inner.replace("''", "'") if value[0] == "'" else inner
+    return value
+
+
+# 引用しないと YAML として別の意味になる値。先頭の記号・`: `・` #`・末尾の : や空白
+NEEDS_QUOTE = re.compile(r"""^$|^[\s\-?:,\[\]{}#&*!|>'"%@`]|: | #|[:\s]$""")
+
+
+def yaml_value(value):
+    """frontmatter に書く値。要るときだけ単一引用にする。
+
+    check は寛容な部分集合だが、書き手は YAML としても読める形で書く（後段の読み手が
+    YAML パーサを使っても壊れないように）。
+    """
+    if NEEDS_QUOTE.search(value):
+        return "'%s'" % value.replace("'", "''")
     return value
 
 
@@ -143,7 +182,7 @@ def parse(text):
             continue
         key, _, value = line.partition(":")
         value = value.strip()
-        if value[:1] in BLOCK_SCALARS:
+        if BLOCK_SCALAR.fullmatch(value):
             bad.add("unsupported-syntax")
         fm[key.strip()] = unquote(value).strip()
     return fm, bad
@@ -171,10 +210,18 @@ def split_tmp(path):
 
     tmp の親に .git（ファイルかディレクトリ）があるものだけを tmp/ とみなす。
     scratchpad（/private/tmp/...）や monorepo のパッケージの tmp/ は外れる。
+    字面で当たらなければ実体（symlink を解決したパス）でもう一度見る。順序は字面が先
+    （tmp/ を repo の外へ向けた symlink を外さないため）。realpath は無い末尾を残して祖先を
+    解決するので、symlink の先のまだ無いサブディレクトリへの書き込みも対象になる。
+    ディレクトリ名は大文字小文字を区別しない（拡張子と同じく APFS）。
     """
-    parts = os.path.normpath(path).split(os.sep)
+    return (find_tmp(os.path.normpath(path).split(os.sep))
+            or find_tmp(os.path.realpath(path).split(os.sep)))
+
+
+def find_tmp(parts):
     for i in range(len(parts) - 1, 0, -1):
-        if parts[i] != "tmp":
+        if parts[i].lower() != "tmp":
             continue
         root = os.sep.join(parts[:i]) or os.sep
         if os.path.exists(os.path.join(root, ".git")):
@@ -186,7 +233,7 @@ def is_document(rel):
     """tmp/ からの相対の要素のリストが、検査・目録の対象の md か。"""
     if not rel or not rel[-1].lower().endswith(".md"):
         return False
-    if rel[0] in EXCLUDED_DIRS and len(rel) > 1:
+    if rel[0].lower() in EXCLUDED_DIRS and len(rel) > 1:
         return False
     return rel[-1].lower() not in EXCLUDED_NAMES
 
@@ -202,10 +249,30 @@ def match_glob(rel, pattern):
         fnmatch.fnmatchcase(r, p) for r, p in zip(rel, pat))
 
 
+def unarchive(rel):
+    """写し（.archived-）の要素を元の名前に戻す。(元の要素のリスト, 元のパスか None)。
+
+    元のパスは repo からの相対（tmp/…）で、ディレクトリの写しの中なら末尾に / を付ける
+    （snapshot が書く superseded_by と同じ形）。
+    """
+    out = []
+    src = None
+    for i, part in enumerate(rel):
+        if ARCHIVED in part:
+            last = i == len(rel) - 1
+            part = part.split(ARCHIVED)[0] + (os.path.splitext(part)[1] if last else "")
+            if src is None:
+                src = "/".join(["tmp"] + out + [part]) + ("" if last else "/")
+        out.append(part)
+    return out, src
+
+
 def guess_type(rel):
-    """tmp/ からの相対の要素のリストから種類を引く。引けなければ None。"""
-    if ".archived-" in rel[-1]:
-        return None
+    """tmp/ からの相対の要素のリストから種類を引く。引けなければ None。
+
+    写しは元の名前で引く。写しの名前のまま引くと plan-review.archived-… が plan*.md に当たる。
+    """
+    rel = unarchive(rel)[0]
     for name, pattern in TYPES:
         if match_glob(rel, pattern):
             return name
@@ -214,8 +281,13 @@ def guess_type(rel):
 
 def template_for(path):
     hit = split_tmp(path)
-    name = guess_type(hit[1]) if hit else None
-    return TEMPLATE.format(type=name or "<種類>")
+    if hit is None:
+        return TEMPLATE.format(type="<種類>")
+    name = guess_type(hit[1]) or "<種類>"
+    src = unarchive(hit[1])[1]
+    if src is not None:
+        return ARCHIVED_TEMPLATE.format(type=name, successor=src)
+    return TEMPLATE.format(type=name)
 
 
 def require_abs(name, value):
@@ -227,6 +299,8 @@ def report(head, kinds, path):
     print(head)
     if kinds:
         print("違反: " + ", ".join(sorted(kinds)))
+    if kinds and "unsupported-syntax" in kinds:
+        print("平坦な key: value 以外は使えない。値が記号で始まる・`: ` を含むときは '…' で引用する。")
     print("tmp/ の md には type・title・description・status が必須です。")
     print("書式: python3 ~/.claude/scripts/knowledge.py spec")
     print(template_for(path))
@@ -237,7 +311,7 @@ def cmd_check(args):
     require_abs("--old-path", args.old_path)
     # 対象外でも stdin を読み切る。読まずに終わると、パイプで大きな本文を渡す hook 側の
     # 書き手が SIGPIPE で落ち、pipefail の下で判定の失敗に見える
-    new = sys.stdin.buffer.read().decode("utf-8", "replace")
+    new = strip_bom(sys.stdin.buffer.read().decode("utf-8", "replace"))
     if not in_scope(args.path):
         return 0
     op = args.op
@@ -260,8 +334,11 @@ def cmd_check(args):
     except OSError as e:
         raise UsageError("--old-file を読めない: %s" % e)
     if parse(before_text)[0] is None:
-        return 0
-    added = after - violations(before_text)
+        # frontmatter の無い今ある文書には、キーの不足だけを免除する（付けた値の誤りを通すと、
+        # 以後の Edit がその誤りを基準に grandfather される）
+        added = after - LEGACY_KINDS - {"no-frontmatter"}
+    else:
+        added = after - violations(before_text)
     if not added:
         return 0
     report("この編集で frontmatter の違反が増えます。", added, args.path)
@@ -270,8 +347,6 @@ def cmd_check(args):
 
 INDEX_HEAD = ("自動生成。手で編集しない。"
               "再生成: `python3 ~/.claude/scripts/knowledge.py index`")
-# 違反ではなく「キーの不足」に数える種類（install 前に作られた旧形式の文書）
-LEGACY_KINDS = set("missing:" + k for k in REQUIRED)
 
 
 def resolve_tmp(value):
@@ -297,7 +372,7 @@ def documents(tmp):
     found = []
     for dirpath, dirnames, filenames in os.walk(tmp):
         if dirpath == tmp:
-            dirnames[:] = [d for d in dirnames if d not in EXCLUDED_DIRS]
+            dirnames[:] = [d for d in dirnames if d.lower() not in EXCLUDED_DIRS]
         dirnames.sort()
         base = os.path.relpath(dirpath, tmp)
         for name in filenames:
@@ -354,7 +429,9 @@ def cmd_lint(args):
 
 def link(text, rel):
     text = text.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
-    return "* [%s](%s)" % (text, rel)
+    # リンク先を <…> で囲む（空白・括弧を含む名前で壊れない）。囲みの中では < と > を使えない
+    rel = rel.replace("<", "%3C").replace(">", "%3E")
+    return "* [%s](<%s>)" % (text, rel)
 
 
 def render_index(rows):
@@ -433,9 +510,10 @@ FALLBACK_TYPE = "Document"
 
 
 def normalize_reason(reason):
-    r = re.sub(r"[\s/]+", "-", reason.strip()).strip("-")[:REASON_MAX]
+    # 名前に使える文字（語の文字・. ・-）だけを残す。| や : がファイル名に入らないように
+    r = re.sub(r"[^\w.-]+", "-", reason.strip()).strip("-.")[:REASON_MAX]
     if not r:
-        raise UsageError("--reason が空（/ と空白を - に変えた後）")
+        raise UsageError("--reason が空（名前に使えない文字を - に変えた後）")
     return r
 
 
@@ -454,16 +532,22 @@ def set_keys(text, updates):
     lines = text.split("\n")
     fm = frontmatter_lines(text)
     if fm is None:
-        block = ["---"] + ["%s: %s" % kv for kv in updates] + ["---"]
+        block = ["---"] + ["%s: %s" % (k, yaml_value(v)) for k, v in updates] + ["---"]
         return "\n".join(block) + "\n" + text
     end = len(fm) + 1
     keys = dict(updates)
-    for i in range(1, end):
-        key = lines[i].partition(":")[0]
-        if lines[i][:1] not in " \t" and key.strip() in keys:
-            lines[i] = "%s: %s" % (key.strip(), keys.pop(key.strip()))
-    extra = ["%s: %s" % (k, v) for k, v in updates if k in keys]
-    return "\n".join(lines[:end] + extra + lines[end:])
+    done = set()
+    head = [lines[0]]
+    for line in lines[1:end]:
+        key = line.partition(":")[0].strip()
+        if line[:1] in " \t" or (key not in keys and key not in done):
+            head.append(line)
+        elif key in keys:
+            head.append("%s: %s" % (key, yaml_value(keys.pop(key))))
+            done.add(key)
+        # 置き換えたキーの 2 行目以降は落とす（parse は後勝ちで読むので、残すと置き換えが効かない）
+    extra = ["%s: %s" % (k, yaml_value(v)) for k, v in updates if k in keys]
+    return "\n".join(head + extra + lines[end:])
 
 
 def archive_md(path, rel, successor, reason, when):
@@ -511,14 +595,22 @@ def repo_relative(path):
 
 
 def snapshot_one(src, reason, note, stamp, when):
-    src = src.rstrip("/") or src
+    src = os.path.normpath(src)
+    # . と .. は名前を持たないので、絶対パスにしてから親と名前に分ける（分けずに使うと保存先が
+    # コピー元の中にでき、copytree が保存先自身を写し続ける）。ふつうの相対パスは出力の形を保つ
+    if os.path.basename(src) in (".", ".."):
+        src = os.path.abspath(src)
     is_dir = os.path.isdir(src)
     head, name = os.path.split(src)
     stem, ext = (name, "") if is_dir else os.path.splitext(name)
-    dest = reserve(os.path.join(head, "%s.archived-%s-%s%s" % (stem, stamp, reason, ext)),
-                   is_dir)
+    base = os.path.join(head, "%s%s%s-%s%s" % (stem, ARCHIVED, stamp, reason, ext))
+    # 正規化を通っても、ディレクトリへの symlink（tmp/up -> .）では保存先の実体がコピー元の下になる
+    real = os.path.realpath(src)
+    if is_dir and os.path.realpath(base).startswith(real.rstrip(os.sep) + os.sep):
+        raise UsageError("保存先がコピー元の中になる: %s" % src)
+    dest = reserve(base, is_dir)
     successor = repo_relative(src) + ("/" if is_dir else "")
-    # 種類と title の既定は元の場所（tmp/review/x.md）で引く。写しの名前は .archived- を含み、引けない
+    # 種類と title の既定は元の場所（tmp/review/x.md）で引く（title の既定のファイル名に写しの名前を出さない）
     hit = split_tmp(os.path.abspath(src))
     src_rel = hit[1] if hit else [name]
     if not is_dir:
@@ -609,6 +701,10 @@ def build_parser():
 
 
 def main(argv=None):
+    # 出力先の符号化で落ちると traceback の exit 1 になり、違反ありと区別できない
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)

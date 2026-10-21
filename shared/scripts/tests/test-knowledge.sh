@@ -89,10 +89,22 @@ run_check_tests() {
     for p in "$WORK/scratch/tmp/x.md" "/private/tmp/claude-501/s/x.md" "/tmp/x.md" \
         "$R/tmp/_runs/a.md" "$R/tmp/_runs/series-sync/1/a.md" "$R/tmp/_assets/a.md" \
         "$R/tmp/index.md" "$R/tmp/sub/log.md" "$R/tmp/s/SKILL.md" "$R/tmp/s/skill.md" \
-        "$R/tmp/x.txt" "$R/packages/a/tmp/x.md" "$R/docs/x.md"; do
+        "$R/tmp/x.txt" "$R/packages/a/tmp/x.md" "$R/docs/x.md" "$R/tmp/_RUNS/a.md"; do
         ck "$no_fm" --path "$p" --op write
         assert_rc "CK-scope 対象外: ${p#"$WORK"/}" 0 "$RC" "$OUT"
     done
+    # ディレクトリ名も大文字小文字を区別しない（拡張子と同じく APFS）。symlink を経由した書き込みは実体で見る
+    # （まだ無いサブディレクトリでも祖先の symlink を解決する）。tmp 自体が repo の外への symlink でも、字面で当たれば対象
+    ln -s tmp "$R/t2"
+    local R2="$WORK/repo-outlink"
+    git_init "$R2"
+    mkdir -p "$WORK/outside-tmp"
+    ln -s "$WORK/outside-tmp" "$R2/tmp"
+    for p in "$R/TMP/new.md" "$R/Tmp/x.md" "$R/t2/new.md" "$R/t2/new-dir/x.md" "$R2/tmp/x.md"; do
+        ck "$no_fm" --path "$p" --op write
+        assert_rc "CK-scope 対象: ${p#"$WORK"/}" 1 "$RC" "$OUT"
+    done
+    rm -f "$R/t2"
 
     # --- CK-write: 必須キーと値（C-2） ---
     local T="$R/tmp/plan.md"
@@ -123,6 +135,12 @@ run_check_tests() {
 superseded_by: tmp/plan.md}" --path "$T" --op write
     assert_rc "CK-write deprecated で superseded_by ありは 0" 0 "$RC" "$OUT"
 
+    # --- CK-encoding: 出力先が UTF-8 でなくても、違反は rc 1 と理由で返す（traceback の rc 1 は違反ありと区別できない） ---
+    OUT="$(printf '%s' "$no_fm" | PYTHONIOENCODING=ascii kn check --path "$T" --op write 2>&1)"; RC=$?
+    assert_rc "CK-encoding 出力先が ascii でも違反は 1" 1 "$RC" "$OUT"
+    assert_has "CK-encoding 出力先が ascii でも理由を出す" "$OUT" "type:"
+    if [[ "$OUT" != *Traceback* ]]; then pass "CK-encoding traceback を出さない"; else fail "CK-encoding traceback: $OUT"; fi
+
     # --- CK-syntax: 平坦な key: value 以外は違反（C-7）。黙って別のキーに化けさせない ---
     ck "${FM_FULL/description: 要約の 1 文/description: |
   1 行目
@@ -131,6 +149,17 @@ superseded_by: tmp/plan.md}" --path "$T" --op write
     assert_has "CK-syntax 未対応の書式を理由に出す" "$OUT" "unsupported-syntax"
     ck "${FM_FULL/description: 要約の 1 文/description: >-}" --path "$T" --op write
     assert_rc "CK-syntax 折り返しの値（>-）は 1" 1 "$RC" "$OUT"
+    # ブロックスカラーは見出しだけの値。> や | で始まる普通の文は値として読む
+    ck "${FM_FULL/description: 要約の 1 文/description: > 50% 速くなった}" --path "$T" --op write
+    assert_rc "CK-syntax > で始まる普通の文は 0" 0 "$RC" "$OUT"
+    ck "${FM_FULL/description: 要約の 1 文/description: | の使い方}" --path "$T" --op write
+    assert_rc "CK-syntax | で始まる普通の文は 0" 0 "$RC" "$OUT"
+    local hdr
+    for hdr in '|2' '>+ # c' '|-' '>'; do
+        ck "${FM_FULL/description: 要約の 1 文/description: $hdr}" --path "$T" --op write
+        assert_rc "CK-syntax ブロックスカラーの見出し（${hdr}）は 1" 1 "$RC" "$OUT"
+    done
+    assert_has "CK-syntax 未対応の書式には引用の案内を出す" "$OUT" "引用"
     ck "${FM_FULL/status: stable/status: stable
 generated:
   at: 2026-10-21}" --path "$T" --op write
@@ -155,6 +184,14 @@ generated:
     ck "${FM_FULL}"$'\n---\nstatus: foo\n---\n' --path "$T" --op write
     assert_rc "CK-range 本文の 2 つ目の --- ブロックは読まない" 0 "$RC" "$OUT"
 
+    # --- CK-bom: 先頭の BOM を外してから読む。stdin（write）と --old-file（edit の基準）の両方 ---
+    local bom=$'\xef\xbb\xbf'
+    ck "${bom}${FM_FULL}" --path "$T" --op write
+    assert_rc "CK-bom BOM 付きで 4 キーがそろった write は 0" 0 "$RC" "$OUT"
+    printf '%s' "${bom}${FM_FULL}" >"$WORK/bom-old.md"
+    ck "$(printf '%s' "$FM_FULL" | grep -v '^type:')" --path "$T" --op edit --old-file "$WORK/bom-old.md"
+    assert_rc "CK-bom BOM 付きの既存文書から type を消す edit は 1（grandfather しない）" 1 "$RC" "$OUT"
+
     # --- CK-template: 違反の出力に、パスから引いた種類の雛形（C-8） ---
     ck "$no_fm" --path "$R/tmp/plan.md" --op write
     assert_has "CK-template plan.md → Implementation Plan" "$OUT" "type: Implementation Plan"
@@ -169,8 +206,17 @@ generated:
     assert_has "CK-template review/*.md → Review Report" "$OUT" "type: Review Report"
     ck "$no_fm" --path "$R/tmp/plan-x/foo.md" --op write
     assert_has "CK-template glob は / を跨がない（plan-x/foo.md は不明）" "$OUT" "type: <種類>"
+    # 写し（.archived-）は元の名前で種類を引き、旧版の雛形（deprecated・後継）を出す。手で写しを作る経路の deny から直せるように
     ck "$no_fm" --path "$R/tmp/plan.archived-20261021-1030-x.md" --op write
-    assert_has "CK-template *.archived-* は推定しない" "$OUT" "type: <種類>"
+    assert_has "CK-template 写しは元の名前で種類を引く" "$OUT" "type: Implementation Plan"
+    assert_has "CK-template 写しの雛形は deprecated" "$OUT" "status: deprecated"
+    assert_has "CK-template 写しの雛形の後継は元のパス" "$OUT" "superseded_by: tmp/plan.md"
+    assert_has "CK-template 写しの雛形に理由の欄" "$OUT" "archived_reason: <理由>"
+    ck "$no_fm" --path "$R/tmp/plan-review.archived-20261021-1030-x.md" --op write
+    assert_has "CK-template 写しでも具体名が glob より先（plan-review）" "$OUT" "type: Plan Review"
+    ck "$no_fm" --path "$R/tmp/review.archived-20261021-1030-x/unified.md" --op write
+    assert_has "CK-template ディレクトリの写しの中は元のディレクトリで種類を引く" "$OUT" "type: Review Report"
+    assert_has "CK-template ディレクトリの写しの後継は元のディレクトリ" "$OUT" "superseded_by: tmp/review/"
     ck "$no_fm" --path "$R/tmp/zzz.md" --op write
     assert_has "CK-template 登録表に無い名前は <種類>" "$OUT" "type: <種類>"
 
@@ -184,6 +230,16 @@ generated:
     # 違反の集合の差だけでは no-frontmatter → missing:* が「増えた」に見える。免除はこのケースで効く
     ck $'---\ntype: Implementation Plan\n---\n# 見出し\n' --path "$T" --op edit --old-file "$old"
     assert_rc "CK-edit frontmatter なしの文書に不完全な frontmatter を付ける edit も 0" 0 "$RC" "$OUT"
+    # 免除するのはキーの不足だけ。付けた値の誤りを通すと、以後の Edit がその誤りを基準に grandfather される
+    ck $'---\ntype: X\ntitle: t\ndescription: d\nstatus: foo\n---\n# 見出し\n' --path "$T" --op edit --old-file "$old"
+    assert_rc "CK-edit frontmatter なしの文書に status: foo を付ける edit は 1" 1 "$RC" "$OUT"
+    assert_has "CK-edit 付けた値の誤りを理由に出す" "$OUT" "invalid:status"
+    ck $'---\ntype: X\ntitle: t\ndescription: d\nstatus: deprecated\n---\n# 見出し\n' --path "$T" --op edit --old-file "$old"
+    assert_rc "CK-edit frontmatter なしの文書に後継の無い deprecated を付ける edit は 1" 1 "$RC" "$OUT"
+    assert_has "CK-edit 後継の欠落を理由に出す" "$OUT" "missing:superseded_by"
+    ck $'---\ntype: X\ntitle: |\n  t\n---\n# 見出し\n' --path "$T" --op edit --old-file "$old"
+    assert_rc "CK-edit frontmatter なしの文書に複数行の値を付ける edit は 1" 1 "$RC" "$OUT"
+    assert_has "CK-edit 未対応の書式を理由に出す（付ける edit）" "$OUT" "unsupported-syntax"
     printf '%s' "$FM_FULL" >"$old"
     ck "${FM_FULL}"$'本文を足した\n' --path "$T" --op edit --old-file "$old"
     assert_rc "CK-edit 揃った frontmatter のまま本文を変える edit は 0" 0 "$RC" "$OUT"
@@ -320,17 +376,25 @@ run_lint_index_tests() {
     body="$(cat "$idx" 2>/dev/null)"
     assert_has "LI-index 先頭行は自動生成の印" "$(head -1 "$idx" 2>/dev/null)" "自動生成。手で編集しない。"
     assert_has "LI-index 種類ごとの節" "$body" "## Implementation Plan"
-    assert_has "LI-index 現行に title と description" "$body" $'### 現行\n\n* [題材](plan.md) - 要約の 1 文'
-    assert_has "LI-index 旧版を分ける" "$body" $'### 旧版（deprecated）\n\n* [前の題材](plan.archived-20261021-1030-r1.md) - 前の版'
-    assert_has "LI-index draft は現行に印つきで載る" "$body" "* [調査中](draft.md) - 書きかけ（draft）"
-    assert_has "LI-index 下の階層の写しも載る" "$body" "(review.archived-20261021-1030-r1/security-review.md)"
-    assert_has "LI-index キーの不足の節" "$body" "* [壁打ち](grill.md) - missing:status"
-    assert_has "LI-index frontmatter なしの節" "$body" $'## frontmatter なし\n\n* [research.md](research.md)'
-    assert_has "LI-index 違反の節" "$body" "* [t](bad.md) - invalid:status"
+    assert_has "LI-index 現行に title と description" "$body" $'### 現行\n\n* [題材](<plan.md>) - 要約の 1 文'
+    assert_has "LI-index 旧版を分ける" "$body" $'### 旧版（deprecated）\n\n* [前の題材](<plan.archived-20261021-1030-r1.md>) - 前の版'
+    assert_has "LI-index draft は現行に印つきで載る" "$body" "* [調査中](<draft.md>) - 書きかけ（draft）"
+    assert_has "LI-index 下の階層の写しも載る" "$body" "(<review.archived-20261021-1030-r1/security-review.md>)"
+    assert_has "LI-index キーの不足の節" "$body" "* [壁打ち](<grill.md>) - missing:status"
+    assert_has "LI-index frontmatter なしの節" "$body" $'## frontmatter なし\n\n* [research.md](<research.md>)'
+    assert_has "LI-index 違反の節" "$body" "* [t](<bad.md>) - invalid:status"
     local n
-    for n in "series-sync" "screenshots" "plan.html" "s.png" "log.md" "(index.md)"; do
+    for n in "series-sync" "screenshots" "plan.html" "s.png" "log.md" "(index.md)" "(<index.md>)"; do
         assert_not_has "LI-index 載らない: $n" "$body" "$n"
     done
+    # リンク先は <…> で囲む（空白・括弧を含む名前で壊れない）。< と > は %3C・%3E にする
+    local R3="$WORK/li-link"
+    git_init "$R3"; mkdir -p "$R3/tmp"
+    printf -- '---\ntype: Research\ntitle: 空白\ndescription: d\nstatus: stable\n---\n' >"$R3/tmp/a b (1).md"
+    printf -- '---\ntype: Research\ntitle: 山括弧\ndescription: d\nstatus: stable\n---\n' >"$R3/tmp/x<y>.md"
+    out="$(kn index --tmp "$R3/tmp" --stdout 2>&1)"
+    assert_has "LI-index 空白と括弧の名前はリンク先を <…> で囲む" "$out" "* [空白](<a b (1).md>)"
+    assert_has "LI-index 名前の < と > は %3C・%3E" "$out" "* [山括弧](<x%3Cy%3E.md>)"
     local order
     order="$(grep -n '^## ' "$idx" | cut -d: -f2- | tr '\n' '|')"
     if [[ "$order" == *"## キーの不足|## frontmatter なし|## 違反|" ]]; then
@@ -438,7 +502,10 @@ run_snapshot_tests() {
     assert_rc "SN-nofm snapshot は 0" 0 "$rc" "$out"
     copy="$S/$out"
     assert_has "SN-nofm 登録表から type" "$(fm_of "$copy")" "type: Research"
-    assert_has "SN-nofm H1 から title" "$(fm_of "$copy")" "title: 調査: 既存の hook"
+    # `: ` を含む値は引用して書く（YAML として読める形。check は引用なしでも読むので、字面で確かめる）
+    assert_has "SN-nofm H1 から title（: を含むので引用する）" "$(fm_of "$copy")" "title: '調査: 既存の hook'"
+    out="$(kn index --tmp "$S/tmp" --stdout 2>&1)"
+    assert_has "SN-nofm 引用した title を読み戻す（旧版の節）" "${out#*旧版（deprecated）}" "[調査: 既存の hook]"
     assert_has "SN-nofm description は元のパスと日時" "$(fm_of "$copy")" "description: tmp/research.md の "
     assert_has "SN-nofm 本文を保つ" "$(cat "$copy" 2>/dev/null)" $'---\n# 調査: 既存の hook\n\n本文'
     printf '本文だけ\n' >"$S/tmp/zzz.md"
@@ -449,6 +516,15 @@ run_snapshot_tests() {
     out="$(cd "$S" && kn snapshot tmp/context.md --reason r1 2>&1)"
     assert_has "SN-nofm 旧形式の写しに type を足す" "$(fm_of "$S/$out")" "type: Context"
     assert_has "SN-nofm 旧形式の写しは元のキーを保つ" "$(fm_of "$S/$out")" "base_commit: abc"
+
+    # --- SN-dupkey: 同じキーが 2 行ある元。parse は後勝ちで読むので、置き換えたキーの 2 行目以降を残すと写しが現行に化ける ---
+    printf -- '---\ntype: Research\ntitle: 重複\ndescription: d\nstatus: stable\nstatus: stable\n---\n# 重複\n' >"$S/tmp/dup.md"
+    out="$(cd "$S" && kn snapshot tmp/dup.md --reason r1 2>&1)"
+    if [[ "$(fm_of "$S/$out" | grep -c '^status:')" == 1 ]]; then pass "SN-dupkey status 行は 1 つだけ"; else fail "SN-dupkey status 行: $(fm_of "$S/$out")"; fi
+    assert_has "SN-dupkey 写しは deprecated" "$(fm_of "$S/$out")" "status: deprecated"
+    out="$(kn index --tmp "$S/tmp" --stdout 2>&1)"
+    assert_has "SN-dupkey 写しは目録の旧版に載る" "${out#*## Research}" $'### 旧版（deprecated）\n\n* [重複](<dup.archived-'
+    rm -f "$S/tmp/dup.md" "$S"/tmp/dup.archived-*
 
     # --- SN-dir: ディレクトリの写し（C-18） ---
     printf -- '---\ntype: Review Report\ntitle: 統合\ndescription: まとめ\nstatus: stable\n---\n' >"$S/tmp/review/unified.md"
@@ -470,6 +546,32 @@ run_snapshot_tests() {
     assert_rc "SN-dir 写しはすべて lint の違反にならない" 0 "$rc" "$out"
     assert_has "SN-dir 写しは正常に数える" "$out" "review.archived-"
 
+    # --- SN-dot: 名前を持たないコピー元（. ・..）。保存先がコピー元の中にできると、copytree が保存先自身を写し続ける ---
+    local D="$WORK/sndot" arg cwd n=0 got
+    git_init "$D"
+    mkdir -p "$D/tmp/review/sub"
+    printf '# x\n' >"$D/tmp/review/a.md"
+    for arg in "tmp/review:." "$D:tmp/review/." "$D:tmp/review/" "tmp/review/sub:.."; do
+        n=$((n + 1)); cwd="${arg%%:*}"; arg="${arg#*:}"
+        [[ "$cwd" == /* ]] || cwd="$D/$cwd"
+        out="$(cd "$cwd" && kn snapshot "$arg" --reason "dot$n" 2>&1)"; rc=$?
+        assert_rc "SN-dot ${arg}（cwd ${cwd#"$D"/}）は 0" 0 "$rc" "$out"
+        # . と .. は絶対パスで返るので、字面ではなく存在で確かめる
+        got="${out%/}"; [[ "$got" == /* ]] || got="$cwd/$got"
+        if [[ -d "$got" && "$(basename "$got")" == review.archived-*-dot$n && "$(cd "$(dirname "$got")" && pwd -P)" == "$(cd "$D/tmp" && pwd -P)" ]]; then
+            pass "SN-dot ${arg} の写しはコピー元の外（tmp/review.archived-…）"
+        else
+            fail "SN-dot ${arg} の写しの場所: $out"
+        fi
+        if [[ -z "$(find "$D/tmp/review" -name '*.archived-*' 2>/dev/null)" ]]; then pass "SN-dot ${arg} はコピー元の中に写しを作らない"; else fail "SN-dot ${arg} がコピー元の中に写しを作った: $(find "$D/tmp/review" -name '*.archived-*' | head -3)"; fi
+    done
+    # 防御の 2 枚目: 正規化を通っても保存先の実体がコピー元の実体の下になる（ディレクトリへの symlink）なら、何も作らずに 2
+    ln -s . "$D/tmp/up"
+    OUT="$(cd "$D/tmp" && kn snapshot up --reason loop 2>&1)"; RC=$?
+    assert_error "SN-dot 保存先がコピー元の実体の下になる symlink は 2" "up"
+    if [[ -z "$(find "$D/tmp" -maxdepth 1 -name 'up.archived-*' 2>/dev/null)" ]]; then pass "SN-dot 拒否したときは保存先を作らない"; else fail "SN-dot 拒否したのに保存先がある"; fi
+    rm -f "$D/tmp/up"
+
     # --- SN-reason: 理由の正規化（C-20） ---
     printf '%s' "$FM_FULL" >"$S/tmp/plan.md"
     out="$(cd "$S" && kn snapshot tmp/plan.md --reason 'a/b c' 2>&1)"
@@ -482,6 +584,24 @@ run_snapshot_tests() {
     fi
     out="$(cd "$S" && kn snapshot tmp/plan.md --reason "$(printf 'x%.0s' $(seq 1 60))" 2>&1)"
     if [[ "$out" =~ -x{40}\.md$ ]]; then pass "SN-reason 40 文字で切る"; else fail "SN-reason 40 文字: $out"; fi
+    # 名前は許可リスト（語の文字・. ・-）で正規化する。値は要るときだけ引用し、写しが lint の違反にならない
+    out="$(cd "$S" && kn snapshot tmp/plan.md --reason '| 理由' 2>&1)"
+    if [[ "$out" =~ archived-[0-9]{8}-[0-9]{4}-理由\.md$ ]]; then pass "SN-reason 記号は名前に出ない（| 理由 → 理由）"; else fail "SN-reason 記号: $out"; fi
+    assert_has "SN-reason | で始まる理由は引用する" "$(fm_of "$S/$out")" "archived_reason: '| 理由'"
+    # 読み戻し: 引用の中の '' は ' に戻る（書き手と対）。H1 に ' と : を含む元の写しを目録で読む
+    printf "# it's: x\n" >"$S/tmp/quote.md"
+    out="$(cd "$S" && kn snapshot tmp/quote.md --reason r1 2>&1)"
+    assert_has "SN-reason '' を含む title を書く" "$(fm_of "$S/$out")" "title: 'it''s: x'"
+    assert_has "SN-reason '' を ' に読み戻す（目録）" "$(kn index --tmp "$S/tmp" --stdout 2>&1)" "* [it's: x](<quote.archived-"
+    rm -f "$S/tmp/quote.md" "$S"/tmp/quote.archived-*
+    out="$(cd "$S" && kn snapshot tmp/plan.md --reason "it's: x" 2>&1)"
+    copy="$S/$out"
+    assert_has "SN-reason ' は '' にして引用する" "$(fm_of "$copy")" "archived_reason: 'it''s: x'"
+    # 置き換えの分岐: 既に archived_reason を持つ写しをもう一度写すと、その行を置き換える
+    out="$(cd "$S" && kn snapshot "${copy#"$S"/}" --reason "a: b" 2>&1)"
+    assert_has "SN-reason 置き換えた値も引用する" "$(fm_of "$S/$out")" "archived_reason: 'a: b'"
+    out="$(kn lint --tmp "$S/tmp" 2>&1)"; rc=$?
+    assert_rc "SN-reason 引用した写しも lint の違反にならない" 0 "$rc" "$out"
     OUT="$(cd "$S" && kn snapshot tmp/plan.md --reason '' 2>&1)"; RC=$?
     assert_error "SN-reason 空の理由は 2" "reason"
     OUT="$(cd "$S" && kn snapshot tmp/plan.md --reason ' / ' 2>&1)"; RC=$?
@@ -498,7 +618,7 @@ run_snapshot_tests() {
     if [[ "$out" == "$S/tmp/plan.archived-"*"-abs.md" ]]; then pass "SN-args 絶対パスで渡せば絶対パスで返す"; else fail "SN-args 絶対パス: $out"; fi
 
     # --- SN-index: 写しの後に目録を回し直す。目録の失敗では止めない（C-21） ---
-    assert_has "SN-index 目録の旧版に写しが載る" "$(cat "$S/tmp/index.md" 2>/dev/null)" "(plan-review.archived-"
+    assert_has "SN-index 目録の旧版に写しが載る" "$(cat "$S/tmp/index.md" 2>/dev/null)" "(<plan-review.archived-"
     local O="$WORK/sn-foreign" err
     git_init "$O"; mkdir -p "$O/tmp"
     printf '%s' "$FM_FULL" >"$O/tmp/plan.md"
@@ -535,6 +655,7 @@ shared/skills/fix/reference/category-examples.md|tmp/fixes.md
 shared/skills/fix/reference/fix-plan-template.md|tmp/fix-plan.md
 shared/skills/grill/SKILL.md|tmp/grill.md
 shared/skills/grill/reference/business-scenario.md|tmp/scenario.md
+shared/skills/grill/reference/business-scenario.md|tmp/scenario.md
 shared/skills/implement/reference/agent-selection.md|tmp/step-{n}-{agent-name}-result.md
 shared/skills/integration-test-run/reference/report-template.md|tmp/integration-test-results.md
 shared/skills/integration-test-scenario/reference/scenario-template.md|tmp/integration-test-scenario.md
@@ -542,6 +663,7 @@ shared/skills/outline/SKILL.md|tmp/outline.md
 shared/skills/review-plan/reference/report-template.md|tmp/plan-review.md
 shared/skills/review-strategic-ddd/reference/review-checklist.md|tmp/strategic-ddd-review.md
 shared/skills/review/SKILL.md|tmp/review/_ci-failures.md
+shared/skills/review/SKILL.md|tmp/review/_overview.md
 shared/skills/review/SKILL.md|tmp/review/{agent-name}-review.md
 shared/skills/review/reference/edge-case-reverification.md|tmp/review/_edge-{category}-review.md
 shared/skills/review/reference/unified-report-template.md|tmp/review/unified.md
@@ -608,10 +730,11 @@ run_template_tests() {
     done <<<"$all"
 
     # 書き手の一覧のすべての組に目印がある（目印を消すと、その雛形が上の検査から黙って外れるため）。
-    # 逆向き（目印があるのに一覧に無い）は見ない。一覧を目印に合わせて写し直すだけの検査になる
+    # 逆向き（目印があるのに一覧に無い）は見ない。一覧を目印に合わせて写し直すだけの検査になる。
+    # 件数でも比べる（同じ組の雛形が 2 つあるファイルでは、片方の目印を消しても組の集合は変わらないため。一覧に同じ行を 2 つ書く）
     local want got missing
-    want="$(printf '%s\n' "$WRITERS" | grep -v '^$' | sort -u)"
-    got="$(printf '%s' "$marks" | grep -v '^$' | sort -u)"
+    want="$(printf '%s\n' "$WRITERS" | grep -v '^$' | sort)"
+    got="$(printf '%s' "$marks" | grep -v '^$' | sort)"
     missing="$(comm -23 <(printf '%s\n' "$want") <(printf '%s\n' "$got"))"
     if [[ -n "$want" && -z "$missing" ]]; then
         pass "TP 書き手の一覧の $(printf '%s\n' "$want" | wc -l | tr -d ' ') 組すべてに目印がある"

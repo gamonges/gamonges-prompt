@@ -118,7 +118,7 @@ description: ユーザーのフィードバックに基づいて実装計画を�
 
 ### フェーズ 6: 対象計画ファイルの更新
 
-- [ ] 上書き前に `python3 ~/.claude/scripts/knowledge.py snapshot <対象計画ファイル> --reason "<なぜ前バージョンから変更したかの要約>"` で旧版を保存する。写しは `{name}.archived-{YYYYMMDD-HHmm}-{理由}.md`（例: `tmp/plan.archived-20260722-1430-DB接続プール見直し.md`）で、理由は frontmatter の `archived_reason` に残る。CLI が無い・exit 0 以外なら、同じ名前に手でコピーして冒頭に理由を 1 行記す
+- [ ] 上書き前に `python3 ~/.claude/scripts/knowledge.py snapshot <対象計画ファイル> --reason "<なぜ前バージョンから変更したかの要約>"` で旧版を保存する。写しは `{name}.archived-{YYYYMMDD-HHmm}-{理由}.md`（例: `tmp/plan.archived-20260722-1430-DB接続プール見直し.md`）で、理由は frontmatter の `archived_reason` に残る。CLI が無い・exit 0 以外なら、`cp` で同じ名前にコピーし、写しの frontmatter の `status` を `deprecated` にして `superseded_by: <元のパス>` と `archived_reason: <理由>` を足す（本文の冒頭には書かない。先頭行が `---` でなくなり、frontmatter なしとして deny される）
 - [ ] 「対象計画ファイルの自動判別」で決定した計画ファイル（`./tmp/plan.md` または `./tmp/fix-plan.md`）を修正後の実装計画で上書きする
 - [ ] すべてのフィードバックを反映しつつ、元の構成を維持する
 - [ ] 調査で得た最新情報（ファイルパス、URL、コード例など）で古い情報を更新する

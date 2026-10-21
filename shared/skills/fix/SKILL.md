@@ -108,7 +108,7 @@ description: 実装後の修正項目から修正計画 fix-plan.md を生成す
 
 ### フェーズ 5: 修正計画の出力
 
-- [ ] フェーズ 1.5 で「上書き」が選択された場合、出力前に `python3 ~/.claude/scripts/knowledge.py snapshot ./tmp/fix-plan.md --reason "<なぜ新計画に置き換えるかの要約>"` で旧版を保存する（保存はこのフェーズで行う。CLI が無い・exit 0 以外なら、`fix-plan.archived-{YYYYMMDD-HHmm}-{理由}.md` に手でコピーして冒頭に理由を 1 行記す）
+- [ ] フェーズ 1.5 で「上書き」が選択された場合、出力前に `python3 ~/.claude/scripts/knowledge.py snapshot ./tmp/fix-plan.md --reason "<なぜ新計画に置き換えるかの要約>"` で旧版を保存する（保存はこのフェーズで行う。CLI が無い・exit 0 以外なら、`cp` で `fix-plan.archived-{YYYYMMDD-HHmm}-{理由}.md` にコピーし、写しの frontmatter の `status` を `deprecated` にして `superseded_by: <元のパス>` と `archived_reason: <理由>` を足す（本文の冒頭には書かない。先頭行が `---` でなくなり、frontmatter なしとして deny される））
 - [ ] フェーズ 1.5 で選択された追記/上書き方針に従い、`./reference/fix-plan-template.md` のテンプレートで `./tmp/fix-plan.md` に出力する（上書きの場合は archive 保存後に完全置換、追記の場合は既存末尾に追加）
 
 Cursor 環境の場合は `.cursor/plan.md` または指定された plan ファイルに修正ステップとして書き出す。

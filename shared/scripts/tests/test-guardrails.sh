@@ -2044,6 +2044,11 @@ assert_lg "Edit で description 行を消すと deny" deny "$(lg_run "$(lg_edit 
 assert_lg "Edit でトリガー語を消すと ask" ask "$(lg_run "$(lg_edit '使用する時に呼ぶ。' '')" Edit)"
 assert_lg "Edit で本文だけ変えると素通し" pass "$(lg_run "$(lg_edit 'body' 'changed')" Edit)"
 assert_lg "存在しない SKILL.md への Edit は素通し" pass "$(lg_run "$(jq -nc --arg p "$WORK/lg/skills/none/SKILL.md" '{file_path:$p,old_string:"a",new_string:"b"}')" Edit)"
+# 無いファイルへの空の old_string は新しいファイルを作る。書く前の中身が無いので Write と同じく new_string を検査する
+assert_lg "存在しない SKILL.md への空の old_string の Edit は new_string を検査して deny" deny \
+    "$(lg_run "$(jq -nc --arg p "$WORK/lg/skills/none/SKILL.md" '{file_path:$p,old_string:"",new_string:"---\ndescription: Does a thing. 使用する時に呼ぶ。\n---\n"}')" Edit)"
+assert_lg "存在しない SKILL.md への空の old_string の Edit で new_string が正しければ素通し" pass \
+    "$(lg_run "$(jq -nc --arg p "$WORK/lg/skills/none/SKILL.md" '{file_path:$p,old_string:"",new_string:"---\nname: none\ndescription: Does a thing. 使用する時に呼ぶ。\n---\nbody\n"}')" Edit)"
 lg_multi() { jq -nc --arg p "$LG_DIR/SKILL.md" --argjson e "$1" '{file_path:$p,edits:$e}'; }
 assert_lg "MultiEdit の 2 つ目が description を消すと deny" deny \
     "$(lg_run "$(lg_multi '[{"old_string":"body","new_string":"x"},{"old_string":"description: Does a thing. 使用する時に呼ぶ。\n","new_string":""}]')" MultiEdit)"
@@ -2107,6 +2112,10 @@ TM_NOCLI="$WORK/tm-nocli"; TM_BROKEN="$WORK/tm-broken"
 mkdir -p "$TM_NOCLI" "$TM_BROKEN"
 cp "$LINT_HOOK" "$TM_NOCLI/"; cp "$LINT_HOOK" "$TM_BROKEN/"
 printf 'import sys\nsys.stdin.read()\nsys.stderr.write("broken\\n")\nsys.exit(2)\n' >"$TM_BROKEN/knowledge.py"
+# 出力なしで exit 1 を返す CLI（出力先の符号化で落ちた traceback と同じ形）。違反の deny と取り違えない
+TM_SILENT1="$WORK/tm-silent1"
+mkdir -p "$TM_SILENT1"; cp "$LINT_HOOK" "$TM_SILENT1/"
+printf 'import sys\nsys.stdin.read()\nsys.exit(1)\n' >"$TM_SILENT1/knowledge.py"
 
 tm_run() {  # $1=tool_name, $2=tool_input の JSON, $3=1 なら Codex（turn_id）, $4=hook → 出力。終了コードは RC_FILE
     local in
@@ -2155,6 +2164,18 @@ tm_both "E MultiEdit で今ある文書を変えるのは素通し" pass MultiEd
     "$(tm_multi "$TMR/tmp/legacy.md" '[{"old_string":"本文","new_string":"a"},{"old_string":"a","new_string":"b"}]')"
 tm_both "E MultiEdit の 2 つ目が status を消すと deny" deny MultiEdit \
     "$(tm_multi "$TMR/tmp/full.md" '[{"old_string":"題材\n","new_string":"x\n"},{"old_string":"status: stable\n","new_string":""}]')" "missing:status"
+# 無いファイルへの空の old_string は新しいファイルを作る（Write と同じく必須。old_string が空でなければツールが失敗する前提で素通し）
+tm_both "E 無いファイルへの空の old_string で frontmatter なしは deny" deny Edit \
+    "$(tm_edit "$TMR/tmp/new-edit.md" '' $'# x\n')" "frontmatter がありません"
+tm_both "E 無いファイルへの空の old_string で 4 キーがそろえば素通し" pass Edit "$(tm_edit "$TMR/tmp/new-edit.md" '' "$TM_FULL")"
+tm_both "E 無いファイルへの空でない old_string は素通し" pass Edit "$(tm_edit "$TMR/tmp/new-edit.md" 'a' $'# x\n')"
+# MultiEdit は空文字列から edits を順に当てる。素通しのケースで、順に当てた結果を見ていることを確かめる
+tm_both "E 無いファイルへの MultiEdit（1 つ目が空）で frontmatter なしは deny" deny MultiEdit \
+    "$(tm_multi "$TMR/tmp/new-multi.md" '[{"old_string":"","new_string":"# x\n"}]')" "frontmatter がありません"
+tm_both "E 無いファイルへの MultiEdit は順に当てて 4 キーがそろえば素通し" pass MultiEdit \
+    "$(tm_multi "$TMR/tmp/new-multi.md" '[{"old_string":"","new_string":"---\ntype: X\ntitle: t\ndescription: d\nstatus: STATUS\n---\n"},{"old_string":"STATUS","new_string":"stable"}]')"
+tm_both "E 無いファイルへの MultiEdit で 2 つ目が status を消すと deny" deny MultiEdit \
+    "$(tm_multi "$TMR/tmp/new-multi.md" '[{"old_string":"","new_string":"---\ntype: X\ntitle: t\ndescription: d\nstatus: stable\n---\n"},{"old_string":"status: stable\n","new_string":""}]')" "missing:status"
 # 前処理の失敗（読めないファイル）は、tmp/ の md でも止める。文言は対象に合わせる（C-28）
 printf '%s' "$TM_FULL" >"$TMR/tmp/locked.md"; chmod 000 "$TMR/tmp/locked.md"
 tm_both "E 前処理の失敗（読めないファイル）は ask" ask Edit "$(tm_edit "$TMR/tmp/locked.md" 'a' 'b')" \
@@ -2170,6 +2191,8 @@ tm_both "failclosed CLI が無くても scratchpad の md は素通し" pass Wri
     "" "$TM_NOCLI/hook-lint-skill-frontmatter.sh"
 tm_both "failclosed CLI が無くても tmp/ の md でないものは素通し" pass Write "$(tm_write "$TMR/tmp/x.txt" 'x')" \
     "" "$TM_NOCLI/hook-lint-skill-frontmatter.sh"
+tm_both "failclosed CLI が出力なしで exit 1 なら ask（違反の deny にしない）" ask Write "$(tm_write "$TMR/tmp/plan.md" "$TM_FULL")" \
+    "rc=1" "$TM_SILENT1/hook-lint-skill-frontmatter.sh"
 tm_both "failclosed CLI が exit 2 なら ask" ask Write "$(tm_write "$TMR/tmp/plan.md" "$TM_FULL")" \
     "broken" "$TM_BROKEN/hook-lint-skill-frontmatter.sh"
 tm_both "failclosed CLI が exit 2 でも SKILL.md の lint はそのまま" pass Write \
@@ -2213,6 +2236,45 @@ assert_ap "TM AP 一時ファイルを作れなければ ask [turn_id=0]" ask "$
 TM_OUT="$(TMPDIR="$WORK/no-such-tmpdir/" tm_ap_run "$TM_PATCH_UPD" "$TMR" 1 "$LINT_HOOK")"
 assert_ap "TM AP 一時ファイルを作れなければ deny [turn_id=1]" deny "$TM_OUT" "[要確認]"
 assert_contains "TM AP 一時ファイルを作れなければ deny [turn_id=1 元の理由]" "$(reason_of "$TM_OUT")" "一時ファイルを作れません"
+
+# --- TM-scope: tmp/ の判定の 3 実装（knowledge.py の split_tmp・bash の is_tmp_md・apply_patch の python）を同じ表で比べる。
+# 期待値は test-knowledge.sh の CK-scope に置き、ここでは (2)・(3) を (1) の結果と比べる（実装の間のずれだけを見る）。
+# (1) は実 CLI の rc（1 なら対象）、(2)・(3) は CLI の無い hook の判定（ask なら対象。bash で外れると CLI を呼ばない）。
+# 一致の行は 3 つとも同じ。上位集合の行: bash は正規化（.. を畳む）を持たず、bash と apply_patch の python は
+# どちらも除外（_runs/・index.md 等）を持たない（CLI が無ければ除外に当たるものも止める＝安全側）
+ln -s tmp "$TMR/t2"
+TMR2="$WORK/tm-outlink"; git_init "$TMR2"; mkdir -p "$WORK/tm-outside"; ln -s "$WORK/tm-outside" "$TMR2/tmp"
+tm_scope_sup() {  # $1=判定の名前, $2=CLI, $3=その判定, $4=ラベル。上位集合の行は、その判定が対象（CLI が無ければ止める）
+    if [[ "$3" == in ]]; then
+        pass "TM scope $1 は CLI の上位集合で対象と判定する: $4（CLI ${2} / ${1} ${3}）"
+    else
+        fail "TM scope $1 が対象の疑いのあるパスを外した: $4（CLI ${2}）"
+    fi
+}
+tm_scope() {  # $1=eq（3 つとも一致）| norm（bash だけ上位集合）| excl（bash と apply_patch が上位集合）, $2=絶対パス
+    local cli bash_in ap_in
+    printf '# x\n' | python3 "$(dirname "$LINT_HOOK")/knowledge.py" check --path "$2" --op write >/dev/null 2>&1
+    [[ $? == 1 ]] && cli=in || cli=out
+    [[ "$(decision_of "$(tm_run Write "$(tm_write "$2" $'# x\n')" 0 "$TM_NOCLI/hook-lint-skill-frontmatter.sh")")" == ask ]] && bash_in=in || bash_in=out
+    [[ "$(decision_of "$(tm_ap_run $'*** Begin Patch\n*** Add File: '"$2"$'\n+# x\n*** End Patch' "$TMR" 0 "$TM_NOCLI/hook-lint-skill-frontmatter.sh")")" == ask ]] && ap_in=in || ap_in=out
+    local label="${2#"$WORK"/}"
+    if [[ "$1" == excl ]]; then tm_scope_sup apply_patch "$cli" "$ap_in" "$label"; else assert_equal "TM scope apply_patch の判定は CLI と一致: $label" "$cli" "$ap_in"; fi
+    if [[ "$1" == eq ]]; then assert_equal "TM scope bash の判定は CLI と一致: $label" "$cli" "$bash_in"; else tm_scope_sup bash "$cli" "$bash_in" "$label"; fi
+}
+for TM_P in "$TMR/TMP/x.md" "$TMR/Tmp/x.md" "$TMR/tmp//x.md" "$TMR/t2/x.md" "$TMR/t2/new-dir/x.md" \
+    "$TMR2/tmp/x.md" "$WORK/scratch/tmp/x.md" "$TMR/docs/x.md"; do
+    tm_scope eq "$TM_P"
+done
+tm_scope norm "$TMR/tmp/../docs/x.md"
+# まだ無いディレクトリを .. で抜けるパスは、OS が途中の要素を解決できないので bash の字面でも実体でも当たらない。CLI は normpath で対象にする
+tm_scope norm "$TMR/nodir/../tmp/x.md"
+for TM_P in "$TMR/tmp/_runs/a.md" "$TMR/tmp/index.md"; do
+    tm_scope excl "$TM_P"
+done
+# 表が空回りしていないこと: 対象の行が CLI でも対象と判定されている（CK-scope と同じ期待値の最小の確認）
+printf '# x\n' | python3 "$(dirname "$LINT_HOOK")/knowledge.py" check --path "$TMR/t2/new-dir/x.md" --op write >/dev/null 2>&1
+assert_equal "TM scope symlink 経由の未作成サブディレクトリは CLI でも対象" 1 "$?"
+rm -f "$TMR/t2"
 tm_ap "Update File の現ファイルが読めなければ ask（tmp/ の文言）" ask $'*** Begin Patch\n*** Update File: tmp/none.md\n@@\n-a\n+b\n*** End Patch' "$TMR" \
     "tmp/ の md の frontmatter 検査の前処理に失敗しました ("
 

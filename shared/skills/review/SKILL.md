@@ -210,6 +210,7 @@ The main agent analyzes the PR holistically before launching subagents. This ana
 
 並列起動するサブエージェントに同じ context を inline で配信すると重複コストが大きい（agent 数 × 数百トークン）。共有コンテキストをスナップショットとして保存し、サブエージェントには **「これらを読め」** とパス参照のみを渡す方式に切り替える。
 
+<!-- tmp-frontmatter: tmp/review/_overview.md -->
 ```bash
 mkdir -p tmp/review
 
@@ -221,8 +222,8 @@ echo "$commit_log" > tmp/review/_commits.snapshot
 cat > tmp/review/_overview.md <<'EOF'
 ---
 type: Review Report
-title: PR Overview
-description: 修正の目的・アプローチ・影響範囲の要約
+title: {PR タイトル}
+description: {PR の修正の目的の 1 文}
 status: stable
 ---
 # PR Overview
