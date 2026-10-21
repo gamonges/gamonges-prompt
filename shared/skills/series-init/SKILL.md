@@ -4,7 +4,7 @@ description: LGTM 済みの横断計画の段の表から、シリーズの契�
 disable-model-invocation: true
 ---
 
-> **`/series-init` と明示して起動する。** 自然言語からは起動しない。
+> **`/series-init` と明示して起動する。** 自然言語からは起動しない。series-run は、この SKILL.md の手順を読んで同じ手順を行う（`Skill` ツールでは呼べないため）。
 
 1 つの対応を複数の PR に分ける（シリーズ）とき、横断計画の `## PR の段` から、シリーズの構成と全体像の完成形を持つ契約ファイル `series.md` を作り、各リポジトリの worktree に引き継ぎ（`tmp/context.md`）を書く。以後、各 worktree の `/create-pr` が PR を series.md に登録し、全 PR の本文の全体像を同期する。
 
@@ -122,7 +122,7 @@ disable-model-invocation: true
 - 改名に失敗した worktree: パス・今のブランチ名・エラー
 - orca が残した残骸: パス・ブランチ（消すかはユーザーが決める）
 - 書いた context.md・handoff と、worktree を作らなかった理由（対象外にした段も名指しする）
-- 次の手順: 各 worktree の `/design` が `outline:` を読む。PR は各 worktree の `/create-pr`（スタックなら `/stack-pr-submit`）が登録と同期を行う
+- 次の手順: 各 worktree の `/design` が `outline:` を読む。PR は各 worktree の `/create-pr`（スタックなら `/stack-pr-submit`）が登録と同期を行う。各 worktree の worker の起動と集約をまとめて行うなら `/series-run`（series.md があるので引き継ぎから始まる）
 
 ## 書かないもの
 

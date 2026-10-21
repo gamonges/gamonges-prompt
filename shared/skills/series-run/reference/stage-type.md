@@ -1,0 +1,74 @@
+# 段の型（作業単位の工程）
+
+1 つの作業単位（worktree）を、どの工程の順に、誰が、何を証拠に進めるかの定義。series-run の SKILL.md・worker の spec（`./worker-spec.md`）・状態ファイル（`./state-format.md`）はこの表の工程名と完了の証拠を参照し、写しを持たない。工程を替える（例: review の skill を替える）ときは、この表だけを直す。
+
+ツールのコマンドはここに書かない。起動・待ち合わせ・再試行は adapter の操作名で書く。
+
+## 前提: 作業単位の段は 1 つ
+
+series-init は同じリポジトリでスタックになる段を 1 つの worktree にまとめる（`../../series-init/SKILL.md:L53`）。段が 2 つ以上の作業単位を回すには、スタックの初期化・段の境目でのレイヤーの追加・ブランチごとの review と push が要り、まだ検証していない。段が 2 つ以上の作業単位は、どの工程も起動せず `対象外` にして、次のどちらかを案内する。
+
+- series-init の確認で、段ごとに worktree を分ける（同 L53「ユーザーは確認で分けられる」）
+- その worktree を手で回す
+
+## 工程
+
+| 工程 | 担当 | 起動する skill | 入力（その skill の実行条件を満たす状態） | 出力 | 完了の証拠 | 次 |
+|------|------|---------------|------------------------------------------|------|-----------|----|
+| design | worker | `/design` → `/plan-lgtm` | `tmp/context.md`（series-init の引き継ぎ。`outline:`・`series:` を持つ） | `tmp/plan.md`・`tmp/plan-review.md` | 完了報告が成功、かつ `tmp/plan-review.md` の `**総合判定**` が LGTM・`**対象**` が `tmp/plan.md`・plan-review.md が plan.md より新しい（plan-lgtm と同じ 3 点） | implement |
+| implement | worker | `/implement tmp/plan.md` → push（下の「push の手順」） | LGTM の `tmp/plan.md` | コミット・リモートのブランチ | 完了報告が成功、かつ `git -C <wt> log <起動時の HEAD>..HEAD` が空でなく、`git -C <wt> rev-parse @{u}` が HEAD と一致 | pr |
+| pr | ユーザー（④） | `/create-pr` | リモートのブランチ（`/create-pr` は push の手順を持たず、`gh pr create --head <今のブランチ>` を打つだけ。`../../create-pr/SKILL.md:L231-239`） | open のドラフト PR | `gh pr list --repo <段のリポジトリ> --head <ブランチ> --state open` に PR があり、series.md の `## 段` のその段に PR が登録された（coordinator は別のリポジトリで動くことがあるので `--repo` を付ける） | review |
+| review | worker（claude に固定） | `/review` | 今のブランチに open の PR がある（`../../review/SKILL.md:L96-102`。無いと止まる） | `tmp/review/unified.md` | 完了報告が成功、かつ unified.md の更新時刻が、工程の記録の起動時刻より後（review はコミットを作らないので HEAD では判定できない） | triage |
+| triage | coordinator | — | unified.md・横断計画・series.md | `tmp/fixes.md`（`../../fix/reference/category-examples.md:L6-22` の形） | 指摘ごとの仕分け（直す / 後の段 / 直さない）を状態ファイルに記録した | fix（直すものが 0 件なら完了） |
+| fix | worker | `/fix-lgtm-implement tmp/fixes.md` → push（下の「push の手順」） | `tmp/fixes.md`（fix の実行条件。`../../fix-lgtm-implement/SKILL.md:L22`） | 追加のコミット・リモートのブランチ | implement と同じ（起動時の HEAD からの新しいコミットと、`@{u}` と HEAD の一致） | 完了 |
+
+- 前の工程の完了の証拠は、次の工程の入力（実行条件）を含む。implement の push が無いと `/create-pr` が作る PR の head が無く、pr の工程の open の PR が無いと `/review` が止まる
+- review の worker を claude に固定するのは、Codex では `~/.agents/skills/review` に同名の別実装があると `tmp/review/unified.md` が作られないため（`README.md:L121`）。ほかの工程は claude を既定にし、状態ファイルの `## 運用の約束` で工程ごとに変えられる
+- 1 つの worktree には同時に 1 体の worker だけを入れる。工程は `tmp/` の成果物を前の工程が書いて次の工程が読むので、並列にするのは worktree の間だけ
+
+## 起動時の HEAD と時刻
+
+worker を起動する直前に、`git -C <wt> rev-parse HEAD` と起動時刻を、状態ファイルの `## 工程の記録` に書く。完了の証拠の「新しいコミット」と review の「起動時刻より後」はこの値を基準にする。再試行・再開のときも、その試行を起動したときの値を使う（前の試行のコミットを今回の成果と取り違えないため）。
+
+## push の手順
+
+implement と fix の worker が使う。初回かどうかの判定をここ 1 か所に置く。
+
+1. **前の段の取り込みの確認**: その段の base がシリーズの別の段のブランチ（series.md の段の行の base が、別の段のブランチ名）のときだけ、`git -C <wt> fetch origin` の後に `git -C <wt> log HEAD..origin/<その base>` が空であることを確かめる。空でなければ push せず、完了報告の「残り」に書く（前の段の修正の取り込み漏れを防ぐ。coordinator がユーザーに回す）
+2. `git -C <wt> rev-parse --abbrev-ref @{u}` が失敗する（upstream が無い。series-init は upstream を外す。`../../series-init/SKILL.md:L97`・L101）なら、`git -C <wt> remote get-url origin` とブランチ名が series.md の段の行と一致することを確かめてから `git -C <wt> push -u origin HEAD`
+3. upstream があれば `git -C <wt> push`
+4. 強制の push はしない（④。必要なら完了報告の「残り」に依頼として書く）
+
+## 起動の前の確認
+
+- **作業単位の段の数**: 1 つであること（上の前提）
+- **review・fix**: その段の PR が open であることを `gh pr view <PR> --repo <段のリポジトリ> --json state` で確かめる。pr の工程の後で、ユーザーが PR をマージしたり閉じたりすることがあるため（起動したときには PR が既にマージ済みだった事故がある）。open でなければ起動せず、③としてユーザーに回す
+- **同じ worktree の worker**: 状態ファイルの `## adapter` で、その worktree の試行のうち、まだ終わっていない（完了報告を受け入れていない・止めていない）ものが無いこと。あれば起動せず、ユーザーに回す。完了報告の後に残した terminal（pr の工程でユーザーが操作した terminal など）は数えない
+
+## pr の工程
+
+1. implement の工程の完了の証拠を確かめたら、作業単位を `ユーザーの操作待ち（/create-pr）` にし、adapter の「worker の terminal を残す」で implement の worker の terminal を残す
+2. その terminal で `/create-pr` を打つよう、worktree と terminal を名指しして案内する。worker は完了報告を送った後なので、ユーザーが打った `/create-pr` はユーザー自身の作業になり、その中の質問（通常の PR かスタックか など）はユーザーに直接出る（worker の契約の最後の項）
+3. ユーザーが作ったと伝えたとき、次の出来事を処理するたび、待ち受けが時間切れになるたびに、完了の証拠を確かめる。ユーザーの返事が無くても、証拠がそろえば進む
+4. 満たしたら、adapter の「worker を解放する」で implement の worker を解放して review へ進む（ユーザーが操作した terminal は解放では閉じない。後始末は adapter）
+
+## 仕分け（triage）が 0 件のとき
+
+直すものが 0 件なら fix を飛ばす。初回の push は implement の工程で済み、PR もあり、新しいコミットも無いので push の担い手は要らない。coordinator は `git -C <wt> rev-parse HEAD` と `git -C <wt> rev-parse @{u}` の一致だけを確かめて作業単位を `完了` にし、fix の工程の記録に「飛ばした（0 件）」と書く。一致しなければ③としてユーザーに回す（coordinator は push しない）。
+
+## 失敗したとき
+
+- 完了報告が失敗、または成功の報告でも完了の証拠を満たさないときは、同じ工程を 1 回だけ起動し直す。2 回目も失敗ならユーザーに回す（③として扱う）
+  - 失敗の報告・止めた試行の後は、adapter の「工程の再試行」で起動し直す
+  - 成功の報告で証拠を満たさないときは、その試行は成功として終わっていて再試行の対象にならないので、adapter の「worker を解放する」の後、「worker の起動」で新しく起動する（試行の回数は 2 回目として数える）
+- 失敗を受け入れた worker の terminal は、起動し直す前に adapter の「worker を解放する」で片付ける（ユーザーが中を見たいと言ったときだけ「worker の terminal を残す」）。2 回目の失敗でユーザーに回すときも同じ
+- 自動で 3 回以上は回さない。series-run はコードを持たず、上限の遵守はモデルの instruction-following に依存するので、上限を文で決めておく（`../../plan-lgtm/SKILL.md:L69` と同じ理由）
+- 試行の数え方:
+  - **起動そのものの失敗**（起動の応答が失敗・結果が不明）は、worker の失敗報告と分ける。試行の回数に数えず、adapter の「起動の失敗の扱い」に回す
+  - **死んだ worker**（終了の積極的な証拠がある）は、adapter の「試行を止める」で止めてから扱う。トランスクリプトがあれば（作業を始めていた）、完了報告が失敗だったときと同じく試行の 1 回に数える（数えないと、毎回途中で死ぬ worker が上限なしに起動し直される）。トランスクリプトが無ければ（作業を始める前に死んだ）試行に数えずに 1 回だけ起動し直し、2 回続いたらユーザーに回す（続いた回数は `## 工程の記録` の成否の欄に「起動直後に死亡」と書いて数える。再開しても数が失われない）（ツールが起動の成功を返した後の死なので、ツール側の起動の失敗の上限には数えられない）
+
+## 工程の境目での `tmp/` の退避（B6 の差し込み口）
+
+同じ worktree で工程が進むと、後の工程の skill が前の工程の `tmp/` の成果物を上書きする（例: fix-lgtm-implement の中の review-plan が `tmp/plan-review.md` を作り直す）。工程の境目での `tmp/` の退避の規則は、`feat-tmp-okf-document` の決定に従う（未決）。
+
+決まるまでは、design の工程の完了の証拠を確かめたときに、`tmp/plan-review.md` の `**総合判定**`・`**対象**`・更新時刻の 3 点を状態ファイルの `## 工程の記録` に写す。ファイルそのものは動かさない（退避の規則を先取りしないため）。

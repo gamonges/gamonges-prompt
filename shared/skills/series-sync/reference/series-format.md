@@ -1,6 +1,6 @@
 # series.md の契約（正典）
 
-シリーズ（1 つの対応を複数の PR に分けたもの）の構成と進捗の正本 `series.md` の形式。`series-init`（作る）・`series-sync`（同期する）・`create-pr`／`stack-pr-submit`（PR を登録する）がこのファイルを参照し、各 skill には写しを置かない。形式はスクリプト `../scripts/series_sync.py` の `check` が強制し、挙動テスト `shared/scripts/tests/test-series-sync.sh` が固定する（契約とパーサが食い違えばテストが落ちる）。
+シリーズ（1 つの対応を複数の PR に分けたもの）の構成と進捗の正本 `series.md` の形式。`series-init`（作る）・`series-sync`（同期する）・`create-pr`／`stack-pr-submit`（PR を登録する）・`series-run`（読む）がこのファイルを参照し、各 skill には写しを置かない。形式はスクリプト `../scripts/series_sync.py` の `check` が強制し、挙動テスト `shared/scripts/tests/test-series-sync.sh` が固定する（契約とパーサが食い違えばテストが落ちる）。
 
 PR の本文に描く全体像の見た目（見出し・凡例・classDef・表の列）は `../../create-pr/reference/pr-description-template.md` の「全体像ブロック」が正典で、ここには書かない。
 
@@ -194,7 +194,7 @@ series.md を書く口は 3 つだけで、どれも `<series.md>.lock` を `fcn
 | 口 | 持ち分 | 呼ぶもの |
 |----|--------|---------|
 | `register` | `## 段` の 1 行のブランチ・PR（worktree が空なら埋める） | create-pr・stack-pr-submit・`/series-sync` |
-| `write` | series.md 全体（ただし運用の値は引き継ぐ） | series-init だけ |
+| `write` | series.md 全体（ただし運用の値は引き継ぐ） | series-init だけ（series-run が series-init の手順を行うときを含む） |
 | `status` | `## 進捗` と `timestamp` | `/series-sync`・同期の手順 |
 
 - 人の手編集（`## メモ`）はロックの外になる。同期の実行中に series.md を手で編集しない（コードでは守れない。残るリスク）
