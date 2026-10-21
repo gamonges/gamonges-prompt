@@ -2,7 +2,14 @@
 
 `integration-test-scenario` スキルのフェーズ 4 が `./tmp/integration-test-scenario.md` に出力する際の骨子。
 
+<!-- tmp-frontmatter: tmp/integration-test-scenario.md -->
 ```markdown
+---
+type: Integration Test Scenario
+title: [対象機能名] の統合テストシナリオ
+description: [検証する観点の要約を 1 文]
+status: stable
+---
 # 統合テストシナリオ: [対象機能名]
 
 ## ① 観点一覧

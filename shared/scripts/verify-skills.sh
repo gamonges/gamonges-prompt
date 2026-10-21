@@ -33,7 +33,7 @@
 #   ./shared/scripts/verify-skills.sh                        構造検証のみ
 #   ./shared/scripts/verify-skills.sh --with-behavior-tests   挙動テストも実行する
 #
-# 挙動テスト (tests/test-guardrails.sh・tests/test-setup-codex.sh・tests/test-series-sync.sh・tests/test-codex-run.sh) を既定で走らせないのは、fixture 生成に数十秒かかり
+# 挙動テスト (tests/test-guardrails.sh・tests/test-setup-codex.sh・tests/test-series-sync.sh・tests/test-codex-run.sh・tests/test-knowledge.sh) を既定で走らせないのは、fixture 生成に数十秒かかり
 # 構造検証の即応性を損なうため。ただし fail-open は挙動テストしか捉えられないので、
 # shared/scripts/ を編集したときはフラグ付きで実行する。
 set -euo pipefail
@@ -967,6 +967,14 @@ if [ "$WITH_BEHAVIOR_TESTS" -eq 1 ]; then
         pass "Codex のラッパーの挙動テストがすべて通りました"
     else
         fail "Codex のラッパーの挙動テストに失敗があります (上記の [FAIL] を参照)"
+    fi
+    # tmp/ の md の frontmatter の CLI と、skill の雛形の frontmatter。fixture は mktemp の下に作る
+    echo ""
+    echo -e "${BLUE}== 挙動テスト: tests/test-knowledge.sh（tmp/ の md の frontmatter）==${NC}"
+    if bash "${REPO_SHARED}/scripts/tests/test-knowledge.sh"; then
+        pass "tmp/ の md の frontmatter の挙動テストがすべて通りました"
+    else
+        fail "tmp/ の md の frontmatter の挙動テストに失敗があります (上記の [FAIL] を参照)"
     fi
 fi
 

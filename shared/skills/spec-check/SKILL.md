@@ -57,7 +57,14 @@ plan.md が既存仕様（`openspec/specs/`）と矛盾しないか網羅的に�
 
 `./tmp/spec-check.md` に以下のフォーマットで出力する:
 
+<!-- tmp-frontmatter: tmp/spec-check.md -->
 ```markdown
+---
+type: Spec Check
+title: {plan の題材} の仕様整合性チェック
+description: {判定と主なずれの要約を 1 文}
+status: stable
+---
 # 仕様整合性チェック
 
 **対象**: {plan ファイルパス}

@@ -8,12 +8,12 @@ review / plan / fix-plan / research のいずれにも該当しない Markdown �
 
 ```
 <header>
-  <h1>{title (入力 MD の最初の # 行、または basename)}</h1>
+  <h1>{title (入力 MD の先頭の frontmatter の title、無ければ最初の # 行、または basename)}</h1>
   <p class="generated-at">generated at {ISO 8601 timestamp}</p>
 </header>
 
 <main>
-  <!-- 入力 MD の h2/h3/段落/リスト/コードブロック/テーブル/blockquote をそのまま HTML 化 -->
+  <!-- 入力 MD の h2/h3/段落/リスト/コードブロック/テーブル/blockquote をそのまま HTML 化。先頭の frontmatter（先頭行の --- から次の --- まで）は本文に出さない -->
 </main>
 
 <footer>

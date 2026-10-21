@@ -4,7 +4,14 @@
 
 `./tmp/strategic-ddd.md` に Phase ごとに段階的に追記する形で出力する:
 
+<!-- tmp-frontmatter: tmp/strategic-ddd.md -->
 ```markdown
+---
+type: Strategic DDD
+title: {チケット番号} {機能名} の戦略的 DDD 設計
+description: {境界と主要な集約の要約を 1 文}
+status: stable
+---
 # 戦略的 DDD 設計: {チケット番号} {機能名}
 
 ## 1. 問題空間のスコーピング

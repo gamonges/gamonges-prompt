@@ -97,8 +97,9 @@ scheduled task から repo skill を回している場合は `/schedule` の一�
 1. `shared/skills/<skill-name>/SKILL.md` を作成（YAML frontmatter に `name` と `description` 必須）
 2. `disable-model-invocation: true` を付けたら、同じ skill に `agents/openai.yaml`（`policy:` の下に `allow_implicit_invocation: false` の 2 行）も置く。Codex は frontmatter のこのフィールドを読まず、自然文での暗黙起動を止めるのはこのファイルだけ（`verify-skills.sh` の check 9 が過不足を検査する）
 3. 入力ファイル（既定 `./tmp/context.md`）で質問・要件を受け取る skill は、入口を `../brief/reference/entry.md` に従わせる（質問を文章や会話の依頼で渡されたときも同じ手順に入れるため。`verify-skills.sh` の check 2(b) が、パラメーター節の既定のファイルの書き方で対象を見つけ、参照漏れを検査する）
-4. `./setup.sh install` を再実行
-5. `./shared/scripts/verify-skills.sh` で構造検証
+4. `tmp/` に md を書く場合は、雛形のフェンスに frontmatter（`python3 ~/.claude/scripts/knowledge.py spec`）を入れ、フェンスの直前に `<!-- tmp-frontmatter: <書き先> -->` を置き、`shared/scripts/tests/test-knowledge.sh` の `WRITERS` に `<雛形のファイル>|<書き先>` を足す。新しい種類なら `knowledge.py` の `TYPES` にも足す。Bash（heredoc）で書く雛形も同じ（hook を通らないので、TP の検査が唯一の確認になる）
+5. `./setup.sh install` を再実行
+6. `./shared/scripts/verify-skills.sh` で構造検証
 
 補助ファイル（テンプレート、参考資料、検証スクリプト等）は同じ skill ディレクトリ内に配置する（例: `shared/skills/design/reference/plan-template.md`）。**本文が長い skill は `reference/` に切り出し、「読むタイミング」を表で示す**（`shared/skills/review/SKILL.md` の冒頭が実例）。表は「必ず読む」と「条件付きで読む」の 2 段に分ける — 起動したら必ず通るフェーズのものを条件付きと並べると、「該当する場合のみ読む」という規約の意味が薄れる。
 
@@ -114,6 +115,7 @@ scheduled task から repo skill を回している場合は `/schedule` の一�
 1. `shared/agents/<category>/` に `.md` ファイルを作成する（配置と再起動の要否は `AGENTS.md` のセットアップ節）
 2. `./setup.sh install` を再実行（Codex には install 時に `.md` から TOML を生成して置くので、**`.md` を編集したら再実行しないと古い TOML が残る**）
 3. `README.md` はセットアップスクリプトがスキップするため、ドキュメント用に使用可
+4. agent が `tmp/` に md を書く場合は（`documenter` の `tmp/doc-sync-report.md` など）、Skills と同じく、雛形のフェンスに frontmatter（`python3 ~/.claude/scripts/knowledge.py spec`）を入れ、フェンスの直前に `<!-- tmp-frontmatter: <書き先> -->` を置き、`shared/scripts/tests/test-knowledge.sh` の `WRITERS` に `<雛形のファイル>|<書き先>` を足す。新しい種類なら `knowledge.py` の `TYPES` にも足す。Bash（heredoc）で書く雛形も同じ（hook を通らないので、TP の検査が唯一の確認になる）
 
 注意点:
 

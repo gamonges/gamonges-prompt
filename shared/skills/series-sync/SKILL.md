@@ -42,9 +42,9 @@ disable-model-invocation: true
 | `write <series.md> --from F [--drop S …]` | 読まない | 全体を書く（series-init 専用） | `written: …`・`inherited: …`・`reset: 段 <段> のブランチ <B>（<旧 O/R> のもの）を引き継がない`・`dropped: <段> <O/R#N>` | 0 / 1（F が check を通らない。今の series.md の表が壊れている） / **3**（登録済みの段が F にも `--drop` にも無い。F のブランチ・PR が今の値と違う。PR が登録済みの段のリポジトリが変わった。引き継いだ後に同じ PR が 2 つの段に入る） |
 | `status <series.md>` | 読む | `## 進捗` と `timestamp` を書く | 進捗の表と `warning: …` | 0 / 1（GitHub の読み取りに失敗） |
 | `plan <series.md> [--out DIR] [--migrate]` | 読む（GET） | 読む | PR ごとに `O/R#N <状態> <insert\|replace\|migrate\|none\|error> [理由]`、`changes: X / errors: Y`、`dir: <DIR>` | 0 / 1（check の失敗、error の PR がある） |
-| `apply --plan DIR [--only O/R#N …]` | 読む・**書く**（PATCH） | 読まない | PR ごとに `written` / `unchanged` / `skipped` / `mismatch` / `failed` | 0 / 1（skipped・mismatch・failed がある。`--only` の PR が plan に無い） |
+| `apply --plan DIR\|DIR/plan.json [--only O/R#N …]` | 読む・**書く**（PATCH） | 読まない | PR ごとに `written` / `unchanged` / `skipped` / `mismatch` / `failed` | 0 / 1（skipped・mismatch・failed がある。`--only` の PR が plan に無い。`plan.json` が見つからない — `error:` の行に解決した絶対パス） |
 
-- `plan` の DIR の既定は `<series.md のディレクトリ>/series-sync/<YYYYmmdd-HHMMSS>/`。同じ名前があれば `-2`・`-3` を付ける。実際の DIR は出力の `dir:` の行で知る。DIR には `plan.json`・`*.before.md`（GitHub の今の本文）・`*.after.md`（書く本文）が残る
+- `plan` の DIR の既定は `<series.md のディレクトリ>/_runs/series-sync/<YYYYmmdd-HHMMSS>/`（生ログの置き場。tmp/ の文書と分ける）。同じ名前があれば `-2`・`-3` を付ける。実際の DIR は出力の `dir:` の行で知る（`--out` が相対でも絶対パスで出る）。DIR には `plan.json`・`*.before.md`（GitHub の今の本文）・`*.after.md`（書く本文）が残る
 - `plan` が exit 1 でも、error でない PR の plan は DIR に書かれている（error の PR は `apply` で書かれない）。check の失敗のときだけは何も書かない
 - `apply` は本文を読み直し、after と同じなら `unchanged`（書かない）、plan の時点（before の sha256）から変わっていれば `skipped`（書かない）、どちらでもなければ PATCH して読み直し、after と違えば `mismatch`。同じ DIR で何度やり直しても、書き終えた PR を二重に書かない
 - GitHub への書き込みは `gh api -X PATCH repos/<O/R>/pulls/<N> --input <DIR>/<…>.patch.json` だけ（`gh pr edit` は Projects (classic) のエラーで失敗するリポジトリがあるため）
@@ -64,7 +64,7 @@ disable-model-invocation: true
    - マージ済みの PR も一覧に含まれる（同期はマージ済みの本文も書き換える）。止めたい PR があれば、ここで `--only` の対象から外せる
    - `heading-only:` の error があり、`--migrate` 無しの plan だったとき: 同じ質問に「`--migrate` で plan をやり直し、その PR の既存の全体像も置き換える」を選択肢として足す（シリーズを作る前に `/create-pr` した単独の PR が、後から登録されたときに必ず通る）。選ばれたら手順 3 を `--migrate` でやり直し、手順 5 の確認をもう一度だけ行う
    - `markers:`・`migrate:`・`too-long:`・`gh:` の error は報告だけにする（本文を手で直してから、もう一度 `/series-sync`）
-6. 承認 → `$SYNC apply --plan <DIR>`（一部だけなら `--only O/R#N` を並べる）。`skipped` は「plan の後に本文が変わったので、plan からやり直す」と案内する。`mismatch` は GitHub で本文を確かめるよう報告する。どちらも自動で再試行しない
+6. 承認 → `$SYNC apply --plan <DIR>`（`<DIR>` は手順 3 の `dir:` の行の値をそのまま渡す。絶対パスなので cwd に依らない。`<DIR>/plan.json` を渡してもよい。一部だけなら `--only O/R#N` を並べる）。`skipped` は「plan の後に本文が変わったので、plan からやり直す」と案内する。`mismatch` は GitHub で本文を確かめるよう報告する。どちらも自動で再試行しない
 7. 報告: 書いた PR・unchanged・skipped・mismatch・failed・error と、plan の DIR（前の本文は DIR の `*.before.md` に残る）
 
 **キャンセルしたとき**: 本文は書かれない（新しい PR には全体像が入らない）。後で `/series-sync` を実行すれば入る、と報告する。

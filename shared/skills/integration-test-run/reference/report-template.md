@@ -16,3 +16,15 @@
 ④ 実測ログ抜粋
 ⑤ 発見・注意（経路固有の制約、判定チェックリストで切り分けた環境要因の記録を含む）
 ⑥ 参照実装（該当コアの実装ファイルパス）
+
+出力の先頭には次の frontmatter を置く（書式は `python3 ~/.claude/scripts/knowledge.py spec`）:
+
+<!-- tmp-frontmatter: tmp/integration-test-results.md -->
+```yaml
+---
+type: Integration Test Results
+title: [対象機能名] の統合テスト結果
+description: [status 区分ごとの件数の要約を 1 文]
+status: stable
+---
+```

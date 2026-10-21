@@ -53,6 +53,18 @@ description: 実装計画(plan.md)が「強度高×距離遠×変動性高」ま
 - 結合関係テーブル（`coupling-anatomy` の**推測ベース変種**: 想定モジュール名/概念名、根拠列は `plan.md:L{number}` または `(推測)` タグ）
 - `review-plan` と共通の重要度分類（❌Critical / ⚠️Warning / ✅Good。`review-plan` が読み込んだ際にそのまま統合しやすいように）
 
+出力の先頭には次の frontmatter を置く（書式は `python3 ~/.claude/scripts/knowledge.py spec`）:
+
+<!-- tmp-frontmatter: tmp/coupling-gate.md -->
+```yaml
+---
+type: Coupling Gate
+title: {計画の題材} の結合ゲート
+description: {PASS / WARN / FAIL と理由の要約を 1 文}
+status: stable
+---
+```
+
 #### 判定基準
 
 - **PASS**: 強度高×距離遠×変動性高等の危険な結合バランスが検出されず（BALANCEがすべてtrue）、かつ各関係の根拠が `(推測)` タグのみに依存していない

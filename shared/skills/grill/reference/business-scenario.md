@@ -60,7 +60,7 @@ QA 指摘の再発原因は「**同一機能に複数の入口と複数の出口
 
 ## 題材の同一性（frontmatter と resume）
 
-`./tmp/grill.md` と同じ規約を適用する — **同一題材なら resume（in-place で継続）／別題材なら上書き前に 1 問確認**する（`grill/SKILL.md` の入力節）。2 つのファイルで挙動が違うと、前題材の残骸を今回のシナリオと誤認する事故になる。
+`./tmp/grill.md` と同じ規約を適用する — **同一題材なら resume（in-place で継続）／別題材なら上書き前に 1 問確認**する（`grill/SKILL.md` の入力節）。2 つのファイルで挙動が違うと、前題材の残骸を今回のシナリオと誤認する事故になる。resume の更新は Edit で該当ブロックを差し替える。Write で全体を書き直すときは必須の 4 キーをそろえる（install 前に作った文書は `status` などを欠くことがあり、Write だと deny される。Edit は違反を増やさなければ通る）。
 
 **不一致のときの 1 問は次の 3 択で、それぞれ帰結を持つ**（`/design` フェーズ 1.5 の確認と同じ形に揃える）:
 
@@ -70,17 +70,22 @@ QA 指摘の再発原因は「**同一機能に複数の入口と複数の出口
 | **追記** | 既存を残し、**既存の最大 `n` + 1** から新しい `S-n` を足す（採番の衝突を避ける）。frontmatter の `title` は新しい題材にする（`title` は「今回どの題材として resume するか」の判定に使うため。前の題材のまま残すと、次にその題材で始めたときに一致と取り違える） |
 | **キャンセル** | `scenario.md` を触らず、Phase 0（または `/design` フェーズ 1.2）を中断する |
 
-frontmatter（`grill.md` と同型。`type` と **`title` が必須**、他は任意 — `title` は上記の同一性判定に使うため、未記入だと判定が成立しない）:
+frontmatter（`grill.md` と同型。必須キーは `type`・`title`・`description`・`status`（`knowledge.py spec`）、`tags`・`timestamp` は任意。`title` は上記の同一性判定にも使うため、未記入だと判定が成立しない）:
 
+<!-- tmp-frontmatter: tmp/scenario.md -->
 ```yaml
 ---
 type: Business Scenario
-title: <題材>                        # 同一題材かの判定に使う（**本ファイルでは必須**）
+title: <題材>
 description: <この変更で何が変わるかの要約>
+status: stable
 tags: [business-scenario, ...]
-timestamp: <最終更新日時 ISO8601>    # in-place 更新のたびに現在時刻へ上書き
+timestamp: <最終更新日時 ISO8601>
 ---
 ```
+
+- `title`: 同一題材かの判定に使う（**本ファイルでは必須**）
+- `timestamp`: in-place 更新のたびに現在時刻へ上書きする
 
 ## 記述書式（固定 5 項目）
 
@@ -120,9 +125,16 @@ Notion 反映: <価値ページ URL> / 反映日: <YYYY-MM-DD> / 確認依頼先
 
 ## `## 判定: シナリオ不要` の書式
 
-発火判定がいずれも No のとき、`S-n` を立てず次の 1 ブロックだけを書いて閉じる。
+発火判定がいずれも No のとき、`S-n` を立てず、frontmatter と次の 1 ブロックだけを書いて閉じる（frontmatter は上の雛形と同じ型。`title` は同一性の判定に使う）。
 
+<!-- tmp-frontmatter: tmp/scenario.md -->
 ```markdown
+---
+type: Business Scenario
+title: <題材>
+description: 業務シナリオ不要と判定（<理由の要約>）
+status: stable
+---
 ## 判定: シナリオ不要
 理由: <判定 1・2 がいずれも No である理由。列挙した属性・列を名指しする>
 判定日: <YYYY-MM-DD>

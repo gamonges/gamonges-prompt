@@ -80,7 +80,7 @@ description: |
    - `review` style: `./reference/examples/fix-plan.html` (カードレイアウト流用)
    - `research` style: `./reference/examples/adr-pipeline.html` + (情報量多 → `css-tabs.html`)
    - `generic` style: example 不要
-4. 入力 `<input.md>` を Read
+4. 入力 `<input.md>` を Read。先頭の frontmatter（先頭行の `---` から次の `---` まで。tmp/ の md は持つ）は本文に出さず、`title` があれば見出しの題に使う（どの style でも同じ。research.md の `---` 区切りの最初のブロックとして扱わない）
 
 ### フェーズ 4: HTML 組み立て
 

@@ -4,11 +4,18 @@
 
 該当判定ルールと記入例は `./phase-details.md`、受入条件の書き方は `./acceptance-criteria.md` を参照。
 
+<!-- tmp-frontmatter: tmp/plan.md -->
 ````markdown
+---
+type: Implementation Plan
+title: [機能名]
+description: [計画の要約を 1 文]
+status: stable
+---
 # 実装計画: [機能名]
 
 モード: [concept | implement | refactor | bug]
-<!-- [該当時] コンテキストファイルの mode: が既知のモードに解決した時だけ置く（未知の値は置かない）。H1 は変えない（spec-propose がタイトルから change-name を推定するため）。frontmatter にしないのは、plan.md の先頭行を読む既存の処理に影響させないため -->
+<!-- [該当時] コンテキストファイルの mode: が既知のモードに解決した時だけ置く（未知の値は置かない）。H1 は変えない（spec-propose がタイトルから change-name を推定するため）。モードは frontmatter のキーにせず、H1 の直下のこの行に置く（implement・grill が `../../brief/reference/modes.md` の規則でこの行を読むため） -->
 
 ## TL;DR
 <!-- [任意] 1〜3 行で全体像を要約。/status や PR 本文への転用を意識 -->

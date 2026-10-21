@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# PreToolUse hook: SKILL.md の frontmatter lint (name / description 必須 + トリガー語推奨)
+# PreToolUse hook: SKILL.md の frontmatter lint (name / description 必須 + トリガー語推奨) と、
+# tmp/ の md の frontmatter 検査（判定の本体は同じディレクトリの knowledge.py check。ここでは
+# 書いた後の中身と書く前のファイルを作って渡し、終了コードを deny / ask に変えるだけ）
 # 公式: https://code.claude.com/docs/en/hooks
 # matcher: "Edit|Write|MultiEdit" 限定で settings.json から登録
 # （Codex の hooks.json にも同じ定義が入る。Codex では Edit / Write の matcher が apply_patch にも当たる）
@@ -7,8 +9,9 @@
 # 検査仕様は shared/skills/_template/reference/skill-frontmatter-spec.md を参照
 # - 必須フィールド欠落 → permissionDecision: "deny" でファイル書き込みを阻止
 # - トリガー語不足 → permissionDecision: "ask" で人間判断（Codex は ask に未対応なので deny に変える）
-# - 検査対象外 (非 SKILL.md / _*/SKILL.md) → exit 0 で素通し
-# - Codex の apply_patch: patch を解釈して対象の SKILL.md ごとに同じ検査を当てる（lint_apply_patch）
+# - 検査対象外 (非 SKILL.md / _*/SKILL.md / tmp/ の md でないもの) → exit 0 で素通し
+# - tmp/ の md: knowledge.py が 1 なら deny（理由に雛形）。それ以外の失敗（CLI・python が無い・exit 2 等）は ask（fail-closed）
+# - Codex の apply_patch: patch を解釈して、対象の SKILL.md と tmp/ の md ごとに同じ検査を当てる（lint_apply_patch）
 #
 # NOTE: 機微情報を扱う場合は CLAUDE.md:L28-L46 の env-var indirection を参照
 # NOTE: MultiEdit パースは Python フォールバックで多行/特殊文字を安全に扱う (W-B 対応)
@@ -19,7 +22,8 @@ INPUT=$(cat)
 # 前処理のエラーは実行ごとの一時ファイルに書く（固定パスだと、並行して走る別の hook の失敗の理由を出す）。
 # trap の中のコマンドは失敗させない。失敗すると終了コードが変わり、出力済みの判定が無効になる
 ERR_FILE=""
-trap 'if [[ -n "$ERR_FILE" ]]; then rm -f "$ERR_FILE" 2>/dev/null || true; fi' EXIT
+OLD_FILE_TMP=""
+trap 'if [[ -n "$ERR_FILE" ]]; then rm -f "$ERR_FILE" 2>/dev/null || true; fi; if [[ -n "$OLD_FILE_TMP" ]]; then rm -f "$OLD_FILE_TMP" 2>/dev/null || true; fi' EXIT
 ERR_FILE=$(mktemp "${TMPDIR:-/tmp}/skill-lint-err.XXXXXX" 2>/dev/null) || ERR_FILE=""
 # malformed JSON は silent miss を生むため非ゼロ終了して可観測化
 # オブジェクトでない入力（配列・tool_input が false 等）も止める。jq -e . は通し、後続の jq が exit 5 で落ちて素通しする
@@ -128,6 +132,104 @@ fi
 exit 0
 }
 
+# tmp/ の md か（bash 側の判定）。.md で終わり、祖先の tmp の親に .git がある。除外（_runs/・index.md 等）と
+# 正規化（.. を畳む）は持たない — CLI が判定し、CLI が無いときは除外に当たるものも止める（安全側）。この判定は
+# knowledge.py の split_tmp の上位集合で、test-guardrails.sh の TM-scope の表で確かめている。. ・.. の要素を含む
+# パスは畳まずに対象の疑いありとして CLI に回す（まだ無いディレクトリを .. で抜けるパスは、OS が途中を解決できず
+# 字面でも実体でも当たらない。外すと CLI を呼ばずに終わる）。scratchpad
+# （/private/tmp/…）は tmp の親に .git が無いので、CLI が無くても止めず、python も起動しない。
+# 字面で当たらなければ実体でも見る（順序は字面が先。tmp/ を repo の外へ向けた symlink を外さないため）。実体は
+# 無い末尾を残して祖先を解決する（symlink の先のまだ無いサブディレクトリへの Write を外さないため。外すと
+# CLI を呼ばずに終わり、検査そのものが消える）。比較は glob の文字クラスで大文字小文字を区別しない（APFS）。
+# nocasematch を使わないのは、途中の return で戻し忘れると hook の残りの判定まで変わるため
+is_tmp_md() {  # $1=絶対パス
+  local anc tail="" real
+  [[ "$1" == /* && "$1" == *.[Mm][Dd] ]] || return 1
+  [[ "$1" == */../* || "$1" == */./* ]] && return 0
+  tmp_dir_hit "${1%/*}" && return 0
+  anc="${1%/*}"
+  while [[ -n "$anc" && ! -d "$anc" ]]; do
+    tail="/${anc##*/}${tail}"
+    anc="${anc%/*}"
+  done
+  [[ -n "$anc" ]] || return 1
+  real=$(cd -P "$anc" 2>/dev/null && pwd -P) || return 1
+  tmp_dir_hit "${real}${tail}"
+}
+
+tmp_dir_hit() {  # $1=ディレクトリ。自身か祖先に、親に .git のある tmp があるか（プロセスを起動しない）
+  local dir="$1"
+  while [[ -n "$dir" && "$dir" != "/" ]]; do
+    if [[ "${dir##*/}" == [Tt][Mm][Pp] && -e "${dir%/*}/.git" ]]; then
+      return 0
+    fi
+    dir="${dir%/*}"
+  done
+  return 1
+}
+
+TMP_MD_LABEL="tmp/ の md の frontmatter 検査"
+
+# 環境変数 CONTENT（書いた後の中身）を knowledge.py check に渡し、問題があれば deny / ask の JSON を出す。
+# 素通しは何も出さない。呼ぶのは is_tmp_md（または patch の解釈）で tmp/ の md と決めた後だけなので、
+# CLI が無い・exit 2・python が無いときは止める（黙って通すと、規則がまるごと消えても気づけない）
+check_tmp_md() {  # $1=絶対パス, $2=write|edit, $3=書く前の中身のファイル（edit）, $4=移動の元の絶対パス
+  local kn out rc err
+  local args=(check --path "$1" --op "$2")
+  kn="$(dirname "$0")/knowledge.py"
+  if [[ -n "${3-}" ]]; then args+=(--old-file "$3"); fi
+  if [[ -n "${4-}" ]]; then args+=(--old-path "$4"); fi
+  if [[ ! -f "$kn" ]]; then
+    rc=127
+    err="knowledge.py が見つかりません: $kn"
+  elif out=$(printf '%s' "$CONTENT" | python3 "$kn" "${args[@]}" 2>"${ERR_FILE:-/dev/null}"); then
+    return 0
+  else
+    rc=$?
+    err=$(cat "${ERR_FILE:-/dev/null}" 2>/dev/null || true)
+  fi
+  if [[ "$rc" == 1 && -n "$out" ]]; then
+    jq -n --arg reason "$out" '{
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: $reason
+      }
+    }'
+    return 0
+  fi
+  decide_ask_or_deny "${TMP_MD_LABEL}に失敗しました (rc=${rc}): ${err} — 内容を目視確認して承認してください。"
+}
+
+# 解釈できない patch が tmp/ の md に触れている疑いがあるか。文字列の部分一致ではなく、見出し（Add File・
+# Update File・Move to）のパスを取り出し、相対なら cwd で解決してから is_tmp_md を当てる。部分一致だと、cwd が
+# tmp/ の下の相対パス（plan.md）を見落とし（ガードが開く）、scratchpad（/private/tmp/…）を誤って止める。
+# cwd が無く相対の .md は場所を決められないので疑いありとする。見出しが取れなければ疑いなし（従来どおり）
+patch_touches_tmp_md() {  # $1=patch, $2=cwd
+  local line p lc
+  while IFS= read -r line; do
+    line="${line%$'\r'}"
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    case "$line" in
+      '*** Add File: '*) p="${line#'*** Add File: '}" ;;
+      '*** Update File: '*) p="${line#'*** Update File: '}" ;;
+      '*** Move to: '*) p="${line#'*** Move to: '}" ;;
+      *) continue ;;
+    esac
+    if [[ "$p" != /* ]]; then
+      if [[ -z "$2" ]]; then
+        lc=$(printf '%s' "$p" | LC_ALL=C tr 'A-Z' 'a-z')
+        if [[ "$lc" == *.md ]]; then return 0; fi
+        continue
+      fi
+      p="$2/$p"
+    fi
+    if is_tmp_md "$p"; then return 0; fi
+  done <<<"$1"
+  return 1
+}
+
 # apply_patch（Codex）。SKILL.md の編集は Write / Edit ではなく apply_patch で行われる。入力には
 # tool_input.file_path が無く（patch 本文は tool_input.command）、下の file_path による早期 return を
 # 通すと必ず素通りして、Codex 側の lint が黙って開く。そのため、この分岐は早期 return より前に置く。
@@ -139,7 +241,7 @@ exit 0
 # patch の解釈と現ファイルへの適用は python で行い、対象の SKILL.md ごとの検査後の本文を JSON で返す。
 # 検査（lint_content）は Write / Edit / MultiEdit と共通で、組み立て方だけが分岐する
 lint_apply_patch() {
-  local patch cwd results fatal item path err content out
+  local patch cwd results fatal item path err content out kind op old_path old_file
   patch=$(echo "$INPUT" | jq -r '.tool_input.command // ""')
   cwd=$(echo "$INPUT" | jq -r '.cwd // ""')
 
@@ -263,11 +365,12 @@ def apply_update(path, body, text):
 
 
 def build(op):
+    """(書く前の中身か None, 書いた後の中身)"""
     if op["op"] == "add":
         for l in op["body"]:
             if not l.startswith("+"):
                 raise PatchError("Add File の本文に + で始まらない行があります: %r" % l[:40])
-        return "\n".join(l[1:] for l in op["body"]) + "\n"
+        return None, "\n".join(l[1:] for l in op["body"]) + "\n"
     src = op["path"]
     if not src.startswith("/"):
         if not cwd:
@@ -278,7 +381,29 @@ def build(op):
             text = f.read()
     except OSError as e:
         raise PatchError("現ファイルを読めません: %s" % e)
-    return apply_update(op["path"], op["body"], text)
+    return text, apply_update(op["path"], op["body"], text)
+
+
+def absolute(p):
+    if p.startswith("/"):
+        return p
+    return os.path.join(cwd, p) if cwd else None
+
+
+def tmp_dir_hit(path):
+    d = os.path.dirname(path)
+    while d not in ("/", ""):
+        if os.path.basename(d).lower() == "tmp" and os.path.exists(os.path.join(os.path.dirname(d), ".git")):
+            return True
+        d = os.path.dirname(d)
+    return False
+
+
+def is_tmp_md(p):
+    """knowledge.py の split_tmp と同じ判定（.md で終わり、祖先の tmp の親に .git。字面が先で、次に実体）。"""
+    if not p.lower().endswith(".md"):
+        return False
+    return tmp_dir_hit(os.path.normpath(p)) or tmp_dir_hit(os.path.realpath(p))
 
 
 try:
@@ -290,12 +415,30 @@ try:
         full = eff if eff.startswith("/") else "/" + eff
         # 相対パスの skills/x/SKILL.md が /SKILL.md$ に当たるよう、先頭に / を補ってから判定する。
         # macOS の APFS は大文字小文字を区別しないので、skill.md 指定でも SKILL.md が書き換わる
-        if not re.search(r"/SKILL\.md$", full, re.IGNORECASE) or re.search(r"/_[^/]+/SKILL\.md$", full, re.IGNORECASE):
+        if re.search(r"/SKILL\.md$", full, re.IGNORECASE):
+            if re.search(r"/_[^/]+/SKILL\.md$", full, re.IGNORECASE):
+                continue
+            try:
+                results.append({"path": eff, "content": build(op)[1]})
+            except PatchError as e:
+                results.append({"path": eff, "error": str(e)})
             continue
+        # tmp/ の md。CLI には絶対パスを渡す（相対のままだと CLI が内部エラーにする）。cwd が無く相対の
+        # .md は場所を決められないので、疑いありとして前処理の失敗に倒す
+        target = absolute(eff)
+        if target is None:
+            if eff.lower().endswith(".md"):
+                results.append({"path": eff, "kind": "tmp", "error": "入力に cwd が無いため、相対パスを解決できません: %s" % eff})
+            continue
+        if not is_tmp_md(target):
+            continue
+        item = {"path": target, "kind": "tmp", "op": "write" if op["op"] == "add" else "edit",
+                "old_path": absolute(op["path"]) if op["move"] else ""}
         try:
-            results.append({"path": eff, "content": build(op)})
+            item["old_content"], item["content"] = build(op)
         except PatchError as e:
-            results.append({"path": eff, "error": str(e)})
+            item = {"path": target, "kind": "tmp", "error": str(e)}
+        results.append(item)
     print(json.dumps(results, ensure_ascii=False))
 except Exception as e:
     print(json.dumps({"fatal": str(e)}, ensure_ascii=False))
@@ -310,6 +453,8 @@ PY
   if [[ -n "$fatal" ]]; then
     if [[ "$(printf '%s' "$patch" | LC_ALL=C tr 'A-Z' 'a-z')" == *skill.md* ]]; then
       decide_ask_or_deny "SKILL.md lint の前処理に失敗しました: ${fatal} — 内容を目視確認して承認してください。"
+    elif patch_touches_tmp_md "$patch" "$cwd"; then
+      decide_ask_or_deny "${TMP_MD_LABEL}の前処理に失敗しました: ${fatal} — 内容を目視確認して承認してください。"
     fi
     exit 0
   fi
@@ -319,15 +464,38 @@ PY
   while IFS= read -r item; do
     path=$(echo "$item" | jq -r '.path')
     err=$(echo "$item" | jq -r '.error // ""')
+    kind=$(echo "$item" | jq -r '.kind // ""')
     if [[ -n "$err" ]]; then
-      decide_ask_or_deny "SKILL.md lint の前処理に失敗しました (${path}): ${err} — 内容を目視確認して承認してください。"
+      if [[ "$kind" == tmp ]]; then
+        decide_ask_or_deny "${TMP_MD_LABEL}の前処理に失敗しました (${path}): ${err} — 内容を目視確認して承認してください。"
+      else
+        decide_ask_or_deny "SKILL.md lint の前処理に失敗しました (${path}): ${err} — 内容を目視確認して承認してください。"
+      fi
       exit 0
     fi
     content=$(echo "$item" | jq -r '.content // ""')
-    # 本文を環境変数として子プロセスに渡さない（1 MB を超えると awk の起動が Argument list too long で落ちる）
-    out=$(CONTENT=$content; lint_content)
+    if [[ "$kind" == tmp ]]; then
+      op=$(echo "$item" | jq -r '.op')
+      old_path=$(echo "$item" | jq -r '.old_path // ""')
+      old_file=""
+      if [[ "$op" == edit ]]; then
+        # 書く前の中身を CLI に渡す一時ファイル。作れなければ前処理の失敗として止める
+        if ! OLD_FILE_TMP=$(mktemp "${TMPDIR:-/tmp}/tmp-md-old.XXXXXX" 2>/dev/null); then
+          decide_ask_or_deny "${TMP_MD_LABEL}の前処理に失敗しました (${path}): 一時ファイルを作れません — 内容を目視確認して承認してください。"
+          exit 0
+        fi
+        echo "$item" | jq -r '.old_content // ""' >"$OLD_FILE_TMP"
+        old_file="$OLD_FILE_TMP"
+      fi
+      out=$(CONTENT=$content; check_tmp_md "$path" "$op" "$old_file" "$old_path")
+      # 項目ごとに作るので、使い終えたら消す（trap が消すのは最後の 1 つだけ）
+      if [[ -n "$OLD_FILE_TMP" ]]; then rm -f "$OLD_FILE_TMP"; OLD_FILE_TMP=""; fi
+    else
+      # 本文を環境変数として子プロセスに渡さない（1 MB を超えると awk の起動が Argument list too long で落ちる）
+      out=$(CONTENT=$content; lint_content)
+    fi
     if [[ -n "$out" ]]; then
-      # 複数ファイルの patch で、どの SKILL.md が問題か分かるように理由にパスを足す
+      # 複数ファイルの patch で、どのファイルが問題か分かるように理由にパスを足す
       echo "$out" | jq --arg f "$path" '.hookSpecificOutput.permissionDecisionReason |= ("[" + $f + "] " + .)'
       exit 0
     fi
@@ -339,21 +507,28 @@ if [[ "$TOOL_NAME" == "apply_patch" ]]; then
   lint_apply_patch
 fi
 
-# 1. 検査対象判定: SKILL.md でなければ素通し。macOS の APFS は大文字小文字を区別しないので、skill.md 指定でも
-#    SKILL.md が書き換わる。小文字にそろえて比べる（bash 3.2 に ${v,,} は無い。LC_ALL=C は、不正な UTF-8 で
-#    tr が落ちて素通しになるのを避けるため）
+# 1. 検査対象判定: SKILL.md でも tmp/ の md でもなければ素通し。macOS の APFS は大文字小文字を区別しないので、
+#    skill.md 指定でも SKILL.md が書き換わる。小文字にそろえて比べる（bash 3.2 に ${v,,} は無い。LC_ALL=C は、
+#    不正な UTF-8 で tr が落ちて素通しになるのを避けるため）
 FILE_PATH_LC=$(printf '%s' "$FILE_PATH" | LC_ALL=C tr 'A-Z' 'a-z')
-if [[ ! "$FILE_PATH_LC" =~ /skill\.md$ ]]; then
-  exit 0
-fi
-
-# _ プレフィックスディレクトリは除外 (_template, _example 等)
-if [[ "$FILE_PATH_LC" =~ /_[^/]+/skill\.md$ ]]; then
+if [[ "$FILE_PATH_LC" =~ /skill\.md$ ]]; then
+  # _ プレフィックスディレクトリは除外 (_template, _example 等)
+  if [[ "$FILE_PATH_LC" =~ /_[^/]+/skill\.md$ ]]; then
+    exit 0
+  fi
+  TARGET=skill
+  PREP_LABEL="SKILL.md lint の"
+elif is_tmp_md "$FILE_PATH"; then
+  TARGET=tmp
+  PREP_LABEL="${TMP_MD_LABEL}の"
+else
   exit 0
 fi
 
 # 2. 検査対象テキストの構築 (Write / Edit / MultiEdit)
 CONTENT=""
+# 無いファイルへの空の old_string は新しいファイルを作る。書く前の中身が無いので Write と同じく必須にする
+NEW_FILE=0
 case "$TOOL_NAME" in
   Write)
     CONTENT=$(echo "$INPUT" | jq -r '.tool_input.content // ""')
@@ -364,12 +539,13 @@ case "$TOOL_NAME" in
     # replace_all のときは全置換する。1 回だけ置換して検査すると、全置換で消えるフィールドを見落とす
     REPLACE_ALL=$(echo "$INPUT" | jq -r 'if .tool_input.replace_all == true then 1 else 0 end')
     if [[ ! -f "$FILE_PATH" ]]; then
-      # 既存ファイルが無い場合は素通し（Edit は通常存在前提）
-      exit 0
-    fi
+      # 空でない old_string はツール自体が失敗するので素通し
+      [[ -z "$OLD" ]] || exit 0
+      NEW_FILE=1
+      CONTENT="$NEW"
     # quote 付き heredoc + 環境変数渡しで bash 変数展開を抑止 (injection 経路を遮断)
     # 失敗時は permissionDecision: ask で明示的にユーザーへ通知（silent abort を防ぐ）
-    if ! CONTENT=$(FILE_PATH="$FILE_PATH" OLD="$OLD" NEW="$NEW" REPLACE_ALL="$REPLACE_ALL" python3 - <<'PY' 2>"${ERR_FILE:-/dev/null}"
+    elif ! CONTENT=$(FILE_PATH="$FILE_PATH" OLD="$OLD" NEW="$NEW" REPLACE_ALL="$REPLACE_ALL" python3 - <<'PY' 2>"${ERR_FILE:-/dev/null}"
 import os, sys
 try:
     with open(os.environ["FILE_PATH"], encoding="utf-8", errors="replace") as f:
@@ -382,21 +558,25 @@ except Exception as e:
     sys.exit(2)
 PY
     ); then
-      decide_ask_or_deny "SKILL.md lint の前処理に失敗しました: $(cat "${ERR_FILE:-/dev/null}" 2>/dev/null) — 内容を目視確認して承認してください。"
+      decide_ask_or_deny "${PREP_LABEL}前処理に失敗しました: $(cat "${ERR_FILE:-/dev/null}" 2>/dev/null) — 内容を目視確認して承認してください。"
       exit 0
     fi
     ;;
   MultiEdit)
-    if [[ ! -f "$FILE_PATH" ]]; then
-      exit 0
-    fi
     EDITS_JSON=$(echo "$INPUT" | jq -c '.tool_input.edits // []')
+    if [[ ! -f "$FILE_PATH" ]]; then
+      # 1 つ目の old_string が空なら新しいファイルを作る。空文字列から edits を順に当てる
+      [[ "$(echo "$EDITS_JSON" | jq -r '.[0].old_string // "x"')" == "" ]] || exit 0
+      NEW_FILE=1
+    fi
     # quote 付き heredoc + 環境変数渡しで bash 変数展開を抑止
-    if ! CONTENT=$(FILE_PATH="$FILE_PATH" EDITS_JSON="$EDITS_JSON" python3 - <<'PY' 2>"${ERR_FILE:-/dev/null}"
+    if ! CONTENT=$(FILE_PATH="$FILE_PATH" EDITS_JSON="$EDITS_JSON" NEW_FILE="$NEW_FILE" python3 - <<'PY' 2>"${ERR_FILE:-/dev/null}"
 import json, os, sys
 try:
-    with open(os.environ["FILE_PATH"], encoding="utf-8", errors="replace") as f:
-        content = f.read()
+    content = ""
+    if os.environ["NEW_FILE"] != "1":
+        with open(os.environ["FILE_PATH"], encoding="utf-8", errors="replace") as f:
+            content = f.read()
     edits = json.loads(os.environ["EDITS_JSON"])
     for e in edits:
         count = -1 if e.get("replace_all") is True else 1
@@ -407,7 +587,7 @@ except Exception as e:
     sys.exit(2)
 PY
     ); then
-      decide_ask_or_deny "SKILL.md lint の前処理に失敗しました: $(cat "${ERR_FILE:-/dev/null}" 2>/dev/null) — 内容を目視確認して承認してください。"
+      decide_ask_or_deny "${PREP_LABEL}前処理に失敗しました: $(cat "${ERR_FILE:-/dev/null}" 2>/dev/null) — 内容を目視確認して承認してください。"
       exit 0
     fi
     ;;
@@ -417,4 +597,14 @@ PY
 esac
 
 # 検査本体。Write / Edit / MultiEdit はここで 1 回だけ呼ぶ（apply_patch は上の分岐で対象ごとに呼ぶ）
-lint_content
+if [[ "$TARGET" == skill ]]; then
+  lint_content
+fi
+# tmp/ の md。Edit・MultiEdit は書く前の中身（現ファイル）と比べ、違反を増やす編集だけを止める
+# （新しいファイルを作るものは書く前の中身が無いので Write と同じ）
+if [[ "$TOOL_NAME" == Write || "$NEW_FILE" == 1 ]]; then
+  check_tmp_md "$FILE_PATH" write
+else
+  check_tmp_md "$FILE_PATH" edit "$FILE_PATH"
+fi
+exit 0

@@ -884,13 +884,18 @@ run_plan_tests() {
     # 同じ --out でもう一度 → -2 の DIR に書く（前の before を上書きしない）
     out="$(PATH="$FAKE_BIN:$PATH" ss plan "$s" --out "$WORK/plan1" 2>&1)"
     assert_has "SS-7 同じ DIR が既にあれば -2 を付ける" "$out" "dir: $WORK/plan1-2"
-    # --out 無し → series.md の隣の series-sync/<日時>/
+    # --out 無し → series.md の隣の _runs/series-sync/<日時>/（生ログの置き場。tmp/ の文書と分ける）
     out="$(PATH="$FAKE_BIN:$PATH" ss plan "$s" 2>&1)"
-    if [[ "$out" =~ dir:\ $WORK/series-sync/[0-9]{8}-[0-9]{6}(-[0-9]+)?$'\n'?$ ]]; then
-        pass "SS-7 --out 無しは series.md の隣の series-sync/<日時>/"
+    if [[ "$out" =~ dir:\ $WORK/_runs/series-sync/[0-9]{8}-[0-9]{6}(-[0-9]+)?$'\n'?$ ]]; then
+        pass "SS-7 --out 無しは series.md の隣の _runs/series-sync/<日時>/"
     else
         fail "SS-7 既定の DIR: ${out##*dir: }"
     fi
+    # 相対の --out でも dir: は絶対パス（cwd が変わった後の apply でも解決できる）。期待値は pwd -P で作る
+    # （macOS の mktemp は /var/folders/… で、python の getcwd は symlink を解いた /private/var/… を返す）
+    out="$(cd "$WORK" && PATH="$FAKE_BIN:$PATH" ss plan "$s" --out rel/out 2>&1)"
+    assert_has "SS-7 相対の --out でも dir: は絶対パス" "$out" "dir: $(cd "$WORK" && pwd -P)/rel/out"
+    if [[ -f "$WORK/rel/out/plan.json" ]]; then pass "SS-7 相対の --out の DIR に plan.json を書く"; else fail "SS-7 相対の --out の DIR: $(ls "$WORK/rel" 2>&1)"; fi
 
     # 本文がすでに描画と同じ → none（AC-15 の前半）
     gh_reset
@@ -1001,6 +1006,26 @@ run_apply_tests() {
 
     out="$(PATH="$FAKE_BIN:$PATH" ss apply --plan "$WORK/no-such-plan" 2>&1)"; rc=$?
     if [[ "$rc" == 1 && "$out" == "error: "* ]]; then pass "SS-8 plan の DIR が無ければ exit 1 と error:"; else fail "SS-8 plan の DIR が無いとき（rc=${rc}）: ${out:0:200}"; fi
+    # 相対で渡しても error: には解決した絶対パスを出す（どこを探したかが分かるように）
+    out="$(cd "$WORK" && PATH="$FAKE_BIN:$PATH" ss apply --plan no-such-plan 2>&1)"; rc=$?
+    if [[ "$rc" == 1 && "$out" == "error: "*"$(cd "$WORK" && pwd -P)/no-such-plan" ]]; then
+        pass "SS-8 相対の --plan の error: は絶対パス"
+    else
+        fail "SS-8 相対の --plan の error:（rc=${rc}）: ${out:0:200}"
+    fi
+
+    # --plan に DIR/plan.json を渡しても DIR と同じ。PATCH に至る入力で、存在の確認・after の読み込み・
+    # patch.json の書き出しの 3 か所がすべて正規化した DIR を使うことを見る
+    setup_sync
+    PATH="$FAKE_BIN:$PATH" ss plan "$s" --out "$WORK/ap6" >/dev/null 2>&1
+    out="$(PATH="$FAKE_BIN:$PATH" ss apply --plan "$WORK/ap6/plan.json" 2>&1)"; rc=$?
+    assert_rc "SS-8 --plan DIR/plan.json は exit 0" 0 "$rc" "$out"
+    assert_has "SS-8 --plan DIR/plan.json でも written" "$out" "written: acme/web#5"
+    if [[ "$(patch_count)" == 3 ]]; then pass "SS-8 --plan DIR/plan.json でも 3 本を PATCH する"; else fail "SS-8 --plan DIR/plan.json の PATCH の回数: $(patch_count)"; fi
+    assert_has "SS-8 --plan DIR/plan.json の patch.json は DIR に書く" "$(cat "$FAKE_GH_DIR/calls.log")" \
+        "--input $WORK/ap6/acme__api__12.patch.json"
+    out="$(PATH="$FAKE_BIN:$PATH" ss apply --plan "$WORK/ap6/acme__api__12.after.md" 2>&1)"; rc=$?
+    if [[ "$rc" == 1 && "$out" == "error: "* ]]; then pass "SS-8 plan.json でも DIR でもないパスは exit 1"; else fail "SS-8 plan.json でないファイル（rc=${rc}）: ${out:0:200}"; fi
 
     # plan に無い PR の --only → exit 1、PATCH 0 回
     setup_sync

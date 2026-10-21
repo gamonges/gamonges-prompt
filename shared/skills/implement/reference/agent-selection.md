@@ -29,6 +29,19 @@
 2. 各専門エージェントの担当ファイルを **排他的に** 割り当てる（同一ファイルの並列編集は原則禁止）。実装計画ファイルは割り当てない。既存テストが落ちても各エージェントには直させず報告だけさせる（判定は結果マージの後にメインエージェントが `./test-audit-flow.md` の ② で行う）
 3. 各エージェントを `run_in_background: true` で並列起動する
 4. 各エージェントの出力: `./tmp/step-{n}-{agent-name}-result.md`
+
+出力の先頭には次の frontmatter を置く（書式は `python3 ~/.claude/scripts/knowledge.py spec`）:
+
+<!-- tmp-frontmatter: tmp/step-{n}-{agent-name}-result.md -->
+```yaml
+---
+type: Step Result
+title: ステップ {n} の {agent-name} の結果
+description: {変更したファイルと結果の要約を 1 文}
+status: stable
+---
+```
+
 5. 全エージェント完了後、結果マージプロトコル（下記）を実行する
 
 ## 結果マージプロトコル

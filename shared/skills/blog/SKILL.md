@@ -53,6 +53,18 @@ disable-model-invocation: true
 - [ ] まとめセクションの位置を決定する（末尾）
 - [ ] コードブロック・図表の配置位置を計画する
 
+出力の先頭には次の frontmatter を置く（書式は `python3 ~/.claude/scripts/knowledge.py spec`）:
+
+<!-- tmp-frontmatter: tmp/blog-draft.md -->
+```yaml
+---
+type: Blog Draft
+title: {記事タイトル}
+description: {記事の要旨を 1 文}
+status: stable
+---
+```
+
 ### Phase 3: 散文化
 
 - [ ] 各セクションを文章に展開する:

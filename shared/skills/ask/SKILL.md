@@ -26,7 +26,21 @@ description: コードベース・技術仕様を調査して回答する。実�
 
 ### research.md への記録ルール
 
-- **デフォルトは追記**: 既存の `./tmp/research.md` がある場合、末尾に `---`（区切り線）を挿入してから調査結果を追記する。既存の内容を削除・上書きしない。
+- **デフォルトは追記**: 既存の `./tmp/research.md` がある場合、末尾に `---`（区切り線）を挿入してから調査結果を追記する。既存の内容を削除・上書きしない。追記は Edit で末尾に足す（Write で全体を書き直さない）。
+- **frontmatter**: 新しく作るときは先頭に下の frontmatter を書く。追記のたびに `title`・`description` を最新の調査の題材に更新する（`tmp/index.md` の説明を実態に合わせるため）。
+
+出力の先頭には次の frontmatter を置く（書式は `python3 ~/.claude/scripts/knowledge.py spec`）:
+
+<!-- tmp-frontmatter: tmp/research.md -->
+```yaml
+---
+type: Research
+title: {最新の調査の題材}
+description: {最新の調査の要旨を 1 文}
+status: stable
+---
+```
+
 - **上書きする場合**: ユーザーから「上書き」「リセット」「クリア」等の明示的な指示があった場合のみ、ファイルを上書きする。
 - **基準を先頭に書く**: 記録の冒頭（追記なら追記ブロックの冒頭）に、対象 repo ごとの基準コミット（`git rev-parse --short HEAD`）と取得日時を書く。後から読む側が、どの時点のコードに対する主張かを判別できるようにするため。
 

@@ -131,6 +131,7 @@ Skills は開発ワークフローの各ステップを担う。**下図の矢�
 
 - 出力は日本語（技術用語・コード例は英語のまま）
 - `tmp/` 配下のファイルはコミットしない
+- `tmp/` の md には frontmatter が要る。書式は `python3 ~/.claude/scripts/knowledge.py spec`
 - レビュー指摘・コード参照は `file_path:L{number}` 形式
 - ソースコードを変更しない skill は、出力先を skill 本文に明記する（例: `./tmp/research.md`）
 - 成果物を人が読む形にする場合、完了報告に続けて **HTML 化を提案する（既定）**。`html-view` で `tmp/<basename>.html` を生成してブラウザで開く。提案は**完了報告時に 1 回だけ**行い、同一実行内で再提案しない。Artifact（claude.ai 上の共有ページ）は、**ユーザーが共有を求めたときだけ**使う。その場合は `artifact-design` skill に従い、`html-view` の reference は参照しない（設計指針を二重管理しないため）。HTML はローカルのファイルで、Claude Code と Codex のどちらでも同じ手段で作れる

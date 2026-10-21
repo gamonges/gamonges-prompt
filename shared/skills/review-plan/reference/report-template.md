@@ -4,7 +4,14 @@
 
 `**Codex レビュー**:` 行は `**総合判定**:` 行の後ろに置き、`**総合判定**:` 行は変えない（`plan-lgtm` がこの行を文字列一致で読む）。`**出所**:` 行は Codex の指摘を写した Critical・Warning・Note のどれにも付ける（書き方は `../../review/reference/codex-reviewer.md` の「写し方」）。
 
+<!-- tmp-frontmatter: tmp/plan-review.md -->
 ```markdown
+---
+type: Plan Review
+title: {計画の題材} のレビュー
+description: {総合判定と主な指摘を 1 文}
+status: stable
+---
 # 実装計画レビュー
 
 **対象**: {計画ファイルパス}

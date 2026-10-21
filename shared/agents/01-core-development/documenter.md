@@ -61,7 +61,14 @@ Periodically consolidate accumulated knowledge:
 
 Write results to `./tmp/doc-sync-report.md` (overwrite with latest):
 
+<!-- tmp-frontmatter: tmp/doc-sync-report.md -->
 ```markdown
+---
+type: Doc Sync Report
+title: Documentation Sync Report {YYYY-MM-DD}
+description: {同期した文書と残る差分の要約を 1 文}
+status: stable
+---
 # Documentation Sync Report
 
 ## Date: {YYYY-MM-DD}
