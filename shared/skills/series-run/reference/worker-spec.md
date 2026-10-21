@@ -6,16 +6,17 @@ coordinator が worker を起動するときに渡す指示（spec）の雛形�
 
 ## 雛形
 
-`<…>` を埋めて渡す。5 項目の見出しは、ツールの spec の 5 項目（Target / Change / Constraints / Ownership / Observable acceptance）にそろえる。
+`<…>` を埋めて渡す。5 項目の見出しは、今の adapter（Orca）の spec の 5 項目（Target / Change / Constraints / Ownership / Observable acceptance）にそろえてある。adapter が別の形を求めるときは adapter に従う。
 
 ```markdown
 ## Target
 - worktree: <worktree の絶対パス>
 - 担当の段: <段名>（シリーズ: <series.md の絶対パス>）
 - 工程: <段の型の工程名>
+- リポジトリ: <段のリポジトリ。`owner/repo`。push の手順 2 の照合に使う>
 
 ## Change
-<段の型の「起動する skill」。push がある工程では、段の型の「push の手順」を手順ごと写す。例: `/implement tmp/plan.md` を実行し、次の手順で push する: …>
+<段の型の「起動する skill」。push がある工程では、段の型の「push の手順」を手順ごと写し、手順 1 で比べる前の段のブランチ（引いたもの）も書く。recheck では強さ・PR 番号と、段の型の「recheck の工程」の 2・3 を写す。例: `/implement tmp/plan.md` を実行し、次の手順で push する: …。implement・fix では「この工程の前の試行がコミットを残していれば、それを確かめて、残りの作業（push を含む）だけを行う」も書く（段の型の「工程の基準の HEAD と、試行の起動時の HEAD・時刻」。工程の再試行は spec を差し替えないので、1 回目から書く）>
 
 ## Constraints
 
@@ -23,7 +24,7 @@ coordinator が worker を起動するときに渡す指示（spec）の雛形�
 - あなたは coordinator に起動された worker である
 - 定型の判断（TDD の Red の確認・テストの層・計画の意図を変えない技術判断）の質問は、注入された指示にある質問の手段で coordinator に聞く。確認の画面（`AskUserQuestion` など）は開かない。coordinator が答えられない
 - 仕様・範囲・UX の文言・過去の決定に関わる判断も、同じ手段で coordinator に聞く（coordinator がユーザーに回す）
-- ユーザー専用の操作（PR の作成・DB の migrate・破壊的な git・強制の push）は行わず、完了報告の「残り」に依頼として書く。依頼が残っていても、自分の工程が終わっていれば成功で報告する（依頼が残ることは失敗ではない）
+- ユーザー専用の操作（PR の作成・DB の migrate・破壊的な git・強制の push）は行わず、完了報告の「残り」に依頼として書く。依頼が残っていても、自分の工程が終わっていれば成功で報告する（依頼が残ることは失敗ではない）。push の手順が push を止めたときは、「残り」に手順の番号（「手順 1」など）と理由を書く（coordinator が番号で扱いを決める）。push のコマンドそのものが通信の障害などで失敗したときは、番号を書かずに失敗で報告する
 - この契約は、この工程の作業の中で起動される skill にも当てる。連鎖して起動される skill（plan-lgtm → review-plan / revise、fix-lgtm-implement → fix / plan-lgtm / implement）と、完了報告の前に人がこの terminal で打った `/skill` を含む
 - 完了報告を送った後に、人がこの terminal で打った指示（`/create-pr` など）は、この契約の外にある人自身の作業である。その skill の手順どおりに、質問は目の前の人に直接聞き、確認の画面も使ってよい。終えた工程の質問・報告の手段（と、その ID）は使わない
 
@@ -37,6 +38,9 @@ coordinator が worker を起動するときに渡す指示（spec）の雛形�
 
 ### この作業単位に効くユーザーの決定
 <状態ファイルの `## ユーザーの決定` のうち、効く作業単位にこの作業単位を含む行を写す。0 件なら「なし」と書く>
+
+### 前の段から引き継いだ指摘
+<前の段の triage で「後の段で配線される」として、この段の名前を挙げた指摘を写す。0 件なら「なし」と書く>
 
 ## Ownership
 - 編集してよいもの: この worktree の中だけ。ほかの worktree・横断計画の worktree には触れない
@@ -55,5 +59,5 @@ coordinator が worker を起動するときに渡す指示（spec）の雛形�
 
 - **Change** と **Observable acceptance** は、段の型（`./stage-type.md`）の工程の行から写す。言い換えない（coordinator が完了の証拠を確かめるときに、worker と同じ基準を使うため）。push がある工程（implement・fix）では、段の型の「push の手順」も Change に写す。worker は段の型を読まない
 - **作業の制約** の最後の行は、状態ファイルの `## 運用の約束` から写す。リポジトリに依存しない制約は雛形の行で足りる
-- **この作業単位に効くユーザーの決定** は、欄を消さない。0 件でも「なし」と書く（写し忘れと区別するため）。写したら、状態ファイルの `## ユーザーの決定` の配布済みにこの作業単位を足す
-- 完了報告の 3 文は、ツールの完了報告に添える要約の文の数（3 文）にそろえてある
+- **この作業単位に効くユーザーの決定**・**前の段から引き継いだ指摘** は、欄を消さない。0 件でも「なし」と書く（写し忘れと区別するため）。写したら、状態ファイルの `## ユーザーの決定` の配布済み・triage の記録の届け済みに、この作業単位と口（`spec`）を足す
+- 完了報告の 3 文は、今の adapter（Orca）の完了報告に添える要約の文の数（3 文）にそろえてある

@@ -148,7 +148,7 @@ git pull
 | `/fix` | 修正項目から fix-plan.md を生成 |
 | `/create-pr` | 既定ブランチ向けドラフト PR を作成（ベースは `gh repo view` から取得） |
 | `/series-init` / `/series-sync` | 複数の PR に分けた対応の全体像。横断計画からシリーズの契約と引き継ぎを作り、各 PR の本文の全体像を同期する |
-| `/series-run` | シリーズの監督。series-init の手順の後、各 worktree に工程別の worker（design → implement → review → fix）を起動し、質問と完了報告を 1 つのセッションに集める（Orca の orchestration を使う。`/` 呼び出しのみ） |
+| `/series-run` | シリーズの監督。series-init の手順の後、各 worktree に工程別の worker（design → implement → review → fix → recheck）を起動し、質問と完了報告を 1 つのセッションに集める（Orca の orchestration を使う。`/` 呼び出しのみ） |
 | `/spec-check` / `/spec-propose` / `/spec-archive` / `/document-spec` | OpenSpec 仕様管理 |
 | `/review-comments` | PR レビューコメントの妥当性評価 + 返信 + resolve |
 | `/retrospective` | 日次 PR 振り返り |

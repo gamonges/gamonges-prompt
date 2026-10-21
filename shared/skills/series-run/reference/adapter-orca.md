@@ -30,8 +30,8 @@ Orca の `--json` の応答は `{"ok": …, "result": {…}}` で包まれる。
 | worker の起動 | `orca orchestration worker-start --spec "<spec>" --worktree path:<worktree> --agent <claude\|codex> --run <run_id> --json`。応答の Task ID・Dispatch ID・terminal の handle を `## adapter` に書く。既存の worktree では setup を再実行しない |
 | 工程の再試行 | `orca orchestration worker-start --task <失敗した Task ID> --retry-of <dispatch_id> --worktree path:<worktree> --agent <claude\|codex> --run <run_id> --json`。失敗の報告（`failed`）か止めた（`stopped`）試行にだけ使う（`references/recovery-and-cleanup.md` の「Retry, stop, and abandon」）。`--retry-of` は `--task` が要り、配置を引き継がないので、worktree と agent を改めて指定する（`worker-start --help` の Notes） |
 | 試行を止める | 終了の積極的な証拠があるときだけ、`worker-list --run <run_id> --json` のその行の `projection.nextAction` が `worker-stop` か `worker-abandon` を指せばそれに従い、argv が無ければ `orca orchestration worker-stop --dispatch <dispatch_id> --json`。`nextAction` がほかの操作を指すとき、`worker-stop` が失敗したとき、`worker-abandon` を使ったとき（試行が stopped にならず、`--retry-of` の対象外になる）は、工程の再試行に進まず③としてユーザーに回す。どれも終了の証拠の無い試行には使わない |
-| 出来事を待つ | `orca orchestration check --wait --run <run_id> --types "worker_done,escalation,question" --timeout-ms 900000 --json` |
-| 出来事を処理済みにする（と次を待つ） | `orca orchestration check --ack <delivery_id> --wait --run <run_id> --types "worker_done,escalation,question" --timeout-ms 900000 --json`。ack はバッチ全体に効く |
+| 出来事を待つ | `orca orchestration check --wait --run <run_id> --types "worker_done,escalation,question" --timeout-ms 570000 --json`（下の「待ち受けの時間」） |
+| 出来事を処理済みにする（と次を待つ） | `orca orchestration check --ack <delivery_id> --wait --run <run_id> --types "worker_done,escalation,question" --timeout-ms 570000 --json`。ack はバッチ全体に効く |
 | 質問に答える | `orca orchestration reply --id <message_id> --body "<答え>" --run <run_id> --json` |
 | 追加の指示を送る | `orca orchestration send --to dispatch:<dispatch_id> --run <run_id> --subject "<要旨>" --body "<指示>" --json`。成功は受信箱に入ったことしか示さない。worker は区切りのたびにしか読まない（kernel の「Worker obligations」3） |
 | worker の terminal を残す（ユーザーの操作待ち） | `orca orchestration worker-retain --dispatch <dispatch_id> --json` |
@@ -48,6 +48,10 @@ Orca の `--json` の応答は `{"ok": …, "result": {…}}` で包まれる。
 - worker ごとの最後の heartbeat の送信時刻
 - `runtimeId` と、最後の Orca の再起動の時刻（`ready` に戻った時刻。heartbeat の割り引きに使う）
 
+## 待ち受けの時間
+
+待ち受けの時間は 570000 ms（9 分 30 秒）。Claude Code の coordinator は前景の Bash で張り、Bash ツールの `timeout` を `600000` にする。Claude Code の前景の Bash の上限は 600000 ms で、それより長い待ちは Bash の側で切れる（`codex-run.sh wait --timeout-sec 570` と同じ理由）。Codex の coordinator の上限は未確認で、切れたら時間切れと同じに扱う。SKILL.md・生存の判定の「待ち受けの時間」はこの値を指す。
+
 ## 待ち受けの戻り
 
 - `check` が返す Delivery は FIFO のバッチ全体で、`--types` では絞られない（`--types` は `--wait` が起きる条件にすぎない。`check --help`）。heartbeat が混ざることも、heartbeat だけのこともある
@@ -55,7 +59,7 @@ Orca の `--json` の応答は `{"ok": …, "result": {…}}` で包まれる。
 - 待ち受けは Run に 1 つだけ張る（2 つ目は `waiter_exists` になる）
 - 待ち受けの出力を捨てない・jq で絞らない（`worker_done` を取りこぼす）。出力をファイルに受けたときは、JSON が複数並ぶことがある
 - heartbeat も ack する
-- 空の待ち受けが 3 回続いたら、`worker-list --run <run_id> --include-remote --json` で各行の `projection.attention` と `projection.nextAction` を見て、kernel の「Canonical supervised loop」に従う（`nextAction` が `none` なら argv は無い）
+- 空の待ち受けが 3 回続いたら、`worker-list --run <run_id> --include-remote --json` で各行の `projection.attention` と `projection.nextAction` を見て、kernel の「Canonical supervised loop」に従う（`nextAction` が `none` なら argv は無い）。下の生存の判定は時間切れのたびに行い、3 回続いたときはそれに加えてこの手順を行う。判定の表で③に回した worker と、`## ユーザーへの依頼` に `回答済み` でない③がある worker は、この手順の対象から外す
 
 ## 生存の判定
 
@@ -63,7 +67,7 @@ kernel は「Heartbeat or visible activity means alive, not done.」（`referenc
 
 **生存の信号は 2 つ:**
 
-- **heartbeat**: ただし、送信の時刻が `## adapter` の最後の再起動の時刻より前のもの（再起動の後に届く滞留分。worker は既に死んでいることがある）と、待ち受けの時間（15 分）より古いものは数えない
+- **heartbeat**: ただし、送信の時刻が `## adapter` の最後の再起動の時刻より前のもの（再起動の後に届く滞留分。worker は既に死んでいることがある）と、待ち受けの時間（上の「待ち受けの時間」）より古いものは数えない
 - **トランスクリプトの最終時刻**（`worker-read --source transcript`）
 
 terminal の末尾（`--source terminal`）は信号に数えない。再描画の残骸で「作業中」に見えることがある。terminal は、入力待ちのプロンプトと権限確認の画面の有無を見るためだけに使う。
@@ -73,7 +77,7 @@ terminal の末尾（`--source terminal`）は信号に数えない。再描画�
 **対象:** 生きているはずの worker。次の 2 つは除く。
 
 - 作業単位が `ユーザーの操作待ち` の worker（pr の工程で残した terminal など）
-- `## ユーザーへの依頼` に未回答の③の問いがある worker。`ask` で待つ worker は heartbeat を送らない（`references/worker-contract.md`）。kernel では、`ask` で待っていること自体が生存の信号である
+- `## ユーザーへの依頼` に `回答済み` でない③の問い（`未提示`・`未回答`）がある worker。`ask` で待つ worker は heartbeat を送らない（`references/worker-contract.md`）。kernel では、`ask` で待っていること自体が生存の信号である
 
 **判定の表**（上の行から順に当て、最初に当たった行で決める。権限確認の画面は、直前の heartbeat で信号が動いていても見逃さないよう、先頭に置く）:
 
@@ -115,5 +119,5 @@ terminal の末尾（`--source terminal`）は信号に数えない。再描画�
 
 1. 前提の確認（`runtimeId` の比較を含む）と kernel の読み込み
 2. `run-use --id <## adapter の Run ID>` で、既存の Run にこの coordinator をつなぐ。`check` は `--run` を省くと呼び出し元に紐づいた Run を読むため（`run-use --help`）。つながったことを応答で確かめる
-3. `check --run <run_id> --json`（`--wait` を付けない）と `worker-list --run <run_id> --json` で、未処理の出来事と生きている worker を、状態ファイルの作業単位の行に突き合わせる
+3. `check --run <run_id> --json`（`--wait` を付けない）と `worker-list --run <run_id> --json` で、未処理の出来事と生きている worker を、状態ファイルの作業単位の行に突き合わせる。状態ファイルで `<工程>: 作業中` なのに、その worker が一覧に無い・`exited` で、未処理の出来事にも完了報告が無いなら、まず段の型の完了の証拠を、「完了報告が成功」を除いて確かめる（前のセッションが完了報告を処理済みにした後、状態ファイルを書く前に落ちた場合は、報告が手元に残らないため。残りの証拠は成果物とコミットで確かめられる）。満たせば完了として扱い（`<工程>: 済み`）、`worker-read --dispatch <dispatch_id> --source transcript --json` で失った完了報告を読み直して「残り」を拾う（読めなければ③の表に「前のセッションの完了報告の残りを読めなかった」と添える）。満たさなければ上の「生存の判定」の表の 4 行目へ。一覧に行が無い試行は `projection.nextAction` を読めないので「試行を止める」を省き、トランスクリプトの有無で段の型の「死んだ worker」の数え方を当て、起動し直すときは「worker の起動」で新しく起動する（試行の終わり方が分からず、`--retry-of` の対象か決まらないため）
 4. 以後の待ち受け・ack・一覧・返答・送信にも `--run <run_id>` を付ける
