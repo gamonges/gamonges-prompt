@@ -47,6 +47,7 @@ description: 要件・コンテキストから実装計画 plan.md を新規作�
 
 - コンテキストファイル（入口の正典で解決したもの）— 要件・コンテキスト情報
 - `./tmp/research.md`（任意）— `/ask` の調査結果
+- `./tmp/grill.md`（任意）— `/grill` の確定事項・未決事項。未決事項のうち `/design` へ送られたものを、plan の「grill から先送りした項目の照合」で閉じる（該当判定は `./reference/phase-details.md` の「任意セクションの該当判定」）
 - `./tmp/scenario.md`（任意）— `grill` Phase 0 の業務シナリオ。不在ならフェーズ 1.2 で判定し、必要なら生成する
 - `./tmp/coupling-precheck.md`（任意）— `/coupling-precheck` の結合バランス整理結果
 - `openspec/specs/`（任意）— 既存仕様
@@ -58,7 +59,7 @@ description: 要件・コンテキストから実装計画 plan.md を新規作�
 
 ### フェーズ 1: コンテキスト読み込み
 
-要件を「機能要件」「非機能要件」「制約事項」に分類し、`./tmp/research.md` / `openspec/specs/` / `openspec/config.yaml` を参照する。`./tmp/coupling-precheck.md` が存在する場合はあわせて参照する。モードの解決と適用範囲は正典（`../brief/reference/modes.md`）に従う。詳細は `./reference/phase-details.md`。
+要件を「機能要件」「非機能要件」「制約事項」に分類し、`./tmp/research.md` / `openspec/specs/` / `openspec/config.yaml` を参照する。`./tmp/coupling-precheck.md` が存在する場合はあわせて参照する。`./tmp/grill.md` があれば読み、frontmatter の `title` を今回の題材と照らす。違えば 1 問で確かめ（フェーズ 1.2 の `scenario.md` と同じ規約。前の題材の残骸を照合しないため）、別の題材なら以後 grill.md を使わない。その場合も見出し `## grill から先送りした項目の照合` は置き、表の代わりに `出典: tmp/grill.md（title: …）は別の題材のため照合しない` の 1 行だけを書く（`/review-plan` は見出しの有無で照合欄を判定するので、見出しが無いと照合欄の欠落の Warning が反復ごとに出る）。モードの解決と適用範囲は正典（`../brief/reference/modes.md`）に従う。詳細は `./reference/phase-details.md`。
 
 ### フェーズ 1.2: 業務シナリオの確認
 
