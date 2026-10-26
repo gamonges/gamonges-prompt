@@ -305,6 +305,7 @@ backend-reviewer / database-reviewer 起動時に渡すチェックリスト（�
 - Relevant `.cursor/rules/` content（agent ごとに異なるため inline は維持）
 - **CI exclusion rule**: 「CI で検出される問題（型エラー、lint 違反、テスト失敗）は指摘対象外」
 - (backend project) Backend/Database checklist from above
+- (frontend-reviewer を起動したとき。`unknown` で全エージェントを起動した場合を含む) 「条件付きで表示する文・要素を足した差分では、同じ分岐に常に出る既存の文・要素と並べて、同時に出て矛盾しないかを見る」（足した 1 文だけを見ると、既存の文との矛盾を見落とす）
 
 > **NOTE**: full diff、commit log、PR overview を prompt に inline すると agent 数 × 数百トークンの重複コストになるため、必ずスナップショット参照に統一する。
 

@@ -47,6 +47,7 @@ description: 要件・コンテキストから実装計画 plan.md を新規作�
 
 - コンテキストファイル（入口の正典で解決したもの）— 要件・コンテキスト情報
 - `./tmp/research.md`（任意）— `/ask` の調査結果
+- `./tmp/grill.md`（任意）— `/grill` の確定事項・未決事項。未決事項のうち `/design` へ送られたものを、plan の「grill から先送りした項目の照合」で閉じる（該当判定は `./reference/phase-details.md` の「任意セクションの該当判定」）
 - `./tmp/scenario.md`（任意）— `grill` Phase 0 の業務シナリオ。不在ならフェーズ 1.2 で判定し、必要なら生成する
 - `./tmp/coupling-precheck.md`（任意）— `/coupling-precheck` の結合バランス整理結果
 - `openspec/specs/`（任意）— 既存仕様
