@@ -178,6 +178,15 @@
       {
         "hooks": [
           {
+            "command": "/Users/gamouhiroto/.claude/scripts/hook-guard-env-files.sh",
+            "type": "command"
+          }
+        ],
+        "matcher": "Read|Edit|Write|MultiEdit|Grep|NotebookEdit"
+      },
+      {
+        "hooks": [
+          {
             "command": "'/Users/gamouhiroto/Library/Application Support/Muxy/hooks/muxy-claude-hook.sh' pre-tool-use # muxy-notification-hook",
             "timeout": 10,
             "type": "command"
@@ -423,20 +432,17 @@
       "Bash(mkdir:*)",
       "Bash(rg:*)",
       "Read(~/.config/git/message)",
-      "Read(**/.env.sample)",
       "WebFetch(domain:api.github.com)",
       "WebFetch(domain:docs.anthropic.com)",
       "WebFetch(domain:gist.github.com)",
       "WebFetch(domain:github.com)",
       "Edit(/private/tmp)",
-      "Edit(**/.env.sample)",
       "mcp__context7",
       "mcp__serena"
     ],
     "ask": [
       "Bash(git checkout:*)",
       "Bash(git config:*)",
-      "Bash(git push:*)",
       "Bash(git rebase:*)",
       "Bash(git reset:*)",
       "Bash(git rm:*)"
@@ -455,7 +461,8 @@
       "Bash(pushf:*)",
       "Bash(sudo:*)",
       "Bash(wget:*)",
-      "Read(**/*.env*)",
+      "Read(**/.env)",
+      "Read(**/*.env)",
       "Read(**/.aws/**)",
       "Read(**/*token*)",
       "Read(**/*secrets*)",
@@ -463,7 +470,8 @@
       "Read(id_ed25519)",
       "Read(id_rsa)",
       "Read(**/*.key)",
-      "Edit(**/*.env*)",
+      "Edit(**/.env)",
+      "Edit(**/*.env)",
       "Edit(**/*.key)",
       "Edit(**/.aws/**)",
       "Edit(**/*production*)",

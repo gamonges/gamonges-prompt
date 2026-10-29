@@ -27,8 +27,8 @@ Orca の `--json` の応答は `{"ok": …, "result": {…}}` で包まれる。
 |------|------|
 | 監督の開始 | `orca orchestration run-create --objective "<series の title>" --json` |
 | 既存の監督につなぐ（再開） | `orca orchestration run-use --id <run_id> --json` |
-| worker の起動 | `orca orchestration worker-start --spec "<spec>" --worktree path:<worktree> --agent <claude\|codex> --run <run_id> --json`。応答の Task ID・Dispatch ID・terminal の handle を `## adapter` に書く。既存の worktree では setup を再実行しない |
-| 工程の再試行 | `orca orchestration worker-start --task <失敗した Task ID> --retry-of <dispatch_id> --worktree path:<worktree> --agent <claude\|codex> --run <run_id> --json`。失敗の報告（`failed`）か止めた（`stopped`）試行にだけ使う（`references/recovery-and-cleanup.md` の「Retry, stop, and abandon」）。`--retry-of` は `--task` が要り、配置を引き継がないので、worktree と agent を改めて指定する（`worker-start --help` の Notes） |
+| worker の起動 | `orca orchestration worker-start --spec "<spec>" --worktree path:<worktree> --agent <claude\|codex> [--model <model>] --run <run_id> --json`。`--model` は `## 運用の約束` にその工程の model があるときだけ付ける（段の型の「worker のモデルと advisor」）。応答の Task ID・Dispatch ID・terminal の handle を `## adapter` に書く。既存の worktree では setup を再実行しない |
+| 工程の再試行 | `orca orchestration worker-start --task <失敗した Task ID> --retry-of <dispatch_id> --worktree path:<worktree> --agent <claude\|codex> [--model <model>] --run <run_id> --json`。`--model` は worker の起動と同じく当て直す。失敗の報告（`failed`）か止めた（`stopped`）試行にだけ使う（`references/recovery-and-cleanup.md` の「Retry, stop, and abandon」）。`--retry-of` は `--task` が要り、配置を引き継がないので、worktree と agent を改めて指定する（`worker-start --help` の Notes） |
 | 試行を止める | 終了の積極的な証拠があるときだけ、`worker-list --run <run_id> --json` のその行の `projection.nextAction` が `worker-stop` か `worker-abandon` を指せばそれに従い、argv が無ければ `orca orchestration worker-stop --dispatch <dispatch_id> --json`。`nextAction` がほかの操作を指すとき、`worker-stop` が失敗したとき、`worker-abandon` を使ったとき（試行が stopped にならず、`--retry-of` の対象外になる）は、工程の再試行に進まず③としてユーザーに回す。どれも終了の証拠の無い試行には使わない |
 | 出来事を待つ | `orca orchestration check --wait --run <run_id> --types "worker_done,escalation,question" --timeout-ms 570000 --json`（下の「待ち受けの時間」） |
 | 出来事を処理済みにする（と次を待つ） | `orca orchestration check --ack <delivery_id> --wait --run <run_id> --types "worker_done,escalation,question" --timeout-ms 570000 --json`。ack はバッチ全体に効く |
@@ -38,6 +38,7 @@ Orca の `--json` の応答は `{"ok": …, "result": {…}}` で包まれる。
 | worker を解放する | `orca orchestration worker-release --dispatch <dispatch_id> --json` |
 | 生存の確認 | `orca orchestration worker-list --run <run_id> --json` の各行の `projection.liveness`（`live`・`unverifiable`・`exited`。kernel の「Authority and safety floor」）を入口にする。行の中の正確なパスは未確認なので、初回に 1 行を見て確かめる。進んでいるかは `orca orchestration worker-read --dispatch <dispatch_id> --source transcript --json` の最終時刻、入力待ちのプロンプトと権限確認の画面は `--source terminal` で見る（下の「生存の判定」） |
 | 残った terminal を閉じる | `orca terminal close --terminal <handle> --json`。下の「完了の後始末」の確かめの後で、`retained` の terminal にだけ使う |
+| 自分の terminal の識別子 | 環境変数 `ORCA_TERMINAL_HANDLE`（受信箱の `register` の `--terminal` に使う） |
 | worker 側の手段 | 注入された preamble にある `ask`・`send --type heartbeat`・`check --terminal`・`send --type worker_done --outcome succeeded\|failed` をそのまま使う。spec には書かない（preamble の引数を組み立て直さない。kernel の「Authority and safety floor」） |
 
 ## 状態ファイルの `## adapter` 節に書くもの
@@ -51,6 +52,8 @@ Orca の `--json` の応答は `{"ok": …, "result": {…}}` で包まれる。
 ## 待ち受けの時間
 
 待ち受けの時間は 570000 ms（9 分 30 秒）。Claude Code の coordinator は前景の Bash で張り、Bash ツールの `timeout` を `600000` にする。Claude Code の前景の Bash の上限は 600000 ms で、それより長い待ちは Bash の側で切れる（`codex-run.sh wait --timeout-sec 570` と同じ理由）。Codex の coordinator の上限は未確認で、切れたら時間切れと同じに扱う。SKILL.md・生存の判定の「待ち受けの時間」はこの値を指す。
+
+worker が 0 体で `checks: 確認中` の作業単位を待つとき（SKILL.md の 4 の「待つ相手の worker が居ないとき」）も、同じ「出来事を待つ」を時計に使う。`check --wait` は worker の数に依らず、出来事が無ければ `--timeout-ms` まで待って `"count": 0` で戻る（2026-10-29 に、Run に紐づいた状態・紐づかない状態の両方で実測）。
 
 ## 待ち受けの戻り
 

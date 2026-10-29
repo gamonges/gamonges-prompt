@@ -94,6 +94,7 @@ bash shared/scripts/tests/test-setup-codex.sh    # setup.sh・verify・agents �
 bash shared/scripts/tests/test-series-sync.sh    # series-sync の同期スクリプトの挙動（偽の gh。python3 と /usr/bin/python3）。series_sync.py を編集したら
 bash shared/scripts/tests/test-codex-run.sh      # codex-run.sh の挙動（偽の companion）。codex-run.sh を編集したら
 bash shared/scripts/tests/test-knowledge.sh      # knowledge.py の規則・目録・snapshot と、skill の雛形の frontmatter（python3 と /usr/bin/python3）。knowledge.py か tmp/ に md を書く skill の雛形を編集したら
+bash shared/scripts/tests/test-series-inbox.sh   # series-run の横断の受信箱の挙動（SERIES_RUN_STATE_DIR。python3 と /usr/bin/python3）。series_inbox.py を編集したら
 ```
 
 ### アンインストール
@@ -140,8 +141,31 @@ git pull
 - **Bash で書かれた md は通る**（`cat >`・`tee`・python）。既存の deny と同じく Read/Edit/Write/apply_patch の経路だけを守る。漏れは `knowledge.py lint` で拾う
 - **YAML との互換**: check は YAML の部分集合として寛容に読み、YAML パーサとの互換は保証しない（`title: 調査: 既存の hook` も通す）。knowledge.py が書く値（snapshot の写し）は、要るときだけ単一引用にして YAML としても読める形にする。保存庫・ナレッジ化で YAML パーサを使うときに check を厳しくする
 - **プロジェクト単位では外せない**: hook はグローバルに効き、外部の書き手（`/goal` の `tmp/goal.md`・グローバル CLAUDE.md の `tmp/plan.md`）も初回は deny を挟む。理由に雛形が出て 1 回で回復できる。外す手段を足すと、外したまま忘れても気づけない（ガードが黙って開くのと同じ型）ので足さない
-- **AGENTS.md の挙動テストの一覧に `test-knowledge.sh` は足していない**: Codex の指示（`~/.codex/AGENTS.md` ＋ repo の AGENTS.md）は既に上限 32 KiB を超えている（F-5）。一覧は上の「挙動テスト」と `verify-skills.sh --with-behavior-tests` が持つ。F-5 の解消時に AGENTS.md へ移すかを決める
+- **AGENTS.md の挙動テストの一覧に `test-knowledge.sh`・`test-series-inbox.sh` は足していない**: Codex の指示（`~/.codex/AGENTS.md` ＋ repo の AGENTS.md）は既に上限 32 KiB を超えている（F-5）。一覧は上の「挙動テスト」と `verify-skills.sh --with-behavior-tests` が持つ。F-5 の解消時に AGENTS.md へ移すかを決める
 - **止まったら**: deny の理由に付けるべき frontmatter の雛形が出るので、それを先頭に足して書き直す。ask（CLI の失敗）は `./setup.sh install` 済みか（`~/.claude/scripts/knowledge.py` があるか）を確かめる
+
+### git push の確認と .env 系の制限
+
+判断記録（AGENTS.md に置かないのは、上と同じく Codex の指示のサイズの上限のため。settings.json はコメントを書けない）:
+
+- **`permissions.ask` の `Bash(git push:*)` を外し、既定のブランチへの push だけを `hook-confirm-destructive-git.sh` で ask にした。** worker の feature ブランチへの push は毎回 Yes で、毎回の確認は中身を読まずに承認する習慣を育てる（ガードを別の方向から無効にする）。既定のブランチは `main`・`master`・`develop` と `refs/remotes/<リモート>/HEAD` の値（取れなければ名前の 3 つだけ）。Codex では `[要確認]` の deny。`release/*`・`trunk`・`production` などは集合に入れず、GitHub の branch protection に任せる（`refs/remotes/<リモート>/HEAD` が指すときだけ既定のブランチとして扱う）
+- **押す先は引数と git の参照から求め、求められなければ ask に倒す。** `<src>:<dst>` は dst、`<name>` は同名、`HEAD`・`@` は `symbolic-ref HEAD`、refspec が無ければ `@{push}`。`--all`・`--branches`・`--mirror`・`--prune`・`--repo`、知らないオプション、git のグローバルオプション（`-C` と押す先に関わらないもの以外。`-c`・`--git-dir` など）、`$`・バッククォート・glob を含む引数、`sudo`・`xargs`・`ssh` などのラッパーの中、許可に無い `GIT_*` の代入・`export`（`GIT_CONFIG_*`・`GIT_DIR` は hook から見えない所で押す先を替える。`GIT_TRACE*`・`GIT_SSH_COMMAND` などは通す）、`push.default=matching` の refspec の無い push（`git push`・`git push origin`。同名の全ブランチを押す）、明示したリモートと `@{push}` のリモートの食い違い、`remote.<r>.push` の設定（`@{push}` は今のブランチの対応しか返さないが、`git push <r>` は設定の全部を押す。`:<dst>` を省いた明示の refspec も、この設定が押す先を替える）は ask。refspec の `+`（強制）も宛先によらず ask（force の判定は `-f`・`--force`・`--force-with-lease` しか拾わず、permissions.ask を外すと `+` を止める経路が無くなるため）
+- **`git push --dry-run` は使わない。** pre-push のフック（テスト・ネットワーク）を走らせる
+- **コマンドの書き方によらず push を見つける。** 前段は引用符・バックスラッシュ・改行を除いて `push` を含むかだけを見て、判定を python に任せる（前段を正規表現で絞ると、`"git" push`・`g\it push`・行の継続・`-C.` が python に届かず素通しになった）。python は、予約語とグループの記号（`if`・`then`・`do`・`{`・`!`・`time` など）を前置きとして読み飛ばし、コマンド置換（`$(…)`・バッククォート。二重引用の中も）の中を同じ判定で読み、`bash -c`・`sh -c`・`eval` の中身も同じ判定で読む（既定でないブランチへの push は通す）。ヒアドキュメントの本文は実行されないので、引用・算術式の外の `<<` から本文を除いてから読む（除かないと、commit メッセージの本文の行を push と読む）。引用無しのヒアドキュメント（`<<EOF`）の本文の中のコマンド置換は実行されるので、同じ判定で読む。行の継続はシェルの意味どおり語をつなぐ
+- **安全側の誤検出**: 別々の語の `git` と `push` を含む未知のコマンド（`echo git push origin main`）は ask になる。単一引用の中のコマンド置換（`echo '… $(git push origin main) …'`）はシェルが実行しないので読まずに通す（`bash -c '…'`・`eval '…'` の中身は上のとおり読み、`ssh host '…'` などのラッパーは中に `git push` があれば ask）
+- **残差**（判定できないので通る）: git の alias（`git p origin main`）、セッションで前に export した `GIT_*` や変数（`git $P` の P を前のコマンドで決めたもの）、Monitor・Serena の `execute_shell_command` 経由の push（Bash の matcher に当たらない。変更前から同じ）、`cd` の後と Codex での `remote.<r>.push`・`refs/remotes/<r>/HEAD`（入力の cwd でしか確かめない。cwd で見つかったときだけ ask を足す）
+- **マージから install までの時差**: settings.json は symlink なので pull の時点で効き、scripts は `./setup.sh install` まで古い。その間は既定のブランチへの push に確認が出ず、`hook-guard-env-files.sh` も無いので exit 127（non-blocking）になり `.env.local` 等も守られない。pull と install を 1 つの手順で行う。Orca のプロファイルの settings.json（通常のファイル）を追従させるのは install の後
+- **判定のディレクトリが取れない入力は ask に倒れる。** `cd x && git push` の移動先と、Codex の `exec_command` の `workdir` は hook に渡らない。`-C` が無く、押す先を求めるのに git の参照が要る（refspec が無い・`HEAD`・`@`）ときは ask（Codex では deny）。ブランチ名を明示した refspec と、`git -C <dir> push …` は判定できるので通る（series-run の push は `-C` 付き）
+- **.env 系の判定を `hook-guard-env-files.sh`（Read・Edit・Write・MultiEdit・Grep・NotebookEdit・apply_patch）に移した。** permissions は否定を書けず、deny が allow より先に評価されるので、`**/*.env*` の deny のままでは `.env.example`・`.env.sample` の allow が効かない（効いていない allow は外した）。判定は basename を小文字にして、`.env` と一致・`.env.`・`.env-`・`.env_` で始まる・`.env` で終わる・`<名前>.env.<拡張子>`（`prod.env.bak`・`secrets.env.json`）を deny。通すのは、区切りが `.`・`-`・`_` の example・sample と `<名前>.env.example`・`<名前>.env.sample`（見本）、`<名前>.env.<コードの拡張子>`（`x.env.ts` など。basename が `.env` で始まる `.env.ts` は止める）。`env/stg.ts`・`app-env.ts`・`.envrc` は通る。symlink は解決した先の名前でも判定する（相対パスは入力の cwd が基点）
+- **`.envrc` は通す**: direnv の設定でシェルのコードを含み、読めないと direnv の設定を扱えない。秘密を置く運用なら、permissions の deny に `Read(**/.envrc)` を足す
+- **Grep で覆う範囲**: `path` がファイルのときと、`glob` が `.env` 系を指すとき（`*.env*`・`**/.env.local`。`**/*.env.ts` は通す）だけ。ディレクトリを対象にした glob 無しの Grep は覆わない
+- **Codex での範囲**: Codex はシェルで読むので、守られるのは apply_patch の書き込みだけ。hooks.json の信頼をし直すまでは、Codex では本 hook 自体もスキップされる
+- **例外の無い名前は permissions にも残す**（`Read/Edit(**/.env)`・`Read/Edit(**/*.env)`）。hook が install 漏れなどで動かないときにも、最も多い `.env` は止まる
+- **apply_patch は見出しで判定する**: Add File・Update File・Delete File と、Move to の移動先（移動元は Update File の見出し）。見出しが読めない patch は、本文に `.env` を含むときだけ止める（全部止めると、文法が将来変わったときに Codex の編集が全部止まる）
+- **出すのは deny だけ**（ask を出さない）。秘密を読む操作に「承認すれば通る」経路を作らない。理由には「必要ならユーザーに依頼する」と書く。check 7(1) の ask を返す hook の一覧には入らない
+- **Bash 経路（`cat .env`）は塞がない**（AGENTS.md の deny の判断記録の方針のまま）
+- **この変更のきっかけの「`env/stg.ts` の編集が止められた」は、`.claude/worktrees/<名前>/env/…`（worktree の下）での出来事だった。** 当時の deny（`**/*.env*`）はこの名前に一致しないので、Claude Code の `.claude/` の下の保護で止まった可能性が高い（未確定。確かめていない）。本 hook はこの名前を通すが、`.claude/` の保護は別の仕組みで、本 hook では変わらない
+- **入れたら**: Codex では PreToolUse の自前グループが 1 つ増えるので、`./setup.sh install` の後に `/hooks` で PreToolUse の全件を信頼し直す
 
 ## 📚 Skills 一覧
 
