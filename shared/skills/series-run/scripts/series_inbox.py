@@ -47,9 +47,39 @@ def registry_dir():
 
 
 def entry_path(state):
-    # 1 シリーズ 1 ファイル。書き手がその coordinator だけに決まるので、登録簿にロックが要らない
-    key = hashlib.sha1(os.path.abspath(state).encode("utf-8")).hexdigest()[:16]
+    # 1 シリーズ 1 ファイル。書き手がその coordinator だけに決まるので、登録簿にロックが要らない。
+    # キーは realpath（/tmp と /private/tmp のような表記の違いで同じシリーズを 2 件にしない）
+    key = hashlib.sha1(os.path.realpath(state).encode("utf-8")).hexdigest()[:16]
     return os.path.join(registry_dir(), key + ".json")
+
+
+def drop_other_keys(state):
+    """同じ状態ファイルを指すのにキーが今のものと違う登録（旧形式の abspath のキー・別の表記）を消す。
+    読めない登録は消さない（render で「読めない」と出す）"""
+    reg, real, keep = registry_dir(), os.path.realpath(state), os.path.basename(entry_path(state))
+    if not os.path.isdir(reg):
+        return
+    for name in os.listdir(reg):
+        if not name.endswith(".json") or name == keep:
+            continue
+        try:
+            entry = load_entry(os.path.join(reg, name))
+        except (OSError, ValueError):
+            continue
+        if os.path.realpath(entry["state"]) == real:
+            os.remove(os.path.join(reg, name))
+
+
+def load_entry(path):
+    with open(path, encoding="utf-8") as f:
+        entry = json.load(f)
+    # 描画に使う欄の型も確かめる。title が数値・terminal が null だと html.escape で AttributeError になり、
+    # シリーズ単位の隔離を抜けて全体の更新が止まる
+    ok = (isinstance(entry, dict) and isinstance(entry.get("state"), str) and entry["state"]
+          and isinstance(entry.get("title", ""), str) and isinstance(entry.get("terminal", ""), str))
+    if not ok:
+        raise ValueError("登録 %s の形が違います" % os.path.basename(path))
+    return entry
 
 
 def atomic_write(path, text):
@@ -59,6 +89,9 @@ def atomic_write(path, text):
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
+            # 登録簿は正本なので、置き換えの前に中身を確かに書く
+            f.flush()
+            os.fsync(f.fileno())
         os.chmod(tmp, 0o644)
         os.replace(tmp, path)
     finally:
@@ -163,7 +196,8 @@ def read_series(entry):
     outside = outside_fences(lines)
     item["units"] = parse_units(lines, outside)
     item["waiting"], item["auto"] = parse_list(lines, outside)
-    if item["units"] and all(u["where"] in DONE_STATES for u in item["units"]):
+    # 完了の後に残る依頼（④）があるうちは、終わったことにせず待っているものを出す
+    if item["units"] and all(u["where"] in DONE_STATES for u in item["units"]) and not item["waiting"]:
         item["done"] = "全作業単位が完了か対象外"
     return item
 
@@ -219,6 +253,8 @@ def render_series(item):
     head = ('<h2>%s</h2>\n<p class="meta">答える terminal: <code>%s</code>'
             ' ・ 状態ファイル: <code>%s</code></p>\n'
             % (esc(item["title"]), esc(item["terminal"]), esc(item["state"])))
+    if item.get("broken"):
+        return '<section>\n%s<p><mark>読めない: %s</mark></p>\n</section>\n' % (head, esc(item["broken"]))
     if item["done"]:
         return ('<section class="done">\n%s<p>終わった（登録が残っている）: %s</p>\n</section>\n'
                 % (head, esc(item["done"])))
@@ -228,7 +264,7 @@ def render_series(item):
     else:
         parts.append("<p>待っているものは無い</p>\n")
     if item["auto"]:
-        parts.append("<h3>推奨で進めたもの（覆すなら番号で答える）</h3>\n<pre>")
+        parts.append("<h3>推奨で進めたもの（確かめるか覆すなら番号で答える）</h3>\n<pre>")
         parts.append("\n".join("<mark>%s</mark>" % text_html(x) for x in item["auto"]))
         parts.append("</pre>\n")
     parts.append("<h3>作業単位</h3>\n<table>\n<tr><th>段</th><th>現在地</th>"
@@ -241,9 +277,15 @@ def render_series(item):
     return "".join(parts)
 
 
+def question_count(item):
+    # 待っているものの件数は「- 」で始まる行の数（複数行の 1 問を、行の数だけ数えない）
+    return sum(1 for line in item["waiting"] if line.startswith("- "))
+
+
 def render_html(items, now):
-    # 待っているものが多いシリーズを上に、終わったものを下に置く（並びを決定的にする）
-    items = sorted(items, key=lambda x: (x["done"] is not None, -len(x["waiting"]), x["title"]))
+    # 読めないものと待っているものが多いシリーズを上に、終わったものを下に置く（並びを決定的にする）
+    items = sorted(items, key=lambda x: (x["done"] is not None, x.get("broken") is None,
+                                         -question_count(x), x["title"]))
     body = "".join(render_series(x) for x in items) or "<p>登録されたシリーズは無い</p>\n"
     return ('<!doctype html>\n<html lang="ja">\n<head>\n<meta charset="utf-8">\n'
             '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
@@ -257,7 +299,8 @@ def render_html(items, now):
 
 def cmd_register(args):
     os.makedirs(registry_dir(), exist_ok=True)
-    entry = {"state": os.path.abspath(args.state), "terminal": args.terminal,
+    drop_other_keys(args.state)
+    entry = {"state": os.path.realpath(args.state), "terminal": args.terminal,
              "title": args.title,
              "registered_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds")}
     atomic_write(entry_path(args.state), json.dumps(entry, ensure_ascii=False, indent=2) + "\n")
@@ -269,6 +312,7 @@ def cmd_unregister(args):
         os.remove(entry_path(args.state))
     except FileNotFoundError:
         pass
+    drop_other_keys(args.state)
     return 0
 
 
@@ -281,20 +325,32 @@ def cmd_render(args):
     with open(os.path.join(d, "inbox.lock"), "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         try:
-            items = []
+            items, errors = [], []
             reg = registry_dir()
             names = sorted(os.listdir(reg)) if os.path.isdir(reg) else []
             for name in names:
                 if not name.endswith(".json"):
                     continue
-                with open(os.path.join(reg, name), encoding="utf-8") as f:
-                    items.append(read_series(json.load(f)))
+                # 1 シリーズの壊れで全シリーズのビューを止めない（coordinator の Write は原子的でないので、
+                # 書き込み中の読み取りで起こりうる）。読めないものは「読めない」と出し、失敗を返す
+                entry = {"title": name, "terminal": "", "state": os.path.join(reg, name)}
+                try:
+                    entry = load_entry(os.path.join(reg, name))
+                    items.append(read_series(entry))
+                except (OSError, ValueError) as e:
+                    errors.append("%s: %s" % (name, e))
+                    # 登録が読めていれば、題名と答える terminal を出す（どこで直すかが分かる）
+                    items.append({"title": entry.get("title") or entry["state"], "terminal": entry.get("terminal", ""),
+                                  "state": entry["state"], "done": None, "broken": str(e),
+                                  "waiting": [], "auto": [], "units": []})
             now = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
             atomic_write(out, render_html(items, now))
         finally:
             fcntl.flock(lock, fcntl.LOCK_UN)
     print(out)
-    return 0
+    for e in errors:
+        sys.stderr.write("series_inbox.py: render: 読めない登録 %s\n" % e)
+    return 1 if errors else 0
 
 
 def main(argv):

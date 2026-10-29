@@ -95,9 +95,10 @@ import os, re, shlex, subprocess
 
 # 値を取らない既知のオプション（git 2.50.1 の `git push -h` から写す。--no-<名前> も受ける）
 FLAG_LONG = {"verbose", "quiet", "tags", "dry-run", "porcelain", "delete", "thin", "set-upstream",
-             "progress", "verify", "follow-tags", "signed", "atomic", "ipv4", "ipv6",
-             "force-if-includes", "force", "force-with-lease"}
-FLAG_SHORT = set("vqdnuf46")
+             "progress", "verify", "follow-tags", "signed", "atomic", "ipv4", "ipv6"}
+FLAG_SHORT = set("vqdnu46")
+# 強制の push。正規表現の側は行の継続・引用で書いた形に当たらないので、ここでも止める
+FORCE_LONG = {"force", "force-with-lease", "force-if-includes"}
 # 値を別の引数に取るオプション（= 付きはその 1 語）。値を refspec と数えない
 VALUE_LONG = {"push-option", "receive-pack", "exec", "recurse-submodules"}
 # 押す先を引数の外で決める・リモートを替えるもの
@@ -106,10 +107,23 @@ WIDEN = {"all", "branches", "mirror", "prune", "repo"}
 GLOBAL_FLAGS = {"--no-pager", "-p", "--paginate", "-P", "--no-optional-locks", "--literal-pathspecs",
                 "--no-replace-objects", "--glob-pathspecs", "--noglob-pathspecs", "--icase-pathspecs"}
 SEPARATORS = {";", "&", "&&", "|", "||", "(", ")"}
-# 後ろに別のコマンド（列）を取るもの
-WRAPPERS = {"bash", "sh", "zsh", "dash", "ksh", "eval", "xargs", "sudo", "env", "command", "exec",
-            "time", "nohup", "nice", "timeout", "gtimeout", "watch", "ssh", "caffeinate"}
+# 予約語・グループの記号は前置きとして読み飛ばす。読み飛ばさないと先頭の語が if・{ になり、後ろの push を判定しない
+SHELL_KEYWORDS = {"if", "then", "elif", "else", "fi", "do", "done", "while", "until", "for", "case", "esac",
+                  "{", "}", "!", "time"}
+# オプションを付けなければ、後ろのコマンドをそのまま起動する前置き
+PREFIXES = {"nohup", "command"}
+# -c の引数をシェルとして実行するもの（eval は残りの引数）。中身を同じ判定で読む
+SHELLS = {"bash", "sh", "zsh", "dash", "ksh", "fish"}
+# 後ろに別のコマンド（列）を取るもの。中身を読めないので、git push を含めば ask
+WRAPPERS = SHELLS | {"eval", "xargs", "sudo", "env", "command", "exec", "nohup", "nice", "timeout", "gtimeout",
+                     "watch", "ssh", "caffeinate", "tcsh", "csh", "script", "doas", "su", "flock", "stdbuf",
+                     "unbuffer", "parallel", "busybox"}
 DEFAULT_NAMES = {"main", "master", "develop"}
+# 押す先を替えない GIT_* の環境変数。ほかの GIT_*（GIT_CONFIG_*・GIT_DIR 等）は、判定用の git() から
+# 見えない所で押す先を替えるので、git -c・--git-dir と同じく ask
+GIT_ENV_OK = re.compile(r"GIT_(TRACE\w*|SSH_COMMAND|SSH|TERMINAL_PROMPT|ASKPASS)")
+GIT_PUSH_TEXT = re.compile(r"(^|[\s;&|(])git\s(.*\s)?push(\s|$)")
+MAX_DEPTH = 5
 
 
 class Ask(Exception):
@@ -134,18 +148,132 @@ def defaults(d, remote):
     return names
 
 
+def close_paren(s, k):
+    # s[k] は "(" 。算術式の中は引用もヒアドキュメントも無いので、括弧だけを数える
+    depth = 0
+    for j in range(k, len(s)):
+        if s[j] == "(":
+            depth += 1
+        elif s[j] == ")":
+            depth -= 1
+            if depth == 0:
+                return j
+    return len(s)
+
+
+def walk(s, i=0, stop=False, dq=False):
+    """ヒアドキュメントの本文を除き、コマンド置換の中身を取り出す。
+    戻り値: (読み終えた位置, 本文を除いた文字列, 置換の中身の並び, 引用無しのヒアドキュメントの本文の並び)。
+    ヒアドキュメントの本文は実行されない。先に除かないと、コミットメッセージの行を push と読む。
+    コマンド置換は二重引用の中でも実行されるが、shlex では 1 つの語になるので、中身を取り出して読む。
+    stop は $( の中を読むとき（対応する ) で止まる）。dq は二重引用の中として読む"""
+    out, subs, bodies, pending = [], [], [], []
+    n, quote, depth = len(s), ('"' if dq else None), 0
+    while i < n:
+        c = s[i]
+        if quote == "'":
+            out.append(c)
+            i += 1
+            if c == "'":
+                quote = None
+            continue
+        if c == "\\" and i + 1 < n:
+            out.append(s[i:i + 2])
+            i += 2
+            continue
+        if c == "`":
+            j = s.find("`", i + 1)
+            end = n if j < 0 else j
+            subs.append(s[i + 1:end])
+            out.append(s[i:end + 1])
+            i = end + 1
+            continue
+        if s.startswith("$((", i):
+            end = close_paren(s, i + 1)
+            out.append(s[i:end + 1])
+            i = end + 1
+            continue
+        if s.startswith("$(", i):
+            end, inner, _, inner_bodies = walk(s, i + 2, stop=True)
+            subs.append(inner)
+            bodies.extend(inner_bodies)
+            out.append("$(" + inner + ")")
+            i = end + 1
+            continue
+        if c == '"':
+            if not dq:
+                quote = None if quote == '"' else '"'
+            out.append(c)
+            i += 1
+            continue
+        if quote == '"':
+            out.append(c)
+            i += 1
+            continue
+        if c == "'":
+            quote = "'"
+            out.append(c)
+            i += 1
+            continue
+        if s.startswith("<<", i) and not s.startswith("<<<", i):
+            j = i + 2
+            dash = j < n and s[j] == "-"
+            if dash:
+                j += 1
+            while j < n and s[j] in " \t":
+                j += 1
+            k = j
+            while k < n and not s[k].isspace() and s[k] not in ";|&<>()":
+                k += 1
+            word = s[j:k]
+            delim = re.sub(r"[\"'\\]", "", word)
+            if delim:
+                pending.append((delim, word != delim, dash))
+            out.append(s[i:k])
+            i = k
+            continue
+        if c == "\n" and pending:
+            out.append(c)
+            i += 1
+            for delim, quoted, dash in pending:
+                body = []
+                # 終端の行が無ければ、bash と同じく入力の終わりまでを本文にする
+                while i < n:
+                    e = s.find("\n", i)
+                    line = s[i:] if e < 0 else s[i:e]
+                    i = n if e < 0 else e + 1
+                    if (line.lstrip("\t") if dash else line) == delim:
+                        break
+                    body.append(line)
+                if not quoted:
+                    bodies.append("\n".join(body))
+            pending = []
+            continue
+        if stop and c == "(":
+            depth += 1
+        elif stop and c == ")":
+            if depth == 0:
+                return i, "".join(out), subs, bodies
+            depth -= 1
+        out.append(c)
+        i += 1
+    return n, "".join(out), subs, bodies
+
+
 def segments(cmd):
-    # 改行もコマンドの区切り（shlex は改行を空白として読む）。行の継続は 1 行につなぐ
-    cmd = cmd.replace("\\\n", " ").replace("\n", " ; ")
+    # 行の継続はシェルの意味どおり語をつなぐ（空白にすると pu\⏎sh が 2 語に分かれる）。改行もコマンドの区切り
+    cmd = cmd.replace("\\\n", "").replace("\n", " ; ")
+    # fd はリダイレクトの記号と隣り合うときだけ。shlex の後では隣り合っていたかが分からず、refspec の数字を捨ててしまう
+    cmd = re.sub(r"(?:(?<=[\s;&|()])|^)\d+(?=[<>])", "", cmd)
     lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
     lex.whitespace_split = True
+    # 語の途中の # をコメントにしない（feat#x main の main を捨てない）
+    lex.commenters = ""
     segs, cur, skip = [], [], False
     for t in lex:
         if skip:
             skip = False
         elif re.fullmatch(r"[<>&]*[<>][<>&]*", t):
-            if cur and cur[-1].isdigit():
-                cur.pop()
             skip = True
         elif t in SEPARATORS or set(t) <= set(";&|()"):
             segs.append(cur); cur = []
@@ -168,7 +296,10 @@ def parse_push(args):
             base = name[3:] if name.startswith("no-") else name
             if base in WIDEN:
                 raise Ask(f"git push の --{name} は押す先を引数から決められません")
-            if base in VALUE_LONG:
+            if base in FORCE_LONG:
+                if not name.startswith("no-"):
+                    raise Ask(f"git push の --{name} は強制の push です")
+            elif base in VALUE_LONG:
                 if not eq and not name.startswith("no-"):
                     i += 1
             elif base not in FLAG_LONG:
@@ -179,6 +310,8 @@ def parse_push(args):
                     if j == len(a) - 1:
                         i += 1
                     break
+                if ch == "f":
+                    raise Ask("git push の -f は強制の push です")
                 if ch not in FLAG_SHORT:
                     raise Ask(f"git push の知らないオプション -{ch} があります")
         else:
@@ -187,17 +320,24 @@ def parse_push(args):
     return (pos[0] if pos else None), pos[1:]
 
 
-def push_config(d, remote):
-    # remote.<r>.push は押す先を refspec の外で決める。未設定は rc=1、それ以外は値ありか読めない
+def push_config(d, remote, strict=True):
+    # remote.<r>.push は押す先を refspec の外で決める。未設定は rc=1、それ以外は値ありか読めない。
+    # strict でない（cd の後・Codex で、入力の cwd で代わりに引く）ときは、値がある（rc=0）ときだけ ask を足す
     rc, _ = git(d, "config", "--get-all", f"remote.{remote}.push")
-    if rc != 1:
+    if rc == 0 or (strict and rc != 1):
         raise Ask(f"remote.{remote}.push の設定が押す先を決めます")
 
 
-def check_push(d, remote, refspecs, can_resolve):
+def check_push(d, remote, refspecs, can_resolve, cwd):
     if not refspecs:
         if not can_resolve:
             raise Ask("押す先を求める git の参照が、この入力からは確かめられません（-C で repo を指すと判定できます）")
+        # @{push} は今のブランチの押す先しか返さない。matching は同名の全ブランチ（main を含む）を押す
+        rc, mode = git(d, "config", "--get", "push.default")
+        if rc == 0 and mode == "matching":
+            raise Ask("push.default=matching は同名の全ブランチ（既定のブランチを含む）を押します")
+        if rc not in (0, 1):
+            raise Ask("push.default の設定を読めません")
         if remote:
             push_config(d, remote)
         rc, out = git(d, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{push}")
@@ -212,7 +352,13 @@ def check_push(d, remote, refspecs, can_resolve):
         if branch in defaults(d, r):
             raise Ask(f"既定のブランチ {branch} への push です")
         return
-    names = defaults(d if can_resolve else "", remote)
+    # cd の後・Codex では判定のディレクトリが分からない。入力の cwd で設定が見つかったときだけ ask を足す
+    # （ask を足す向きだけなので、cwd が別の repo でも素通しは増えない）
+    probe = d if can_resolve else cwd
+    names = defaults(probe, remote)
+    # :<dst> を省いた refspec は、remote.<r>.push が別の ref に向けうる（git help push）
+    if probe and any(":" not in spec for spec in refspecs):
+        push_config(probe, remote, strict=can_resolve)
     for spec in refspecs:
         if spec.startswith("+"):
             raise Ask(f"refspec {spec} は強制の push です")
@@ -237,26 +383,84 @@ def check_push(d, remote, refspecs, can_resolve):
             raise Ask(f"既定のブランチ {dst} への push です")
 
 
-def scan(cmd, cwd, codex):
-    moved = False
-    for seg in segments(cmd):
-        k = 0
-        while k < len(seg) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", seg[k]):
+def assignment(t):
+    m = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)=.*", t, re.S)
+    return m.group(1) if m else None
+
+
+def bad_git_env(name):
+    return bool(name) and name.startswith("GIT_") and not GIT_ENV_OK.fullmatch(name)
+
+
+def exports_git_env(seg):
+    # export・declare -x・typeset -x で出した GIT_* は、同じコマンド列の後ろの git push に効く
+    if not seg or seg[0] not in ("export", "declare", "typeset"):
+        return False
+    if seg[0] != "export" and not any(t.startswith("-") and "x" in t for t in seg[1:]):
+        return False
+    return any(bad_git_env(assignment(t) or t) for t in seg[1:] if not t.startswith("-"))
+
+
+def shell_script(args):
+    # bash -c '<script>'（-lc などのまとめ書きを含む）の <script>。-c が無ければ None
+    for idx, a in enumerate(args):
+        if a == "--" or not a.startswith("-"):
+            return None
+        if not a.startswith("--") and "c" in a[1:]:
+            return args[idx + 1] if idx + 1 < len(args) else None
+    return None
+
+
+def plain(w):
+    return w.replace("\\", "").replace('"', "").replace("'", "")
+
+
+def scan(cmd, cwd, codex, depth=0, moved=False):
+    if depth > MAX_DEPTH:
+        raise Ask("コマンドの入れ子が深く、git push を確かめられません")
+    _, stripped, subs, bodies = walk(cmd)
+    for sub in subs:
+        scan(sub, cwd, codex, depth + 1, moved)
+    for body in bodies:
+        # 引用無しのヒアドキュメントの本文は、中の置換だけが実行される
+        for sub in walk(body, dq=True)[2]:
+            scan(sub, cwd, codex, depth + 1, moved)
+    segs = segments(stripped)
+    exported = any(exports_git_env(seg) for seg in segs)
+    for seg in segs:
+        k, git_env = 0, False
+        while k < len(seg):
+            name = assignment(seg[k])
+            if name:
+                git_env = git_env or bad_git_env(name)
+            elif not (seg[k] in SHELL_KEYWORDS
+                      or (seg[k] in PREFIXES and k + 1 < len(seg) and not seg[k + 1].startswith("-"))):
+                break
             k += 1
         if k >= len(seg):
             continue
-        head = os.path.basename(seg[k])
+        head, rest = os.path.basename(seg[k]), seg[k + 1:]
         if head in ("cd", "pushd", "popd"):
             moved = True
             continue
         if head != "git":
-            # bash -c "git push …"・sudo git push のように、別のコマンドから起動する push。ラッパーに限るのは、
-            # gh pr create --body "… git push …" のような引数の中の文を push と取り違えないため
-            if head in WRAPPERS and any(w == "push" or re.search(r"(^|[\s;&|(])git\s(.*\s)?push(\s|$)", w)
-                                        for w in seg[k + 1:]):
-                raise Ask(f"{head} から起動する git push は押す先を確かめられません")
+            # シェル系のラッパーは中身を同じ判定で読む（bash -c 'git pu\sh origin main' は内側で git push になる）
+            script = shell_script(rest) if head in SHELLS else (" ".join(rest) if head == "eval" else None)
+            if script is not None:
+                scan(script, cwd, codex, depth + 1, moved or head != "eval")
+                continue
+            # ほかのラッパーの中は読めない。ラッパーに限るのは、gh pr create --body "… git push …" のような
+            # 引数の中の文を push と取り違えないため
+            if head in WRAPPERS:
+                if any(plain(w) == "push" or GIT_PUSH_TEXT.search(plain(w)) for w in rest):
+                    raise Ask(f"{head} から起動する git push は押す先を確かめられません")
+                continue
+            # 未知のコマンドの後ろの、別々の語の git と push（foo git push origin main）
+            gi = next((j for j, w in enumerate(rest) if os.path.basename(w) == "git"), None)
+            if gi is not None and "push" in rest[gi + 1:]:
+                raise Ask(f"{head} の後ろの git push は押す先を確かめられません")
             continue
-        args, d, i, explicit_c = seg[k + 1:], cwd, 0, False
+        args, d, i, explicit_c = rest, cwd, 0, False
         while i < len(args) and args[i].startswith("-"):
             a = args[i]
             if a == "-C" and i + 1 < len(args):
@@ -268,15 +472,19 @@ def scan(cmd, cwd, codex):
                 i += 1
             else:
                 raise Ask(f"git のオプション {a} が押す先を替えうるので、確かめられません")
+        if i < len(args) and re.search(r"[$`]", args[i]):
+            raise Ask("git のサブコマンドが、展開されるまで決まりません")
         if i >= len(args) or args[i] != "push":
             continue
+        if git_env or exported:
+            raise Ask("GIT_ で始まる環境変数が押す先を替えうるので、確かめられません")
         push_args = args[i + 1:]
         if any(re.search(r"[$`*?\[\]{}]", w) for w in push_args):
             raise Ask("git push の引数に、展開されるまで値の決まらない文字があります")
         # 前のセグメントの cd と Codex の workdir は判定のディレクトリを替えるが、hook からは見えない
         can_resolve = bool(d) and (explicit_c or not (moved or codex))
         remote, refspecs = parse_push(push_args)
-        check_push(d, remote, refspecs, can_resolve)
+        check_push(d, remote, refspecs, can_resolve, cwd)
 
 
 try:
@@ -288,7 +496,12 @@ except ValueError as e:
 else:
     print("pass")
 PY
-if [[ $match -eq 0 ]] && matches "$COMMAND" "${GIT}push(${OPT_END}|[[:space:]])"; then
+# 前段は緩く取り、判定は python に任せる。前段を正規表現で絞ると、引用・エスケープ・行の継続・-C. の形が
+# python に届かず素通しになる。引用符・バックスラッシュ・改行を除いてから探す（pu\sh・p"u"sh・pu\⏎sh を拾う）。
+# python を起動するかだけを決めるので、緩くしても ask は増えない。除くのは tr で行う（bash 3.2 の ${var//…/} は
+# 約 64 KB のコマンドで数分かかり、hook が時間切れになる）。tr が失敗したら python に回す（素通しにしない）
+PUSH_PROBE=$(printf '%s' "$COMMAND" | tr -d '\n"\\'"'") || PUSH_PROBE=push
+if [[ $match -eq 0 && "$PUSH_PROBE" == *push* ]]; then
   CWD=$(echo "$INPUT" | jq -r '.cwd // ""')
   IS_CODEX=0
   if echo "$INPUT" | jq -e 'has("turn_id")' >/dev/null 2>&1; then IS_CODEX=1; fi

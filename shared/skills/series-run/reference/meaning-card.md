@@ -12,7 +12,7 @@
 - **書き手**: coordinator（`tmp/plan.md`・状態ファイルの決定・差分・checks の結果をすべて持つのは coordinator だけ。worker に書かせると巡ごとに書き手が変わり、表現がぶれる）。作業単位ごとに意味を書くので、決まった写しではなく、毎回 LLM が書く
 - **置き場所**: `<wt>/tmp/meaning-card.md` と `<wt>/tmp/meaning-card.html`。`/create-pr` の Phase 4.5 が md を読む（`../../create-pr/SKILL.md`）
 - **書く時**: 段の型の「pr の工程」の 2（`round: implement`。`/create-pr` の案内の前）と、「checks の工程」の 1 の `前: fix`（`round: fix-<巡>`）。毎回、全体を書き直す（差分の Edit はしない）
-- **HTML**: 書いたら毎回 html-view の手順で作り直す（`../../html-view/SKILL.md` を読んで行う。`--style generic --output <wt>/tmp/meaning-card.html`）。mermaid の図はインラインの SVG に描き直す（html-view は外部依存を禁じる）。pr の工程では `/create-pr` の案内と同時に開く。checks の入口では開かず、パスを状態の表と受信箱に出す（`./inbox.md`）
+- **HTML**: 書いたら毎回 html-view の手順で作り直す（`../../html-view/SKILL.md` を読んで行う。`--style generic --output <wt>/tmp/meaning-card.html`）。mermaid の図はインラインの SVG に描き直す（html-view は外部依存を禁じる）。pr の工程では `/create-pr` の案内と同時に開く。checks の入口では html-view に `--no-open` を付けて作り（html-view は既定でブラウザを開く）、パスを状態の表と受信箱に出す（`./inbox.md`）
 
 ## 書式
 
@@ -41,7 +41,7 @@ round: <implement | fix-1 | fix-2>
 |----|------|------|
 
 ### 推奨で進めた判断
-<状態ファイルの `## ユーザーへの依頼` のうち、この作業単位の `推奨で進めた` の③（番号・要旨・推奨）。覆すなら番号で答える。無ければ「無い」>
+<状態ファイルの `## ユーザーへの依頼` のうち、この作業単位の `推奨で進めた` の③（番号・要旨・推奨）。確かめるか覆すなら番号で答える（直さないとしたものは、確かめるまで既決にも PR 本文にも使わない）。無ければ「無い」>
 
 ## 後半: 意味として抜けていないか
 
@@ -64,6 +64,6 @@ flowchart LR
 <`round` が fix のときだけ。前のカードの `head` から HEAD までの差分を、意味の変化として書く。implement なら「初回」>
 ````
 
-- (d)・(e) は `/create-pr` が PR 本文に写す（「前提」の小見出しと、動作確認のチェックリスト）。計画の内部 ID（段の名前・ステップ ID・`Q-<n>`・`K-<n>`）を書かない（PR の読者には意味が無い。`../../create-pr/reference/pr-description-template.md` と同じ）
+- (d)・(e) は `/create-pr` が PR 本文に写す（「前提」の項目（`- **前提**:`）と、動作確認のチェックリスト）。計画の内部 ID（段の名前・ステップ ID・`Q-<n>`・`K-<n>`）を書かない（PR の読者には意味が無い。`../../create-pr/reference/pr-description-template.md` と同じ）
 - (c) の値の対照は、計画が値として決めたもの（期限・件数・文言・権限）に限る。計画に値が無ければ「無い」
 - 書いた後、`head` が今の HEAD と同じことを確かめる（`/create-pr` が古いカードを報告するのは、この値との比較）

@@ -182,7 +182,7 @@
             "type": "command"
           }
         ],
-        "matcher": "Read|Edit|Write|MultiEdit"
+        "matcher": "Read|Edit|Write|MultiEdit|Grep|NotebookEdit"
       },
       {
         "hooks": [

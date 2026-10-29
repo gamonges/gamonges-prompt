@@ -39,7 +39,7 @@ worker を起動する直前に、`git -C <wt> rev-parse HEAD` と起動時刻�
 
 implement と fix の worker が使う。初回かどうかの判定をここ 1 か所に置く。「残り」に「手順 N」と書くのは、下の手順が push を止めたときだけ。push のコマンドそのものが通信の障害などで失敗したときは、番号を書かずに失敗で報告する（coordinator は通常の失敗として再試行する）。照合に使う値（worktree のパスと段のリポジトリ）は、coordinator が spec の Target に書く。series.md のブランチ列と worktree 列は照合に使わない（ブランチ列は `/create-pr` の register が埋めるまで空。worktree 列は handoff に回った段では、`/create-pr` の register が埋めるまで空。`../../series-init/SKILL.md` の「下書き → check → write」）。
 
-- **push の前の検査**（手順の番号は付けない）: `## 運用の約束` の「検査のコマンド」を worktree で回す。落ちたら直してからもう一度回し、通ってから下の 1 へ進む。直せなければ push せず、番号を書かずに失敗で報告する（push の手順で止めた③ではなく、通常の失敗として再試行する）。「要らない」なら飛ばす。重い検査（typecheck など）は書かず、checks の CI に任せる（運用の約束で決める）
+- **push の前の検査**（手順の番号は付けない）: `## 運用の約束` の「検査のコマンド」を worktree で回す。落ちたら直してからもう一度回し、通ってから下の 1 へ進む。直すのに計画の変更対象の外に触れる必要があるとき、または直せないときは、push せず、番号を書かずに失敗で報告する（push の手順で止めた③ではなく、通常の失敗として再試行する）。「要らない」なら飛ばす。重い検査（typecheck など）は書かず、checks の CI に任せる（運用の約束で決める）
 1. **前の段の取り込みの確認**: 自分の段の base が、シリーズの別の段を指す（指す先の段のブランチ名か、`段 <名> に積む` の形）ときだけ行う。指す段のブランチは、その段の worktree で `git -C <その wt> branch --show-current` で引く（coordinator が spec の Change に書く）。`git -C <wt> fetch origin` の後に `git -C <wt> log HEAD..origin/<そのブランチ>` が空であることを確かめる。空でなければ push せず、完了報告の「残り」に「手順 1: 前の段の取り込み漏れ」と書く。ブランチが引けなければ、確認を省かずに push せず、「残り」に「手順 1: 前の段のブランチが引けない」と書く
 2. `git -C <wt> rev-parse --abbrev-ref @{u}` が失敗する（upstream が無い。series-init は upstream を外す。`../../series-init/SKILL.md:L97`・L101）なら、`git -C <wt> rev-parse --show-toplevel` が spec の Target の worktree と一致し、`git -C <wt> remote get-url origin` から取り出した `<owner>/<repo>`（`github.com[:/]<owner>/<repo>(.git)?` の形）が spec の Target のリポジトリと一致することを確かめてから `git -C <wt> push -u origin HEAD`。一致しなければ push せず、「残り」に「手順 2: 照合の不一致」と書く
 3. upstream があれば、`git -C <wt> rev-parse --abbrev-ref @{u}` が `origin/<git -C <wt> branch --show-current の値>` であることを確かめてから `git -C <wt> push`（handoff から作った worktree は、base のブランチを追跡していることがある）。違えば push せず、「残り」に「手順 3: upstream が今のブランチを向いていない」と書く
@@ -79,7 +79,7 @@ push の後に、CI と bot の結果を coordinator が待つ。implement の�
 1. **入口**（`pr: 済み` か `fix: 済み` を確かめた時）
    - `## 工程の記録` に checks の行を足す: 起動時刻＝入口の時刻、起動時の HEAD＝`git -C <wt> rev-parse HEAD`、要約の先頭に `前: implement` か `前: fix`。作業単位を `checks: 確認中` にする
    - 前の `tmp/checks.md` があれば `tmp/checks.archived-<日時>.md` に移す（triage の fixes.md と同じ暫定。下の「工程の境目での `tmp/` の退避」）
-   - `前: fix` なら意味のカードを書き直す（`./meaning-card.md`。`round: fix-<巡>`）。開かず、パスを状態の表と受信箱に出す
+   - `前: fix` なら意味のカードを書き直す（`./meaning-card.md`。`round: fix-<巡>`）。HTML は html-view に `--no-open` を付けて作り（開かない）、パスを状態の表と受信箱に出す。書き直しで (d)(e) が前のカードから変わったら、PR 本文の「前提」の項目とケースの動作確認の項目を、下の「PR 本文の更新」の手順で書き換える（実装に即した記述なので coordinator が書く。`/create-pr` は implement の時点のカードを写したきりのため）
    - `## 運用の約束` に bot があれば、起動の文面を PR にコメントする（`gh pr comment <PR> --repo <段のリポジトリ> --body "<起動の文面>"`）。完了の印が空の bot は起動しない（運用の約束を埋めるまで）
    - `## 運用の約束` に dispatch する workflow があれば、workflow ごとに `gh workflow run <ファイル名> --ref <ブランチ> --repo <段のリポジトリ>` を打ち、`gh api repos/<owner>/<repo>/actions/workflows/<ファイル名> --jq .name` で表示名を引いて checks の行の要約に控える（`gh pr checks` の `workflow` は表示名で、運用の約束に書くのはファイル名のため）
 2. **確かめる時**: pr の工程の 3 と同じ（出来事を 1 つ処理するたび・時間切れのたび・worker が 0 体でターンを終える前とユーザーの返事が来るたび。SKILL.md の 4）。判定が済むまで毎回 3〜4 を当てる
@@ -87,18 +87,24 @@ push の後に、CI と bot の結果を coordinator が待つ。implement の�
    - **PR のチェック**: `gh pr checks <PR> --repo <段のリポジトリ> --json name,bucket,workflow,event,link`（`--required` を付けない全件）。pending・fail でも rc=0 で JSON を返す。**チェックが 0 件のときは rc=1 で JSON を出さず、標準エラーに `no checks reported` と出す**ので、それを 0 件とする。それ以外の rc≠0 は取得の失敗で、判定せず次の確かめる時にやり直す。dispatch する workflow の表示名と同じで `event` が `pull_request` のチェックは除く（その workflow は dispatch の run を正にする）
    - **dispatch の run**: workflow ごとに `gh run list --repo <段のリポジトリ> --workflow <ファイル名> --branch <ブランチ> --event workflow_dispatch --commit <checks の行の HEAD> --json databaseId,status,conclusion`。run id を checks の行の要約に控える
    - **bot**: 起動の後に、bot のアカウントが完了の印を持つコメントか review を付けたら届いたとみなす（受け付け・開始の通知では届いたとみなさない）。指摘は、bot の未解決の review thread のうち重大度が P0・P1 のもの（取り方は `../../review-comments/SKILL.md` の GraphQL）。人のレビュアーの thread は checks で扱わない（今までどおり `review-comments`）
-   - 判定の表:
+   - 判定の表: **上から当て、最初に当たった行で決める**。チェックが全件で 0 件で、dispatch する workflow も無いときは、CI の分は fail・pending が無いとみなし、bot だけで表を当てる
 
      | 状況 | 次 |
      |------|----|
-     | pending のチェック・終わっていない dispatch の run・届いていない bot がある | 待つ（下の 4 の上限まで） |
-     | 全部そろい、fail も P0/P1 も無い | `tmp/checks.md` を「指摘なし」で書いて 5 へ |
+     | dispatch の run が入口から 5 分たっても見つからない | ③（「dispatch し直す／飛ばす」）。ほかが pending でも先に聞く（PR のチェックは 40 分を超えて pending でありうるので、待つ行を先に置くと 5 分の判定に届かない） |
+     | dispatch の対の無い workflow の必須チェック（`gh pr checks <PR> --repo <R> --required --json name,bucket,workflow`）が 1 件以上あり、その全部が `skipping` | ③（必須チェックが 0 件ならこの行に当てない。CI が動いていない。「dispatch する workflow を運用の約束に足すか／飛ばすか」） |
+     | pending のチェック・終わっていない dispatch の run・まだ見つからない dispatch の run（入口から 5 分未満）・届いていない bot がある | 待つ（下の 4 の上限まで）。まだ見つからない run をここに入れないと、5 分未満でほかが全部済んだときに最後の行に落ちる |
      | fail のチェック・失敗した dispatch の run（必須でないものも含む）・bot の未解決の P0/P1 がある | 1 指摘 1 行で `tmp/checks.md` に書いて 5 へ |
-     | チェックが全件で 0 件で、dispatch する workflow も無い | CI は通す（bot だけを見る） |
-     | dispatch の対の無い workflow の必須チェック（`gh pr checks <PR> --repo <R> --required --json name,bucket,workflow`）が全部 `skipping` | ③（CI が動いていない。「dispatch する workflow を運用の約束に足すか／飛ばすか」） |
-     | dispatch の run が入口から 5 分たっても見つからない | ③（「dispatch し直す／飛ばす」） |
+     | 上のどれにも当たらない | `tmp/checks.md` を「指摘なし」で書いて 5 へ |
 
 4. **上限**: 入口の時刻から `## 運用の約束` の「checks の上限」（既定 45 分）を超えても pending・bot の結果が来ないなら、③で「待つ（もう 1 回の上限）／失敗として扱う／飛ばす」を聞く。この③は 1 回に 1 つだけ立てる（`未回答` の間は立て直さない）。checks の③は、作業単位を `checks: 判断待ち` にする
+   - checks の③の答えごとの書き方と次（どれも checks の行の要約に答えと `Q-<n>` を書く）:
+     - **待つ**: `checks: 確認中` に戻し、checks の行の要約に「上限の延長: <答えた時刻>」を書く（上限はその時刻から数える）
+     - **失敗として扱う**: `tmp/checks.md` に、判明済みの指摘（表の fail の行に当たるもの）を書いたうえで、未完了のチェック・run・届いていない bot を 1 行ずつ「時間切れ」として足し、5 へ（triage・recheck の 4 が指摘として読む。判明済みの指摘を落とすと、CI の fail が入力から消える）
+     - **飛ばす**: `tmp/checks.md` の本文を `飛ばした（③ Q-<n>）: <理由>` の 1 行にして（frontmatter の `head` は書く。再開の推定で checks をやり直さないため）5 へ。triage・recheck は指摘 0 件として読む
+     - **dispatch し直す**: 入口の dispatch をやり直し、5 分の数え始めを今にする（checks の行の要約に「dispatch し直した: <時刻>」を書く）
+     - **dispatch する workflow を運用の約束に足す**: ③の (ii) の答えとして `## 運用の約束` を書き直し、入口の dispatch からやり直す
+   - 「飛ばす」「失敗として扱う」で進めた作業単位は、SKILL.md の 7 の 1 の報告に「CI を見ずに進めた」として出す
 5. **済んだら**: 作業単位を `checks: 済み` にし、checks の行の要約に判定（指摘の件数・run id）を書く。`前: implement` なら review の起動へ、`前: fix` なら recheck の起動へ（SKILL.md の 3）
 
 `tmp/checks.md` の書式（書き手は coordinator。implement の後は triage が、fix の後は recheck の 4 が読む）:
@@ -134,7 +140,7 @@ coordinator が PR 本文を書くときの手順（何を書くかの仕分け�
 
 ### 節「意図した挙動・受け入れた残差」
 
-状態ファイルの `## 直さないと決めた指摘` に行を足したら、上の 1〜4 の手順で、その作業単位の PR 本文の節「意図した挙動・受け入れた残差」に 1 行足し、その行の「PR 本文」の列を `済み` にする。人のレビュアーと外部のレビューの bot に、同じ指摘を繰り返させないための説明である（組み込みの `code-review` が PR 本文を読むかは確かめていないので、上の recheck の照合の代わりにはしない）。
+状態ファイルの `## 直さないと決めた指摘` に行を足したら、上の 1〜4 の手順で、その作業単位の PR 本文の節「意図した挙動・受け入れた残差」に 1 行足し、その行の「PR 本文」の列を `済み` にする。ただし、出どころが `推奨で進めた`（③の 3 段目）で「PR 本文」が `未（推奨）` の行は書かない。ユーザーが推奨どおりと確かめて `未` になった時点で書く（SKILL.md の 4 の「答えが出たら」。確かめていない判断を、人のレビュアーへの説明として残さないため）。人のレビュアーと外部のレビューの bot に、同じ指摘を繰り返させないための説明である（組み込みの `code-review` が PR 本文を読むかは確かめていないので、上の recheck の照合の代わりにはしない）。
 
 - 節が無ければ、本文の末尾の署名（`🤖 Generated with` の行など）の前に `## 意図した挙動・受け入れた残差` を作る
 - 1 行に書くのは、どのコードの何についてか（`path` を含む）と、直さない理由だけ。状態ファイルの番号（`Q-<n>`・`K-<n>`）は書かない（PR の読者には意味が無い）
@@ -160,8 +166,8 @@ fix の後に、PR を組み込みの `code-review` で見直す。組み込み�
 4. **指摘が 1 件以上か、`tmp/checks.md` に指摘があるとき**: `前: fix` の checks の `tmp/checks.md` に指摘があれば、code-review が 0 件でも直接 `完了` にせず、この 4 に入る（CI が赤・bot の P0/P1 が残るまま `完了` にしないため）。code-review が 0 件で checks.md も「指摘なし」のときだけ、直接 `完了` にする。checks の指摘は既決の照合に掛けない（CI の失敗と bot の P0/P1 は毎回新しい）。coordinator は、まず `[既決]` の印をコードで裏取りする（印は worker の主張。写した指摘と同じ箇所・同じ挙動かを確かめる）。裏取りで既決と言えなかったものは新規に戻す
    - **新規が 0 件**（全件が既決で、裏取りも済んだ。checks の指摘も無い）: ③を立てずに `完了` にする。ユーザーが一度決めたことを同じ答えで聞き直すだけになるため。`## 工程の記録` の要約に既決の番号を並べ、完了の報告にも既決の一覧（番号と要旨）を出す
    - **新規が 1 件以上**（checks の指摘を含む）: 新規を③の 3 段（SKILL.md の 4「質問」）で仕分ける。1 段目に当たるものを③の表にまとめ（指摘・推奨: 直す / 直さない）、ユーザーに回す。checks の指摘は、推奨が直す・直さないのどちらでも常に 1 段目に入れる（3 段目で推奨どおり進めると、CI が赤のままであることをユーザーが知らないまま下の分岐で `完了` になる。1 段目で聞いても「1 件でも直す」は `完了` と④で、CI を直すのは④の先になる。自動で fix の 2 巡目を回さない規則は変えない）。2 段目は答えと引用を `## 工程の記録` に書き、3 段目は推奨で決めて `## ユーザーへの依頼` に `推奨で進めた（<日付>）` で記録する（`./state-format.md`）。1 段目が 0 件なら、2・3 段目の答えで下の分岐に進む。既決は表の下に「参考: 既決 <m> 件（K-…）」の 1 行で添える。自動で fix の 2 巡目は回さない（上限を文で決める。`../../plan-lgtm/SKILL.md:L69` と同じ理由）。答えの後:
-   - 全部直さない → 理由を `## 工程の記録` に書き、新規の指摘を `## 直さないと決めた指摘` に足して（`./state-format.md`）`完了`
-   - 1 件でも直す → `完了` にし、直す指摘を `## ユーザーへの依頼` に④（`R-<n>`。どの worktree で何を直すか）で残す。同じ答えで直さないとした指摘は `## 直さないと決めた指摘` に足す
+   - 全部直さない → 理由を `## 工程の記録` に書き、新規の指摘を `## 直さないと決めた指摘` に足して（`./state-format.md`。3 段目の推奨で「直さない」にしたものは、出どころ `推奨で進めた Q-<n>`・PR 本文 `未（推奨）` で足す）`完了`
+   - 1 件でも直す → `完了` にし、直す指摘を `## ユーザーへの依頼` に④（`R-<n>`。どの worktree で何を直すか）で残す。同じ答えで直さないとした指摘は `## 直さないと決めた指摘` に足す（3 段目の推奨で「直さない」にしたものは、上と同じく印を付けて足す）
    - どちらも `対象外` は使わない（`対象外` は工程を回さない作業単位の意味。`./state-format.md` の状態名）
 
 ## 失敗したとき

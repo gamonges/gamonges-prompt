@@ -215,7 +215,8 @@ diff_stats=$(git diff "origin/${base_branch}...HEAD" --stat)
 `./tmp/meaning-card.md`（series-run の coordinator が書く。書式は `../series-run/reference/meaning-card.md`）が**あるときだけ**読む。無ければ何もしない（series-run の外の `/create-pr` の本文は今までどおり）。
 
 - 本文に入れるのは (d) 外部システムへの前提と (e) ケースの表だけ。入れ方は `./reference/pr-description-template.md` の「意味のカードがあるとき」。(a)〜(c)・推奨で進めた判断・(f) は本文に入れない（`/create-pr` を打つ前に人が見る材料で、レビュアー向けではない）
-- frontmatter の `head` が `git rev-parse HEAD` と違っても使い、Phase 8 に「カードが古い（<head> の時点）」と 1 行出す。確認は出さない（人がカードを見てから `/create-pr` を打つこと自体が門で、確認を重ねると中身を読まずに承認する習慣を育てる）
+- frontmatter の `head` が HEAD の祖先でなければ（`git merge-base --is-ancestor <head> HEAD` が失敗する。同じ worktree に別の PR のカードが残っている）、カードを使わず、Phase 8 に「カードが別の履歴のもの（<head>）なので使わなかった」と 1 行出す
+- `head` が祖先で `git rev-parse HEAD` と違うときは使い、Phase 8 に「カードが古い（<head> の時点）」と 1 行出す。確認は出さない（人がカードを見てから `/create-pr` を打つこと自体が門で、確認を重ねると中身を読まずに承認する習慣を育てる）
 
 ### Phase 5: Generate PR Description
 
@@ -228,7 +229,7 @@ PR 本文の構成と Notion Page ID の挿入位置は `./reference/pr-descript
 - 目的（複数該当する場合はすべてチェック）
 - 変更点の概要（コミットメッセージと変更ファイルから生成）
 - Phase 4.5 で収集した `## grill 決定からの変更` と `## マージ後 TODO`（該当時のみ）
-- 意味のカードがあれば（Phase 4.5.4）、「前提」の小見出しと、ケースから作る動作確認の項目
+- 意味のカードがあれば（Phase 4.5.4）、「前提」の項目（`- **前提**:`）と、ケースから作る動作確認の項目
 - 単独の PR で処理の流れがある場合（Phase 4.5.3）、本文の先頭（ref 行があればその下）に `./reference/pr-description-template.md` の「全体像ブロック」の形で図を入れる（目印は付けない）。シリーズの PR では入れない
 - Notion Page IDが指定されていた場合、関連リンクにも記載する
 

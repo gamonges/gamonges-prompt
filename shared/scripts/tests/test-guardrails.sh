@@ -2141,6 +2141,99 @@ dgp "Codex: -C なしの origin HEAD は deny" deny 'git push origin HEAD' "$DGP
 dgp "Codex: -C なしの origin @ は deny" deny 'git push origin @' "$DGP_FEAT" codex
 dgp "Codex: -C 付きの -u origin HEAD は素通し" pass "git -C $DGP_FEAT push -u origin HEAD" "$DGP_FEAT" codex
 dgp "Codex: ブランチ名を明示した refspec は素通し" pass 'git push origin feature' "$DGP_FEAT" codex
+# 予約語・グループ・コマンド置換・未知のラッパーの中の push。先頭の語が if・{ になると、後ろの push を判定せずに素通しした
+for cmd in 'if git push origin feature:main; then true; fi' 'if true; then git push origin main; fi' \
+    'for b in x; do git push origin main; done' 'while false; do git push origin main; done' \
+    '{ git push origin main; }' '! git push origin main' 'echo `git push origin main`' 'echo "$(git push origin main)"' \
+    'fish -c "git push origin main"' 'script -q /dev/null git push origin main' 'echo hi; foo git push origin main' \
+    'time git push origin main' 'command -p git push origin feature' 'nice -n 10 git push origin feature' \
+    "bash -c 'git pu\\sh origin main'" 'sh -c "g\it push origin main"' "eval 'git push origin main'" \
+    'sudo git pu\sh origin main' "ssh host 'git pu\\sh origin main'" $'cat <<EOF\n$(git push origin main)\nEOF' \
+    'echo $((1<<3)); git push origin main'; do
+    dgp "ask: $cmd" ask "$cmd" "$DGP_FEAT"
+done
+# 入れ子の上限（5）を超えた置換は、中身が既定でないブランチでも読み切らずに ask
+dgp "ask: 6 段の入れ子の置換" ask 'echo "$(echo "$(echo "$(echo "$(echo "$(echo "$(git push origin feature)")")")")")"' "$DGP_FEAT"
+for cmd in 'time git push origin feature' 'nohup git push origin feature' 'command git push origin feature' \
+    "bash -lc 'git push origin feature'" 'git commit -m "fix: push の << の扱い"' 'echo $((1<<3)); git push origin feature'; do
+    dgp "pass: $cmd" pass "$cmd" "$DGP_FEAT"
+done
+# ヒアドキュメントの本文は実行されない。読むと、標準の commit の形の本文の行を push と取り違える
+dgp "pass: commit の本文の git push origin main の行" pass $'git commit -m "$(cat <<\'EOF\'\nfix: hook\n\ngit push origin main を判定する\n- hook: git push を判定\nEOF\n)"' "$DGP_FEAT"
+dgp "pass: commit の本文の対応しない括弧" pass $'git commit -m "$(cat <<\'EOF\'\nfix: x\n\n1) git push origin main を判定\nEOF\n)"' "$DGP_FEAT"
+dgp "pass: 引用付きのヒアドキュメントの本文" pass $'cat <<\'EOF\' > x\ngit push origin main\nEOF' "$DGP_FEAT"
+dgp "pass: <<- の本文" pass $'cat <<-EOF\n\n\tgit push origin main\n\tEOF' "$DGP_FEAT"
+dgp "pass: 閉じていないヒアドキュメントは入力の終わりまでが本文" pass $'cat <<\'EOF\'\ngit push origin main' "$DGP_FEAT"
+# 前段の正規表現に当たらない書き方（引用・エスケープ・行の継続・-C.）も python に渡す
+for cmd in $'git \\\npush origin main' '"git" push origin main' "git 'push' origin main" "'git' push origin main" \
+    'g\it push origin main' 'git pu\sh origin main' 'git -C. push origin feature:main' 'p=push; git $p origin main' \
+    $'git pu\\\nsh origin main' $'git push origin ma\\\nin'; do
+    dgp "ask: $cmd" ask "$cmd" "$DGP_FEAT"
+done
+assert_contains "DG-P 理由: 行の継続の後ろの強制の push" "$(dgp_reason $'git \\\npush --force origin feature' "$DGP_FEAT")" "強制"
+for cmd in 'git stash push -m x' 'pushd /tmp' 'echo push'; do
+    dgp "pass: $cmd" pass "$cmd" "$DGP_FEAT"
+done
+# 明示した refspec でも remote.<r>.push が押す先を替える。cd の後・Codex でも入力の cwd で設定が見つかれば止める
+DGP_RPUSH2="$(dgp_repo rpush2 feature)"; dgp_upstream "$DGP_RPUSH2" feature feature
+git -C "$DGP_RPUSH2" config remote.origin.push refs/heads/feature:refs/heads/main
+assert_contains "DG-P 理由: 明示の refspec と remote.origin.push" "$(dgp_reason 'git push origin feature' "$DGP_RPUSH2")" "remote.origin.push の設定"
+dgp "Codex: cwd の remote.origin.push は明示の refspec でも deny" deny 'git push origin feature' "$DGP_RPUSH2" codex
+mkdir -p "$WORK/dgp-nonrepo"
+dgp "Codex: cwd が repo でなければ明示の refspec は素通し" pass 'git push origin feature' "$WORK/dgp-nonrepo" codex
+dgp "Codex: cwd の origin/HEAD が trunk なら origin trunk は deny" deny 'git push origin trunk' "$DGP_TRUNK" codex
+dgp "ask: cd の後でも cwd の origin/HEAD が trunk なら origin trunk" ask 'cd x && git push origin trunk' "$DGP_TRUNK"
+# push.default=matching は同名の全ブランチ（main を含む）を押す
+DGP_MATCH="$(dgp_repo match feature)"; dgp_upstream "$DGP_MATCH" feature feature
+git -C "$DGP_MATCH" config push.default matching
+assert_contains "DG-P 理由: matching の引数なし push" "$(dgp_reason 'git push' "$DGP_MATCH")" "push.default=matching"
+assert_contains "DG-P 理由: matching のリモートだけの push" "$(dgp_reason 'git push origin' "$DGP_MATCH")" "push.default=matching"
+# GIT_* の前置きは、判定用の git から見えない所で押す先を替える
+for cmd in 'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.push GIT_CONFIG_VALUE_0=refs/heads/feature:refs/heads/main git push origin feature' \
+    "GIT_CONFIG_PARAMETERS=\"'remote.origin.push'='refs/heads/feature:refs/heads/main'\" git push origin" \
+    'export GIT_CONFIG_COUNT=1; git push origin feature' 'declare -x GIT_CONFIG_COUNT=1; git push origin feature' \
+    'typeset -x GIT_DIR=/x/.git; git push origin feature' 'GIT_DIR=/other/.git git push origin HEAD'; do
+    dgp "ask: $cmd" ask "$cmd" "$DGP_FEAT"
+done
+for cmd in 'GIT_TRACE=1 git push origin feature' 'GIT_SSH_COMMAND="ssh -v" git push origin feature'; do
+    dgp "pass: $cmd" pass "$cmd" "$DGP_FEAT"
+done
+# 語の途中の # はコメントでない。fd として捨てるのはリダイレクトの記号に隣り合う数字だけ
+dgp "ask: 語の途中の # の後ろの refspec" ask 'git push origin feat#x main' "$DGP_FEAT"
+DGP_NUM="$(dgp_repo num feature)"; dgp_upstream "$DGP_NUM" feature feature
+git -C "$DGP_NUM" update-ref refs/remotes/origin/123 HEAD
+git -C "$DGP_NUM" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/123
+assert_contains "DG-P 理由: リダイレクトの前の数字の refspec を捨てない" "$(dgp_reason 'git push origin 123 >log' "$DGP_NUM")" "既定のブランチ 123"
+for cmd in 'git push origin feature 2>&1' 'git push origin feature >/dev/null 2>&1'; do
+    dgp "pass: $cmd" pass "$cmd" "$DGP_FEAT"
+done
+dgp "ask: git push origin main 2>&1" ask 'git push origin main 2>&1' "$DGP_FEAT"
+# cd の分岐を名前の一致に頼らずに検査する。削除の形の回帰を守る
+assert_contains "DG-P 理由: cd の後の HEAD" "$(dgp_reason 'cd x && git push origin HEAD' "$DGP_FEAT")" "この入力からは確かめられません"
+dgp "pass: cd の後でも明示の refspec" pass 'cd x && git push origin feature' "$DGP_FEAT"
+for cmd in 'git push origin --delete main' 'git push -d origin main' 'git push origin --delete feature main'; do
+    dgp "ask: $cmd" ask "$cmd" "$DGP_FEAT"
+done
+dgp "pass: git push origin --delete feature" pass 'git push origin --delete feature' "$DGP_FEAT"
+# 予約語の読み飛ばしを、別のガード（未知のコマンドの後ろの git push）と区別して検査する
+dgp "pass: 予約語の中の既定でないブランチへの push" pass 'if true; then git push origin feature; fi' "$DGP_FEAT"
+# 前段の正規表現に当たらない短い -f は python の側で止める
+assert_contains "DG-P 理由: python に届く短い -f" "$(dgp_reason 'git pu\sh -f origin feature' "$DGP_FEAT")" "強制"
+# push.default を読めない（壊れた config）ときは ask
+DGP_BADCFG="$(dgp_repo badcfg feature)"; dgp_upstream "$DGP_BADCFG" feature feature
+printf '[push\n\tdefault = \n[[[\n' >>"$DGP_BADCFG/.git/config"
+assert_contains "DG-P 理由: push.default を読めない" "$(dgp_reason 'git push' "$DGP_BADCFG")" "push.default の設定を読めません"
+# Codex の cwd が存在しないディレクトリでも、明示の refspec は素通し（ベストエフォートの確認で止めない）
+dgp "Codex: cwd が存在しなくても明示の refspec は素通し" pass 'git push origin feature' "$WORK/dgp-missing-dir" codex
+# 前段の tr が失敗しても素通しにしない（python に回す）
+DGP_FAKETR="$WORK/dgp-fake-tr"
+mkdir -p "$DGP_FAKETR"
+printf '#!/bin/sh\nexit 1\n' >"$DGP_FAKETR/tr"
+chmod +x "$DGP_FAKETR/tr"
+out="$(jq -nc --arg w "$DGP_FEAT" '{tool_input:{command:"git pu\\sh origin main"},cwd:$w}' | env -u CLAUDE_CODE_HOOK_TRACE PATH="$DGP_FAKETR:$PATH" bash "$CONFIRM_HOOK" 2>/dev/null)"
+rc=$?
+assert_equal "DG-P tr が落ちても python に回して ask" "ask" "$(decision_of "$out")"
+assert_equal "DG-P tr が落ちても exit 0" "0" "$rc"
 # 判定のために pre-push フックを走らせない（git push --dry-run は pre-push を起動する）
 rm -f "$DGP/pre-push-ran"
 for cmd in 'git push' 'git push origin' 'git push origin HEAD' 'git push origin feature'; do
@@ -2503,6 +2596,52 @@ for p in .env.example .env.sample app-env.ts env/stg.ts env/prd.ts env/type.ts x
     for tool in Read Edit Write MultiEdit; do
         tm_both "EV pass: $tool $p" pass "$tool" "$(jq -nc --arg p "$p" '{file_path:$p}')" "" "$ENV_HOOK"
     done
+done
+# 範囲を広げた名前（秘密の写し）。basename が .env で始まる形は、コードの拡張子でも止める
+for p in .env-local .env_local prod.env.bak secrets.env.json app.env.local .ENV-LOCAL .env.ts .env.js; do
+    for tool in Read Write; do
+        tm_both "EV deny: $tool $p" deny "$tool" "$(jq -nc --arg p "$p" '{file_path:$p}')" ".env" "$ENV_HOOK"
+    done
+done
+for p in prod.env.example .env-example .env_sample config.env.js settings.env.py; do
+    for tool in Read Write; do
+        tm_both "EV pass: $tool $p" pass "$tool" "$(jq -nc --arg p "$p" '{file_path:$p}')" "" "$ENV_HOOK"
+    done
+done
+# symlink は解決した先の名前でも判定する。相対パスは入力の cwd を基点にし、hook のプロセスの cwd では解決しない
+EVL="$WORK/ev-link"
+mkdir -p "$EVL/sub" "$WORK/ev-elsewhere"
+: >"$EVL/.env.local"
+ln -s ../.env.local "$EVL/sub/link.txt"
+ln -s ../.env.gone "$EVL/sub/broken.txt"
+ev_cwd() {  # $1=tool_input の JSON, $2=入力の cwd → 判定（deny|pass）。hook は別のディレクトリで起動する
+    local out
+    out="$(cd "$WORK/ev-elsewhere" && jq -nc --argjson i "$1" --arg w "$2" '{tool_name:"Read",tool_input:$i,cwd:$w}' | bash "$ENV_HOOK" 2>/dev/null)"
+    if [[ -z "$out" ]]; then echo pass; else decision_of "$out"; fi
+}
+assert_equal "EV symlink の絶対パスは解決先で deny" deny "$(ev_cwd "$(jq -nc --arg p "$EVL/sub/link.txt" '{file_path:$p}')" "$EVL")"
+assert_equal "EV symlink の相対パスは入力の cwd で解決して deny" deny "$(ev_cwd '{"file_path":"link.txt"}' "$EVL/sub")"
+assert_equal "EV .env 系を指す壊れた symlink も deny" deny "$(ev_cwd '{"file_path":"broken.txt"}' "$EVL/sub")"
+# realpath も readlink も失敗したら、元の名前だけで判定して exit 0 で終える（set -e で落ちてガードを開けない）
+EV_NOLINK="$WORK/ev-nolink"
+mkdir -p "$EV_NOLINK"
+for c in realpath readlink; do printf '#!/bin/sh\nexit 1\n' >"$EV_NOLINK/$c"; chmod +x "$EV_NOLINK/$c"; done
+out="$(jq -nc --arg p "$EVL/sub/broken.txt" '{tool_name:"Read",tool_input:{file_path:$p}}' | PATH="$EV_NOLINK:$PATH" bash "$ENV_HOOK" 2>/dev/null)"
+rc=$?
+assert_equal "EV realpath も readlink も失敗したら元の名前で判定する" "" "$out"
+assert_equal "EV realpath も readlink も失敗しても exit 0" "0" "$rc"
+out="$(jq -nc '{tool_name:"Read",tool_input:{file_path:".env.local"}}' | PATH="$EV_NOLINK:$PATH" bash "$ENV_HOOK" 2>/dev/null)"
+assert_equal "EV realpath が失敗しても .env 系の名前は deny" deny "$(decision_of "$out")"
+# Grep の path・glob と NotebookEdit の notebook_path も同じ判定に通す
+for inp in '{"path":".env.local","pattern":"KEY"}' '{"path":"app","glob":".env*","pattern":"KEY"}' \
+    '{"glob":"**/.env.local","pattern":"KEY"}' '{"glob":"*.env*","pattern":"KEY"}' '{"glob":"**/.env.ts","pattern":"KEY"}' \
+    '{"glob":"*.env.{ts,json}","pattern":"KEY"}'; do
+    tm_both "EV deny: Grep $inp" deny Grep "$inp" ".env" "$ENV_HOOK"
+done
+tm_both "EV deny: NotebookEdit の .env 系" deny NotebookEdit '{"notebook_path":"x/.env.ipynb","new_source":"x"}' ".env" "$ENV_HOOK"
+for inp in '{"path":"src","pattern":"KEY"}' '{"path":"src","glob":"*.ts","pattern":"env"}' \
+    '{"glob":"**/*.env.ts","pattern":"KEY"}' '{"glob":"*.env.{ts,js}","pattern":"KEY"}'; do
+    tm_both "EV pass: Grep $inp" pass Grep "$inp" "" "$ENV_HOOK"
 done
 tm_both "EV pass: Bash の入力は見ない" pass Bash '{"command":"cat .env"}' "" "$ENV_HOOK"
 EVR="$WORK/ev"
