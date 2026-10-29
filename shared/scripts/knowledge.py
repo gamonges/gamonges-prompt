@@ -55,6 +55,8 @@ TYPES = [
     ("Doc Sync Report", "doc-sync-report.md"),
     ("Fix Request", "fixes.md"),
     ("Feedback", "feedback.md"),
+    ("Meaning Card", "meaning-card.md"),
+    ("Checks", "checks.md"),
 ]
 
 # tmp/ の直下の、生ログと画像の置き場。中の md は文書として扱わない

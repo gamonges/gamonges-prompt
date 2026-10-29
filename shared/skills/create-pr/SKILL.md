@@ -177,7 +177,7 @@ diff_stats=$(git diff "origin/${base_branch}...HEAD" --stat)
 
 ### Phase 4.5: PR 本文の素材収集
 
-以下 3 つは PR 種別の判定ではなく **Phase 5（PR 本文生成）の前処理**であるため、Phase 4 から分けている。
+以下 4 つは PR 種別の判定ではなく **Phase 5（PR 本文生成）の前処理**であるため、Phase 4 から分けている。
 
 #### 4.5.1 `tmp/` の確定事項との照合
 
@@ -210,6 +210,13 @@ diff_stats=$(git diff "origin/${base_branch}...HEAD" --stat)
 | ある | ファイルがある | **シリーズの PR**。本文に全体像を入れない（PR 番号が作成前に分からず、兄弟の PR も同時に更新するため。Phase 6.5 の同期が入れる） |
 | ある | ファイルが無い | 止めて「全体像なしで PR を作る（後で `/series-sync`）／キャンセル」を尋ねる（黙って単独として扱うと、兄弟の PR が更新されないまま進むため）。作るを選んだら、本文に全体像を入れず、Phase 6.5 も行わない |
 
+#### 4.5.4 意味のカード
+
+`./tmp/meaning-card.md`（series-run の coordinator が書く。書式は `../series-run/reference/meaning-card.md`）が**あるときだけ**読む。無ければ何もしない（series-run の外の `/create-pr` の本文は今までどおり）。
+
+- 本文に入れるのは (d) 外部システムへの前提と (e) ケースの表だけ。入れ方は `./reference/pr-description-template.md` の「意味のカードがあるとき」。(a)〜(c)・推奨で進めた判断・(f) は本文に入れない（`/create-pr` を打つ前に人が見る材料で、レビュアー向けではない）
+- frontmatter の `head` が `git rev-parse HEAD` と違っても使い、Phase 8 に「カードが古い（<head> の時点）」と 1 行出す。確認は出さない（人がカードを見てから `/create-pr` を打つこと自体が門で、確認を重ねると中身を読まずに承認する習慣を育てる）
+
 ### Phase 5: Generate PR Description
 
 `.github/PULL_REQUEST_TEMPLATE.md`のフォーマットに従って PR 本文を生成します。
@@ -221,6 +228,7 @@ PR 本文の構成と Notion Page ID の挿入位置は `./reference/pr-descript
 - 目的（複数該当する場合はすべてチェック）
 - 変更点の概要（コミットメッセージと変更ファイルから生成）
 - Phase 4.5 で収集した `## grill 決定からの変更` と `## マージ後 TODO`（該当時のみ）
+- 意味のカードがあれば（Phase 4.5.4）、「前提」の小見出しと、ケースから作る動作確認の項目
 - 単独の PR で処理の流れがある場合（Phase 4.5.3）、本文の先頭（ref 行があればその下）に `./reference/pr-description-template.md` の「全体像ブロック」の形で図を入れる（目印は付けない）。シリーズの PR では入れない
 - Notion Page IDが指定されていた場合、関連リンクにも記載する
 
@@ -273,6 +281,7 @@ gh pr view --web
   - 単独の PR: 図を入れたか。省いたなら理由を 1 行
   - シリーズの PR: 登録した段と同期の結果（`../series-sync/SKILL.md` の「同期の手順」の手順 7 の項目: 書いた PR・unchanged・skipped・mismatch・failed・error・plan の DIR）。キャンセルしたなら「後で `/series-sync` を実行すれば全体像が入る」
   - 登録しなかった・できなかった・series.md が無かった: その旨と、後から `/series-sync` で登録・同期する手順
+- 意味のカード（Phase 4.5.4）: 読んだか。`head` が今の HEAD と違えば「カードが古い（<head> の時点）」
 - 次のステップ:
   - 関連リンクを追加する
   - 動作確認チェックリストを確認する

@@ -28,6 +28,7 @@ HOOK="$REPO_ROOT/shared/scripts/hook-block-local-contract-link.sh"
 TMP_HOOK="$REPO_ROOT/shared/scripts/hook-block-tmp-commit.sh"
 CONFIRM_HOOK="$REPO_ROOT/shared/scripts/hook-confirm-destructive-git.sh"
 CURL_HOOK="$REPO_ROOT/shared/scripts/hook-confirm-external-curl.sh"
+ENV_HOOK="$REPO_ROOT/shared/scripts/hook-guard-env-files.sh"
 LINT="$REPO_ROOT/shared/skills/verify-scenario/scripts/verification-lint.mjs"
 ORPHAN="$REPO_ROOT/shared/skills/worktree-cleanup/scripts/find-orphan-collections.mjs"
 
@@ -1392,6 +1393,8 @@ GD_CURL_EXTERNAL="$(jq -nc '{tool_name:"Bash",tool_input:{command:"curl -s https
 GD_CURL_LOCAL="$(jq -nc '{tool_name:"Bash",tool_input:{command:"curl -s http://localhost:3000/health"}}')"
 assert_golden "GD-14 external-curl: localhost 以外の curl は ask" confirm-external-curl-ask "$CURL_HOOK" "$GD_CURL_EXTERNAL"
 assert_golden "GD-15 external-curl: localhost の curl は素通し" confirm-external-curl-local-pass "$CURL_HOOK" "$GD_CURL_LOCAL"
+GD_PUSH_DEFAULT="$(claude_payload '{"tool_name":"Bash","tool_input":{"command":"git push origin main"},"cwd":"/"}')"
+assert_golden "GD-16 confirm-destructive: 既定のブランチへの push は ask" confirm-destructive-git-push-default-ask "$CONFIRM_HOOK" "$GD_PUSH_DEFAULT"
 
 # --- CX: turn_id あり（Codex）では ask を deny にする。出力箇所ごとに 1 件 ---
 assert_ask_becomes_deny "CX-1 confirm-destructive" "$CONFIRM_HOOK" "$GD_DESTRUCTIVE" "破壊的 git 操作を検出しました"
@@ -1402,6 +1405,7 @@ assert_ask_becomes_deny "CX-5 lint: トリガー語なし" "$LINT_HOOK" "$LINT_N
 assert_ask_becomes_deny "CX-6 lint: Edit の前処理失敗" "$LINT_HOOK" "$LINT_EDIT_FAIL" "前処理に失敗しました"
 assert_ask_becomes_deny "CX-7 lint: MultiEdit の前処理失敗" "$LINT_HOOK" "$LINT_MULTI_FAIL" "前処理に失敗しました"
 assert_ask_becomes_deny "CX-8 external-curl" "$CURL_HOOK" "$GD_CURL_EXTERNAL" "localhost 以外です"
+assert_ask_becomes_deny "CX-15 confirm-destructive: 既定のブランチへの push" "$CONFIRM_HOOK" "$GD_PUSH_DEFAULT" "既定のブランチ main への push"
 
 # deny を返す箇所は Codex でも変えない（[要確認] は「確認すれば進める」を意味するので、確認で進めない deny に付けない）
 out="$(printf '%s' "$(jq -c '. + {turn_id: "t-test"}' <<<"$GD_ADD_ALL")" | bash "$TMP_HOOK" 2>/dev/null)"
@@ -1437,10 +1441,10 @@ assert_contains "CX-14 破壊的 git の trace に Codex での判定（deny）�
 assert_contains "CX-14 lint の trace に Codex での判定（deny）を記録する" "$trace_log" "decision=deny reason=trigger-missing"
 assert_contains "CX-14 contract-link の trace に Codex での判定（deny）を記録する" "$trace_log" "decision=deny reason=local-link-package-json"
 
-# --- IN-1・IN-2: オブジェクトでない JSON の入力（PreToolUse の 5 本）---
+# --- IN-1・IN-2: オブジェクトでない JSON の入力（PreToolUse の 6 本）---
 # jq -e . は配列や {"tool_input":false} を通し、後続の jq が exit 5 で落ちる（exit 2 以外は non-blocking なので素通し）。
 # Claude Code・Codex の正常な入力は常にオブジェクトなので、{} と tool_input: null は従来どおり通す
-for h in "$TMP_HOOK" "$CONFIRM_HOOK" "$LINT_HOOK" "$REPO_ROOT/shared/scripts/hook-block-full-lint.sh" "$HOOK"; do
+for h in "$TMP_HOOK" "$CONFIRM_HOOK" "$LINT_HOOK" "$REPO_ROOT/shared/scripts/hook-block-full-lint.sh" "$HOOK" "$ENV_HOOK"; do
     for inp in '[]' '{"tool_input":false}'; do
         printf '%s' "$inp" | bash "$h" >/dev/null 2>&1
         rc=$?  # 引数の $(basename …) が先に展開されて $? を上書きするので、すぐに取る
@@ -1995,9 +1999,10 @@ dg "worktree remove（--force なし）は素通し" pass 'git worktree remove /
 dg "push -f は ask" ask 'git push -f origin main'
 dg "push の末尾の -f は ask" ask 'git push origin main -f'
 dg "push --force-with-lease は ask" ask 'git push --force-with-lease'
-dg "push（強制なし）は素通し" pass 'git push origin main'
-dg "push --no-force は素通し" pass 'git push --no-force'
-dg "push --follow-tags は素通し" pass 'git push --follow-tags'
+dg "push（強制なし）でも既定のブランチなら ask" ask 'git push origin main'
+dg "push（強制なし）の既定でないブランチは素通し" pass 'git push origin feature'
+dg "push --no-force は素通し" pass 'git push --no-force origin feature'
+dg "push --follow-tags は素通し" pass 'git push --follow-tags origin feature'
 dg "reset --soft は素通し" pass 'git reset --soft HEAD~1'
 dg "reset の -- hard-file.txt（パス）は素通し" pass 'git reset HEAD -- hard-file.txt'
 # 位置と接頭辞: 行のどこに出ても、git とサブコマンドの間にグローバルオプションがあっても拾う
@@ -2023,6 +2028,144 @@ dg "X push -fu は ask" ask 'git push -fu origin main'
 # 直前に空白を要求するので、値の中の -f（ブランチ名 feat-f）は拾わない
 dg "X push の値の中の -f（feat-f）は素通し" pass 'git push -u origin feat-f'
 dg "X checkout -b の値の中の -f（fix-f）は素通し" pass 'git checkout -b fix-f'
+
+# --- DG-P: 既定のブランチへの push だけを ask にする（permissions.ask の Bash(git push:*) の置き換え）---
+# 素通しの側は series-run の worker の push（毎回の確認は中身を読まずに承認する習慣を育てる）を、
+# ask の側は「押す先が既定のブランチになりうるのに素通しする」を捕まえる。押す先を求められない形は ask に倒す。
+# fixture の origin はローカルの bare repo（ネットワーク不要）。pre-push フックが動けば印のファイルを書く
+DGP="$WORK/dgpush"
+mkdir -p "$DGP"
+git init -q --bare "$DGP/remote.git"
+dgp_repo() {  # $1=名前, $2=今のブランチ → fixture のパスを出力する。origin/main・origin/feature を持つ
+    local d="$DGP/$1"
+    git init -q -b "$2" "$d"
+    git -C "$d" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m init
+    git -C "$d" remote add origin "$DGP/remote.git"
+    git -C "$d" update-ref refs/remotes/origin/main HEAD
+    git -C "$d" update-ref refs/remotes/origin/feature HEAD
+    printf '#!/bin/sh\ntouch "%s/pre-push-ran"\n' "$DGP" >"$d/.git/hooks/pre-push"
+    chmod +x "$d/.git/hooks/pre-push"
+    echo "$d"
+}
+dgp_upstream() {  # $1=fixture, $2=ブランチ, $3=upstream のブランチ
+    git -C "$1" config "branch.$2.remote" origin
+    git -C "$1" config "branch.$2.merge" "refs/heads/$3"
+}
+DGP_MAIN="$(dgp_repo main main)"; dgp_upstream "$DGP_MAIN" main main
+DGP_FEAT="$(dgp_repo feat feature)"; dgp_upstream "$DGP_FEAT" feature feature
+DGP_UP="$(dgp_repo up feature)"; dgp_upstream "$DGP_UP" feature main
+git -C "$DGP_UP" config push.default upstream
+DGP_TRUNK="$(dgp_repo trunk feature)"
+git -C "$DGP_TRUNK" update-ref refs/remotes/origin/trunk HEAD
+git -C "$DGP_TRUNK" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/trunk
+DGP_FORK="$(dgp_repo fork feature)"; dgp_upstream "$DGP_FORK" feature feature
+git -C "$DGP_FORK" remote add fork "$DGP/remote.git"
+git -C "$DGP_FORK" update-ref refs/remotes/fork/feature HEAD
+git -C "$DGP_FORK" config branch.feature.pushRemote fork
+# simple のままだと pushRemote と upstream のリモートが違う時点で @{push} が求まらず、別の理由で ask になる
+git -C "$DGP_FORK" config push.default current
+# @{push} は今のブランチの対応だけを返すが、git push origin は remote.origin.push の全部（main を含む）を押す
+DGP_RPUSH="$(dgp_repo rpush feature)"; dgp_upstream "$DGP_RPUSH" feature feature
+git -C "$DGP_RPUSH" config --add remote.origin.push refs/heads/feature:refs/heads/feature
+git -C "$DGP_RPUSH" config --add remote.origin.push refs/heads/main:refs/heads/main
+DGP_DETACHED="$(dgp_repo detached feature)"
+git -C "$DGP_DETACHED" checkout -q --detach
+
+dgp_run() {  # $1=command, $2=cwd（空なら cwd を持たない入力）, $3=codex なら turn_id を足す → ask / deny / pass / rc=<n>
+    local inp out rc
+    inp="$(jq -nc --arg c "$1" --arg w "$2" '{tool_name:"Bash",tool_input:{command:$c}} + (if $w == "" then {} else {cwd:$w} end)')"
+    if [[ "${3:-}" == codex ]]; then inp="$(jq -c '. + {turn_id:"t-test"}' <<<"$inp")"; fi
+    out="$(printf '%s' "$inp" | bash "$CONFIRM_HOOK" 2>/dev/null)"
+    rc=$?
+    if [[ "$rc" -ne 0 ]]; then echo "rc=$rc"; return; fi
+    if [[ -z "$out" ]]; then echo pass; else decision_of "$out"; fi
+}
+dgp() {  # $1=ラベル, $2=期待（ask|deny|pass）, $3=command, $4=cwd, $5=codex（省略可）
+    assert_equal "DG-P $1" "$2" "$(dgp_run "$3" "$4" "${5:-}")"
+}
+# ask: 既定のブランチへ向かう refspec（明示・-C・cd・wrapper の中）
+for cmd in 'git push origin main' 'git push origin master' 'git push origin develop' 'git push -u origin main' \
+    'git push --set-upstream origin main' 'git push origin HEAD:main' 'git push origin feature:main' \
+    'git push origin feature:refs/heads/main' 'git push origin +HEAD:main' 'git push origin :main' \
+    "git -C $DGP_FEAT push origin main" 'cd x && git push origin main' "bash -lc 'git push origin main'" \
+    'git push --all' 'git push --mirror' "git push origin 'refs/heads/*:refs/heads/*'" 'git push origin $BR' \
+    'git push origin "$(git branch --show-current)"' 'git push origin refs/heads/main' \
+    'git push --receive-pack x origin main' 'git push --repo origin' 'git push --frobnicate origin feature' \
+    'git push origin +HEAD:feature' 'git push origin +feature' 'git -c push.default=current push'; do
+    dgp "ask: $cmd" ask "$cmd" "$DGP_FEAT"
+done
+dgp "ask: origin/HEAD が trunk なら origin trunk" ask 'git push origin trunk' "$DGP_TRUNK"
+dgp "ask: main 上で upstream が origin/main の引数なし push" ask 'git push' "$DGP_MAIN"
+dgp "ask: main 上の origin HEAD" ask 'git push origin HEAD' "$DGP_MAIN"
+dgp "ask: main 上の origin @" ask 'git push origin @' "$DGP_MAIN"
+dgp "ask: main 上の -o ci.skip origin（-o の値を refspec と数えない）" ask 'git push -o ci.skip origin' "$DGP_MAIN"
+dgp "ask: cwd の無い入力の引数なし push" ask 'git push' ""
+dgp "ask: push.default=upstream で feature から origin/main へ" ask 'git push' "$DGP_UP"
+dgp "ask: pushRemote が fork の feature で git push origin（明示リモートと @{push} が違う）" ask 'git push origin' "$DGP_FORK"
+dgp "ask: remote.origin.push を持つ repo の git push origin" ask 'git push origin' "$DGP_RPUSH"
+dgp "ask: detached の origin HEAD" ask 'git push origin HEAD' "$DGP_DETACHED"
+dgp "ask: cwd が feature でも cd で main の repo へ移った引数なし push" ask "cd $DGP_MAIN && git push" "$DGP_FEAT"
+# fixture の設定を誤ると、@{push} が求まらないという別の理由で ask になり、判定の分岐を何も検査しない。理由まで見る
+dgp_reason() {  # $1=command, $2=cwd
+    reason_of "$(jq -nc --arg c "$1" --arg w "$2" '{tool_name:"Bash",tool_input:{command:$c},cwd:$w}' | bash "$CONFIRM_HOOK" 2>/dev/null)"
+}
+assert_contains "DG-P 理由: pushRemote の食い違い" "$(dgp_reason 'git push origin' "$DGP_FORK")" "@{push} のリモート fork と違います"
+assert_contains "DG-P 理由: remote.origin.push" "$(dgp_reason 'git push origin' "$DGP_RPUSH")" "remote.origin.push の設定"
+assert_contains "DG-P 理由: origin/HEAD の trunk" "$(dgp_reason 'git push origin trunk' "$DGP_TRUNK")" "既定のブランチ trunk"
+assert_contains "DG-P 理由: main 上の引数なし push" "$(dgp_reason 'git push' "$DGP_MAIN")" "既定のブランチ main"
+assert_contains "DG-P 理由: push.default=upstream" "$(dgp_reason 'git push' "$DGP_UP")" "既定のブランチ main"
+# 押す先を決められない形は、それぞれの分岐の理由で ask になる（別の分岐が先に止めていないことを理由で見る）
+assert_contains "DG-P 理由: 知らない短いオプション" "$(dgp_reason 'git push -x origin feature' "$DGP_FEAT")" "知らないオプション -x"
+assert_contains "DG-P 理由: upstream の無いブランチの引数なし push" "$(dgp_reason 'git push' "$DGP_TRUNK")" "@{push}）を求められません"
+assert_contains "DG-P 理由: 宛先が空の refspec" "$(dgp_reason 'git push origin feature:' "$DGP_FEAT")" "refspec feature: の押す先を決められません"
+assert_contains "DG-P 理由: 宛先が HEAD の refspec" "$(dgp_reason 'git push origin feature:HEAD' "$DGP_FEAT")" "refspec feature:HEAD の押す先を決められません"
+assert_contains "DG-P 理由: refs/heads/・refs/tags/ 以外の宛先" "$(dgp_reason 'git push origin feature:refs/remotes/origin/x' "$DGP_FEAT")" "の押す先 refs/remotes/origin/x を決められません"
+# 値を取るオプションの値を refspec と数えない。refspec の無い形でないと、読み飛ばしの回帰が結果に出ない
+assert_contains "DG-P 理由: --receive-pack の値を読み飛ばしてリモートを読む" "$(dgp_reason 'git push --receive-pack x origin' "$DGP_MAIN")" "既定のブランチ main"
+# 素通し: 既定でないブランチへ向かう push（series-run の push の手順 2・3 を含む）
+for cmd in 'git push origin feature' 'git push -u origin feat-main' 'git push origin main-docs' \
+    'git push origin HEAD:feature' 'git push origin HEAD' 'git push' 'git push origin' \
+    'git push --follow-tags origin feature' 'git push origin v1.0' 'git push -o ci.skip origin feature' \
+    'git push --push-option=ci.skip origin feature' 'git push origin refs/tags/v1.0' \
+    "git -C $DGP_FEAT push -u origin HEAD" "git -C $DGP_FEAT push"; do
+    dgp "pass: $cmd" pass "$cmd" "$DGP_FEAT"
+done
+dgp "pass: cwd の無い入力でも -C で feature の repo を指す" pass "git -C $DGP_FEAT push -u origin HEAD" ""
+# shlex は改行を空白として読む。区切りとして扱わないと、2 行目の push が 1 行目の echo の引数に化ける
+dgp "ask: 改行の後ろの push" ask $'echo hi\ngit push origin main' "$DGP_FEAT"
+# ラッパーでないコマンドの引数の中の文（PR 本文など）を push と取り違えない
+dgp "pass: gh の本文の中の git push" pass 'git push origin feature && gh pr create --body "then git push origin main"' "$DGP_FEAT"
+# Codex の入力: workdir が hook に渡らないので、-C が無く git の参照が要る push は止める（[要確認] の deny）
+dgp "Codex: -C なしの引数なし push は deny" deny 'git push' "$DGP_FEAT" codex
+dgp "Codex: -C なしの origin HEAD は deny" deny 'git push origin HEAD' "$DGP_FEAT" codex
+dgp "Codex: -C なしの origin @ は deny" deny 'git push origin @' "$DGP_FEAT" codex
+dgp "Codex: -C 付きの -u origin HEAD は素通し" pass "git -C $DGP_FEAT push -u origin HEAD" "$DGP_FEAT" codex
+dgp "Codex: ブランチ名を明示した refspec は素通し" pass 'git push origin feature' "$DGP_FEAT" codex
+# 判定のために pre-push フックを走らせない（git push --dry-run は pre-push を起動する）
+rm -f "$DGP/pre-push-ran"
+for cmd in 'git push' 'git push origin' 'git push origin HEAD' 'git push origin feature'; do
+    dgp_run "$cmd" "$DGP_FEAT" >/dev/null
+    dgp_run "$cmd" "$DGP_MAIN" >/dev/null
+done
+assert_equal "DG-P 判定で pre-push フックを走らせない" "無い" "$([[ -e "$DGP/pre-push-ran" ]] && echo ある || echo 無い)"
+# fail-closed: python3 が無い・落ちたら、押す先が既定でなくても ask（何も出さないと素通しになる）。
+# trace を外すのは、利用者の環境で CLAUDE_CODE_HOOK_TRACE があると、PATH を絞った起動で mkdir が無く落ちるため
+DGP_NOPY="$WORK/dgp-nopy"
+mkdir -p "$DGP_NOPY"
+for c in jq git grep basename cat; do ln -sf "$(command -v "$c")" "$DGP_NOPY/$c"; done
+out="$(jq -nc --arg w "$DGP_FEAT" '{tool_input:{command:"git push origin feature"},cwd:$w}' | env -u CLAUDE_CODE_HOOK_TRACE PATH="$DGP_NOPY" "$(command -v bash)" "$CONFIRM_HOOK" 2>/dev/null)"
+rc=$?
+assert_equal "DG-P python3 が無ければ ask" "ask" "$(decision_of "$out")"
+assert_equal "DG-P python3 が無くても exit 0" "0" "$rc"
+DGP_FAKE="$WORK/dgp-fake-python"
+mkdir -p "$DGP_FAKE"
+printf '#!/bin/sh\nexit 1\n' >"$DGP_FAKE/python3"
+chmod +x "$DGP_FAKE/python3"
+out="$(jq -nc --arg w "$DGP_FEAT" '{tool_input:{command:"git push origin feature"},cwd:$w}' | env -u CLAUDE_CODE_HOOK_TRACE PATH="$DGP_FAKE:$PATH" bash "$CONFIRM_HOOK" 2>/dev/null)"
+rc=$?
+assert_equal "DG-P python3 が落ちたら ask" "ask" "$(decision_of "$out")"
+assert_equal "DG-P python3 が落ちても exit 0" "0" "$rc"
+dgp "閉じていない引用（解析の失敗）は ask" ask 'git push origin "feature' "$DGP_FEAT"
 
 # --- LG: SKILL.md の lint の判定（Claude 側。Write / Edit / MultiEdit）---
 LG_DIR="$WORK/lg/skills/demo"
@@ -2344,6 +2487,46 @@ printf '#!/bin/sh\nexit 1\n' >"$EC_FAKE/python3"
 chmod +x "$EC_FAKE/python3"
 assert_equal "EC python3 が落ちたらローカル宛てでも ask" "ask" \
     "$(decision_of "$(jq -nc '{tool_input:{command:"curl http://localhost"}}' | PATH="$EC_FAKE:$PATH" bash "$CURL_HOOK" 2>/dev/null)")"
+
+# =====================================================================
+# EV: hook-guard-env-files.sh の .env 系の判定
+# =====================================================================
+# permissions の deny は否定を書けず、deny が allow より先に評価されるので、`**/*.env*` を外して例外
+# （.env.example・.env.sample）を通す判定を本 hook に移した。止める側は「秘密を読ませる」を、
+# 通す側は「env/stg.ts 等の通常のソースが止まる」を捕まえる。出すのは deny だけ（Claude・Codex で同じ）
+for p in .env .env.local .env.production .env.consumer.staging .env.bastion prod.env config/.env .ENV /abs/app/.Env.Local; do
+    for tool in Read Edit Write MultiEdit; do
+        tm_both "EV deny: $tool $p" deny "$tool" "$(jq -nc --arg p "$p" '{file_path:$p}')" ".env" "$ENV_HOOK"
+    done
+done
+for p in .env.example .env.sample app-env.ts env/stg.ts env/prd.ts env/type.ts x.env.ts .envrc environment.ts; do
+    for tool in Read Edit Write MultiEdit; do
+        tm_both "EV pass: $tool $p" pass "$tool" "$(jq -nc --arg p "$p" '{file_path:$p}')" "" "$ENV_HOOK"
+    done
+done
+tm_both "EV pass: Bash の入力は見ない" pass Bash '{"command":"cat .env"}' "" "$ENV_HOOK"
+EVR="$WORK/ev"
+mkdir -p "$EVR"
+tm_ap "EV Add File: .env は deny" deny $'*** Begin Patch\n*** Add File: .env\n+A=1\n*** End Patch' "$EVR" ".env" "$ENV_HOOK"
+tm_ap "EV Update File: x/.env.local は deny" deny $'*** Begin Patch\n*** Update File: x/.env.local\n@@\n-A=1\n+A=2\n*** End Patch' "$EVR" ".env.local" "$ENV_HOOK"
+# 見出しが Delete File だけだと「解釈できない patch」の分岐が拾ってしまい、Delete File の読み取りを検査しない
+tm_ap "EV Delete File: .env は deny" deny $'*** Begin Patch\n*** Update File: README.md\n@@\n-a\n+b\n*** Delete File: .env\n*** End Patch' "$EVR" ".env" "$ENV_HOOK"
+tm_ap "EV Move to の移動先 .env は deny" deny $'*** Begin Patch\n*** Update File: .env.example\n*** Move to: .env\n@@\n-A=\n+A=1\n*** End Patch' "$EVR" "" "$ENV_HOOK"
+tm_ap "EV Move to の移動元 .env は deny" deny $'*** Begin Patch\n*** Update File: .env\n*** Move to: .env.example\n@@\n-A=1\n+A=\n*** End Patch' "$EVR" "" "$ENV_HOOK"
+tm_ap "EV 2 つ目のファイルの .env も deny" deny $'*** Begin Patch\n*** Update File: README.md\n@@\n-a\n+b\n*** Add File: app/.env.production\n+A=1\n*** End Patch' "$EVR" "" "$ENV_HOOK"
+tm_ap "EV .env.example の Update は素通し" pass $'*** Begin Patch\n*** Update File: .env.example\n@@\n-A=\n+A=x\n*** End Patch' "$EVR" "" "$ENV_HOOK"
+tm_ap "EV 本文に .env を含む README の Update は素通し（見出しだけで判定する）" pass $'*** Begin Patch\n*** Update File: README.md\n@@\n-x\n+cp .env.example .env\n*** End Patch' "$EVR" "" "$ENV_HOOK"
+# 解釈できない patch（見出しが無い）: .env を含めば止め、含まなければ通す（全部止めると Codex の編集が全部止まる）
+tm_ap "EV 解釈できない patch に .env を含めば deny" deny $'garbage\n.env\n' "$EVR" "" "$ENV_HOOK"
+tm_ap "EV 解釈できない patch に .env を含まなければ素通し" pass $'garbage\nREADME.md\n' "$EVR" "" "$ENV_HOOK"
+# jq が無いと入力を読めない。素通しにせず deny（exit 0）
+EV_NOJQ="$WORK/ev-nojq"
+mkdir -p "$EV_NOJQ"
+for c in cat basename tr; do ln -sf "$(command -v "$c")" "$EV_NOJQ/$c"; done
+out="$(jq -nc '{tool_name:"Read",tool_input:{file_path:"README.md"}}' | PATH="$EV_NOJQ" "$(command -v bash)" "$ENV_HOOK" 2>/dev/null)"
+rc=$?
+assert_equal "EV jq が無ければ deny" "deny" "$(decision_of "$out")"
+assert_equal "EV jq が無くても exit 0" "0" "$rc"
 
 echo
 echo "${pass_count} passed / ${fail_count} failed"

@@ -96,6 +96,7 @@ Web フォント (Google Fonts 等) の読み込みは禁止。
 - ❌ Web フォント (Google Fonts / Adobe Fonts 等) の読み込み禁止
 - ❌ 外部 JavaScript (`<script src="https://...">`) の読み込み禁止
 - ❌ Mermaid / KaTeX 等の動的レンダリングライブラリの埋め込み禁止 (CDN 経由になるため)
+- ✅ 入力の mermaid のブロックは、インラインの `<svg>` に描き直す（ライブラリは使わない。箱と矢印の流れ図なら `<rect>`・`<text>`・`<path>` で足りる）
 - ✅ `<a href="https://...">` のリンク先 URL は許容 (クリック時のみアクセスされる)
 - ✅ `<style>` はインライン埋め込み、`<script>` を書く場合もインラインのみ
 
