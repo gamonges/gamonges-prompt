@@ -15,7 +15,7 @@
 | `<C-d>` / `<C-u>` | 半画面スクロール（カーソルを中央に） |
 | normal の `<Esc>` | 検索のハイライトを消す |
 | `<leader>cf` | 整形（conform）。**保存時の自動整形は無い** |
-| `<leader>tp` / `<leader>tr` / `<leader>tc` / `<leader>tl` | `tmp/plan.md` / `research.md` / `context.md` / `lessons.md` を開く |
+| `<leader>tp` / `<leader>tr` / `<leader>tc` / `<leader>tl` | `tmp/plan.md` / `research.md` / `context.md` / `lessons.md`（廃止予定）を開く |
 
 ### Git（fugitive）
 
@@ -33,7 +33,18 @@
 | `<leader>gd` | `:Atlas diff <既定のブランチ>...HEAD`（自分の変更） |
 | `<leader>gp` | `:Atlas review`（open な PR を選ぶ。番号を指定するなら `:Atlas review <番号>`） |
 
-差分のバッファの中だけで効くキー（**差分の中では全体のキーより優先される**。`<leader>gs` は Git status ではなくレビューの送信になる）:
+差分のバッファの中では、atlas のキーが全体のキーより優先される（atlas は `nowait` で張る）。次の全体のキーは差分の中では使えない:
+
+- `<leader>f*`（`ff`・`fg`・`fb`・`fr`・`fh`）: `<leader>f` が先に効き、explorer でファイルを探す
+- `<leader>t*`（`tp`・`tr`・`tc`・`tl`）: `<leader>t` が先に効き、タスクを足す
+- `<leader>e`: neo-tree ではなく atlas の explorer へ移る
+- `<leader>gs`: Git status ではなくレビューの送信になる
+- `<Tab>` / `<S-Tab>`: バッファではなくファイルを移る
+- `K`: LSP の hover ではなく、ファイル・コミットの詳細を出す。型を見るなら `gf` でファイルを新しいタブに開いてから `K`
+- `gT`: 前のタブではなく、コメントのテンプレートを出す（タブは `:tabprevious`）
+- `gD` / `gc`: 宣言へ移る・コメントアウトではなく、detail panel・compact の切り替えになる
+
+差分のバッファの中だけで効くキー（atlas `dd8bf80` の既定。網羅）:
 
 | キー | 動作 |
 |------|------|
@@ -49,6 +60,7 @@
 | `]n` / `[n` | 次 / 前の note |
 | `]f` `<Tab>` / `[f` `<S-Tab>` | 次 / 前のファイル |
 | `]h` / `[h` | 次 / 前の hunk |
+| `]r` / `[r` | 次 / 前のコミット |
 | `]u` / `[u` | 次 / 前の未レビューのファイル |
 | `-` | ファイルをレビュー済みにする / 戻す |
 | `K` | ファイル・コミットの詳細 |
@@ -58,6 +70,9 @@
 | `i` / `t` / `gc` | 表示の切り替え / layout の切り替え / compact の切り替え |
 | `gT` | コメントのテンプレート |
 | `gR` / `gD` / `gH` | review panel / detail panel / コメントの表示の切り替え |
+| `gC` | explorer のコミットの一覧の切り替え |
+| `gA` | 外部の差分ビューアのヘルプ |
+| `f`（review panel の中） | panel の表示の絞り込みを切り替える |
 
 差分のタブを閉じる（`:tabclose`）と一時 worktree が消える。
 

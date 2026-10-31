@@ -92,6 +92,9 @@ args = sys.argv[1:]
 with open(os.path.join(d, "notes.calls"), "a") as f:
     f.write(json.dumps({"argv": args, "appname": os.environ.get("NVIM_APPNAME"), "self": sys.argv[0]}) + "\n")
 if args[:1] == ["list"] and len(args) == 3 and args[1] == "--target":
+    if os.environ.get("FAKE_LIST_RC", "0") != "0":
+        sys.stderr.write("atlas-notes: cannot open store (fake)\n")
+        sys.exit(int(os.environ["FAKE_LIST_RC"]))
     with open(os.path.join(d, "list.out")) as f:
         sys.stdout.write(f.read())
     sys.exit(0)
@@ -113,6 +116,9 @@ if args[:1] == ["add"]:
         sys.stderr.write("atlas-notes: bad options %s %s\n" % (sorted(unknown), sorted(missing)))
         sys.exit(1)
     n = sum(1 for l in open(os.path.join(d, "notes.calls")) if json.loads(l)["argv"][:1] == ["add"])
+    if os.environ.get("FAKE_ADD_SLEEP"):
+        import time
+        time.sleep(float(os.environ["FAKE_ADD_SLEEP"]))
     fail_at = int(os.environ.get("FAKE_ADD_FAIL_AT", "0"))
     if fail_at and n >= fail_at:
         sys.stderr.write("atlas-notes: storage is locked (fake)\n")
@@ -133,9 +139,10 @@ make_repo() {  # $1=名前 → repo のパス
     git -C "$r" config user.email test@example.com
     git -C "$r" config user.name test-review-notes
     git -C "$r" config commit.gpgsign false
-    echo 'x' >"$r/src/foo.ts"
+    # 200 行。正常系のレポートの行番号（L7・L15・L42-50・L100 など）がファイルの範囲に入るように
+    seq 200 >"$r/src/foo.ts"
     git -C "$r" add src/foo.ts
-    # コミット時刻を過去に固定し、レポートの mtime（今）が必ず新しくなるようにする
+    # コミット時刻を過去に固定する。鮮度は SHA で判定し mtime に依存しないことを、T-R9c が mtime をさらに古くして確かめる
     GIT_COMMITTER_DATE="2026-01-01T00:00:00" GIT_AUTHOR_DATE="2026-01-01T00:00:00" git -C "$r" commit -q -m init
     echo "$r"
 }
@@ -183,13 +190,15 @@ out() { cat "$WORK/out"; }
 err() { cat "$WORK/err"; }
 
 # 実際のテンプレート（shared/skills/review/reference/unified-report-template.md）の形のレポート
-write_report() {  # $1=repo, $2=ヘッダの PR 行（既定 **PR #38**: title）, 標準入力=本文（ヘッダの後）
-    local r="$1" header="${2-**PR #38**: test pr}"
+write_report() {  # $1=repo, $2=ヘッダの PR 行（既定 **PR #38**: title）, $3=HEAD 行の SHA（既定 repo の HEAD。空なら行を書かない）, 標準入力=本文（ヘッダの後）
+    local r="$1" header="${2-**PR #38**: test pr}" sha="${3-$(head_of "$1")}"
     {
         printf '%s\n' '---' 'type: Code Review' 'title: test' 'description: test' 'status: stable' '---' \
             '# コードレビューレポート' ''
         [[ -n "$header" ]] && printf '%s\n' "$header"
-        printf '%s\n' '**ブランチ**: `feat` → `main`' '**レビュー日**: 2026-10-31' ''
+        printf '%s\n' '**ブランチ**: `feat` → `main`'
+        [[ -n "$sha" ]] && printf '**HEAD**: `%s`\n' "$sha"
+        printf '%s\n' '**レビュー日**: 2026-10-31' ''
         cat
     } >"$r/tmp/review/unified.md"
     touch "$r/tmp/review/unified.md"
@@ -201,6 +210,7 @@ FULL_BODY='## 💡 設計判断（Human Review 推奨）
 
 - **H-1. 状態を二重に持っている** — `src/foo.ts:L7`
   キャッシュと store の両方に同じ値がある。
+  どちらを正とするかを決めたい。
 
 ---
 
@@ -279,6 +289,7 @@ run_tests() {
     assert_contains "T-R1 M の body に詳細説明" "$(add_opt 3 body)" "data という名前は中身を表さない"
     assert_contains "T-R1 H の body に [H-1] タイトル" "$(add_opt 1 body)" "[H-1] 状態を二重に持っている"
     assert_contains "T-R1 H の body にインデントされた説明" "$(add_opt 1 body)" "キャッシュと store の両方に"
+    assert_contains "T-R1 H の body に説明の 2 行目も入れる" "$(add_opt 1 body)" "どちらを正とするかを決めたい"
     assert_contains "T-R1 I の body に詳細説明" "$(add_opt 4 body)" "握りつぶしてよいか"
     assert_eq "T-R1 --context は渡さない" "no" "$(any_opt context)"
     assert_contains "T-R1 件数を出す" "$(out)" "added 4"
@@ -326,6 +337,7 @@ EOF
     assert_eq "T-R4 add は正しい 1 件だけ" "1" "$(add_count)"
     assert_eq "T-R4 追加したのは H-4" "9" "$(add_opt 1 start-line)"
     assert_contains "T-R4 行番号の無い H-1 を ID で出す" "$(out)" "H-1"
+    assert_contains "T-R4 行番号の無い H-1 は「行番号が無い」" "$(out)" "H-1 src/foo.tsx (ComponentName) — 行番号が無い"
     assert_contains "T-R4 絶対パスの H-2 を ID で出す" "$(out)" "H-2"
     assert_contains "T-R4 .. を含む H-3 を ID で出す" "$(out)" "H-3"
     assert_contains "T-R4 範囲が逆の H-5 を ID で出す" "$(out)" "H-5"
@@ -424,17 +436,235 @@ EOF
     assert_contains "T-R8 PR 番号が無いと出す" "$(err)" "PR 番号（**PR #N**）がありません"
     assert_not_contains "T-R8 PR 番号の欠如で例外を出さない" "$(err)" "Traceback"
 
-    # T-R9: レポートが HEAD のコミットより古い（レビュー後にコミットした）
-    R="$(make_repo r9)"; set_pr "$(head_of "$R")"; set_list; reset_calls
+    # T-R9a（regression）: レポートが別のコミットのレビュー。mtime は新しくても書き込まない
+    # （mtime は同じ秒のコミットやコピーで新しくなり、古い行番号の note が今のコードに付いた）
+    R="$(make_repo r9)"; H="$(head_of "$R")"; set_pr "$H"; set_list; reset_calls
+    local OTHER=0123456789abcdef0123456789abcdef01234567
     one_c_report "$R"
+    sed -n '/^## ❌/,$p' "$R/tmp/review/unified.md" >"$WORK/r9.body"
+    write_report "$R" '**PR #38**: test pr' "$OTHER" <"$WORK/r9.body"
+    run_script "$R" --pr 38 --atlas-notes "$WORK/atlas-notes"
+    assert_eq "T-R9a 別のコミットのレポートは exit 1" "1" "$(rc)"
+    assert_eq "T-R9a 別のコミットのレポートでは add 0 回" "0" "$(add_count)"
+    assert_contains "T-R9a レポートの SHA を出す" "$(err)" "$OTHER"
+    assert_contains "T-R9a HEAD の SHA を出す" "$(err)" "$H"
+    assert_contains "T-R9a 回し直しを促す" "$(err)" "/review を回し直してください"
+
+    # T-R9b: HEAD の行が無い（SHA を書く前の /review のレポート）
+    reset_calls
+    write_report "$R" '**PR #38**: test pr' '' <"$WORK/r9.body"
+    run_script "$R" --pr 38 --atlas-notes "$WORK/atlas-notes"
+    assert_eq "T-R9b HEAD の行が無いレポートは exit 1" "1" "$(rc)"
+    assert_eq "T-R9b HEAD の行が無いレポートでは add 0 回" "0" "$(add_count)"
+    assert_contains "T-R9b HEAD の SHA が無いと出す" "$(err)" "HEAD の SHA がありません"
+    assert_not_contains "T-R9b HEAD の行の欠如で例外を出さない" "$(err)" "Traceback"
+
+    # T-R9c: 旧 T-R9 の入力（mtime を古くする）。SHA が HEAD と一致すれば同じコミットのレビューなので書き込む
+    # （旧 T-R9 は exit 1 を期待した。鮮度を mtime ではなく SHA で判定するので、期待値を逆にした）
+    reset_calls
+    write_report "$R" <"$WORK/r9.body"
     touch -t 202512010000 "$R/tmp/review/unified.md"
     run_script "$R" --pr 38 --atlas-notes "$WORK/atlas-notes"
-    assert_eq "T-R9 古いレポートは exit 1" "1" "$(rc)"
-    assert_eq "T-R9 古いレポートでは add 0 回" "0" "$(add_count)"
-    local ct
-    ct="$(git -C "$R" log -1 --format=%ct HEAD)"
-    assert_contains "T-R9 HEAD のコミット時刻を出す" "$(err)" "$(date -r "$ct" '+%Y-%m-%d %H:%M:%S')"
-    assert_contains "T-R9 レポートの時刻を出す" "$(err)" "2025-12-01 00:00:00"
+    assert_eq "T-R9c SHA が一致すれば mtime が古くても exit 0" "0" "$(rc)"
+    assert_eq "T-R9c SHA が一致すれば mtime が古くても add 1 回" "1" "$(add_count)"
+
+    # T-R9d: 短縮形・大文字の SHA は解釈しない（前方一致や大文字小文字の無視に緩めない）
+    for bad in "${H:0:7}" "$(printf '%s' "$H" | tr 'a-f' 'A-F')"; do
+        reset_calls
+        write_report "$R" '**PR #38**: test pr' "$bad" <"$WORK/r9.body"
+        run_script "$R" --pr 38 --atlas-notes "$WORK/atlas-notes"
+        assert_eq "T-R9d SHA の形が違えば exit 1（${bad}）" "1" "$(rc)"
+        assert_eq "T-R9d SHA の形が違えば add 0 回（${bad}）" "0" "$(add_count)"
+        assert_contains "T-R9d SHA の形が違えば SHA が無いと出す（${bad}）" "$(err)" "HEAD の SHA がありません"
+    done
+
+    # T-R12（regression）: 参照が複数ある項目・書式のずれた行を黙って落とさない。H_ITEM が参照 1 つで
+    # 行末の行にしか合わず、合わない行は skip にも積まれずに読み飛ばされ、件数にも一覧にも出なかった
+    R="$(make_repo r12)"; set_pr "$(head_of "$R")"; set_list; reset_calls
+    write_report "$R" <<'EOF'
+- **H-1. 参照が 2 つ** — `src/foo.ts:L7` / `src/bar.ts:L2`
+  2 か所にまたがる。
+- **H-2. 後ろに文字がある** — `src/foo.ts:L8`（要確認）
+  付く。
+- **H-3. em dash でない区切り** - `src/foo.ts:L9`
+  区切りが違う。
+- **H-4. 行番号の無い参照が先** — `src/foo.tsx (Comp)` / `src/foo.ts:L13`
+  行番号のある方に付く。
+- **H-5. 行番号が無い** — `src/foo.tsx (Comp)`
+  no line に数える。
+
+### C-1．全角ピリオドの見出し
+**ファイル**: `src/foo.ts:L10`
+
+### M‐2. U+2010 の見出し
+**ファイル**: `src/foo.ts:L11`
+
+### M-3. ファイルの参照が 2 つ
+**ファイル**: `src/foo.ts:L12` / `src/baz.ts:L3`
+
+2 つ目も残す。
+EOF
+    run_script "$R" --pr 38 --atlas-notes "$WORK/atlas-notes"
+    assert_eq "T-R12 正しい項目があれば exit 0" "0" "$(rc)"
+    assert_eq "T-R12 add は H-1・H-2・H-4・M-3 の 4 回" "4" "$(add_count)"
+    assert_eq "T-R12 参照が 2 つの H は行番号付きの最初の参照に付く" "7" "$(add_opt 1 start-line)"
+    assert_contains "T-R12 H の 2 つ目の参照を body に残す" "$(add_opt 1 body)" "関連: src/bar.ts:L2"
+    assert_eq "T-R12 参照の後ろに文字がある H も付く" "8" "$(add_opt 2 start-line)"
+    assert_not_contains "T-R12 参照の外の文字は body に入れない" "$(add_opt 2 body)" "要確認"
+    assert_eq "T-R12 行番号の無い参照が先でも、行番号のある参照に付く" "13" "$(add_opt 3 start-line)"
+    assert_contains "T-R12 行番号の無い参照は body に残す" "$(add_opt 3 body)" "関連: src/foo.tsx (Comp)"
+    assert_eq "T-R12 ファイルの参照が 2 つの M は最初の参照に付く" "12" "$(add_opt 4 start-line)"
+    assert_contains "T-R12 ファイルの 2 つ目の参照を body に残す" "$(add_opt 4 body)" "関連: src/baz.ts:L3"
+    assert_contains "T-R12 書式のずれた行を件数に出す" "$(out)" "skipped (unparsed) 3"
+    assert_contains "T-R12 行番号が無いものと書式のずれを分けて数える" "$(out)" "skipped (no line) 1, skipped (unparsed) 3,"
+    assert_contains "T-R12 全角ピリオドの見出しを出す" "$(out)" "### C-1．"
+    assert_contains "T-R12 U+2010 の見出しを出す" "$(out)" "### M‐2."
+    assert_contains "T-R12 em dash でない区切りの H を出す" "$(out)" "H-3. em dash でない区切り"
+    assert_contains "T-R12 理由を出す" "$(out)" "書式を解釈できない"
+    # 正しい項目が 0 件でも、何が消えたかを件数と内訳で出してから止める（「0 件」で先に止まらない）
+    reset_calls
+    write_report "$R" <<'EOF'
+### C-1．全角ピリオドの見出し
+**ファイル**: `src/foo.ts:L10`
+EOF
+    run_script "$R" --pr 38 --atlas-notes "$WORK/atlas-notes"
+    assert_eq "T-R12 書式のずれだけなら exit 1" "1" "$(rc)"
+    assert_eq "T-R12 書式のずれだけなら add 0 回" "0" "$(add_count)"
+    assert_contains "T-R12 書式のずれだけでも件数を出す" "$(out)" "skipped (unparsed) 1"
+    assert_contains "T-R12 書式のずれだけでも内訳を出す" "$(out)" "### C-1．"
+    assert_not_contains "T-R12 書式のずれだけでは「0 件」で先に止まらない" "$(err)" "0 件しか"
+    assert_contains "T-R12 全件 skip の理由は skipped の行にあると出す" "$(err)" "理由は上の skipped の行"
+
+    # T-R13（regression）: 位置を正規化し、HEAD のファイルで確かめる。行番号 0 は add の失敗で全体を止め、
+    # `./` 付きは重複判定の鍵が保存値と合わず再実行のたびに増え、範囲外の行番号は存在しない位置に付いた
+    R="$(make_repo r13)"; H="$(head_of "$R")"; set_pr "$H"; set_list; reset_calls
+    write_report "$R" <<'EOF'
+- **H-1. 行番号 0** — `src/foo.ts:L0`
+- **H-2. ./ 付き** — `./src/foo.ts:L42`
+- **H-3. HEAD に無い** — `src/nope.ts:L1`
+- **H-11. ディレクトリ** — `src:L1`
+- **H-4. 範囲外** — `src/foo.ts:L201`
+- **H-5. 2^53 超** — `src/foo.ts:L9007199254740993`
+- **H-6. 列挙** — `src/foo.ts:L100,L158`
+- **H-7. 全角コロン** — `src/foo.ts：L1`
+- **H-8. en dash** — `src/foo.ts:L1–3`
+- **H-9. 行番号が無い** — `src/foo.ts (Comp)`
+- **H-10. 後ろの指摘** — `src/foo.ts:L5`
+
+### C-1. ファイルの全角コロン
+**ファイル**: `src/foo.ts：L2`
+EOF
+    run_script "$R" --pr 38 --atlas-notes "$WORK/atlas-notes"
+    assert_eq "T-R13 正しい項目があれば exit 0" "0" "$(rc)"
+    assert_eq "T-R13 add は H-2・H-10 の 2 回（行番号 0 で止まらない）" "2" "$(add_count)"
+    assert_eq "T-R13 ./ を外したパスで add する" "src/foo.ts" "$(add_opt 1 file)"
+    assert_eq "T-R13 ./ 付きの行" "42" "$(add_opt 1 start-line)"
+    assert_eq "T-R13 行番号 0 の後ろの指摘も add する" "5" "$(add_opt 2 start-line)"
+    assert_contains "T-R13 行番号 0 の理由" "$(out)" "H-1 src/foo.ts:L0 — 行番号が 1 未満"
+    assert_contains "T-R13 HEAD に無いファイルの理由" "$(out)" "H-3 src/nope.ts:L1 — HEAD にファイルが無い"
+    assert_contains "T-R13 ディレクトリはファイルとみなさない" "$(out)" "H-11 src:L1 — HEAD にファイルが無い"
+    assert_contains "T-R13 範囲外の理由" "$(out)" "H-4 src/foo.ts:L201 — 行がファイルの範囲外"
+    assert_contains "T-R13 2^53 超の理由" "$(out)" "H-5 src/foo.ts:L9007199254740993 — 行がファイルの範囲外"
+    assert_contains "T-R13 列挙の理由" "$(out)" "H-6 src/foo.ts:L100,L158 — 行番号の書式を解釈できない"
+    assert_contains "T-R13 全角コロンの理由" "$(out)" "H-7 src/foo.ts：L1 — 行番号の書式を解釈できない"
+    assert_contains "T-R13 en dash の理由" "$(out)" "H-8 src/foo.ts:L1–3 — 行番号の書式を解釈できない"
+    assert_contains "T-R13 ファイルの行の全角コロンの理由" "$(out)" "C-1 src/foo.ts：L2 — 行番号の書式を解釈できない"
+    assert_contains "T-R13 行番号が無い参照の理由" "$(out)" "H-9 src/foo.ts (Comp) — 行番号が無い"
+    # 2 回目: atlas が ./ を外して保存した note が list に出る。正規化した鍵なら重複として飛ばす
+    reset_calls
+    set_list "$(note src/foo.ts "$H" 42 42 "[H-2] ./ 付き")"
+    run_script "$R" --pr 38 --atlas-notes "$WORK/atlas-notes"
+    assert_eq "T-R13 2 回目は ./ 付きの指摘を add しない" "1" "$(add_count)"
+    assert_contains "T-R13 2 回目は ./ 付きの指摘を重複に数える" "$(out)" "skipped (duplicate) 1"
+
+    # T-R14: 外部コマンドと実行場所の失敗経路。rc だけだと、検査が消えても別の理由で exit 1 になって通るので、
+    # メッセージと Traceback の無さまで見る
+    R="$(make_repo r14)"; set_pr "$(head_of "$R")"; set_list; reset_calls
+    one_c_report "$R"
+    (export FAKE_LIST_RC=3; run_script "$R" --pr 38 --atlas-notes "$WORK/atlas-notes")
+    assert_eq "T-R14 list の失敗は exit 1" "1" "$(rc)"
+    assert_eq "T-R14 list の失敗では add 0 回" "0" "$(add_count)"
+    assert_contains "T-R14 list の失敗と出す" "$(err)" "atlas-notes list が失敗しました"
+    assert_contains "T-R14 list の stderr を転記する" "$(err)" "cannot open store (fake)"
+    reset_calls
+    printf 'not json\n' >"$WORK/gh.json"
+    run_script "$R" --pr 38 --atlas-notes "$WORK/atlas-notes"
+    assert_eq "T-R14 gh の出力が JSON でなければ exit 1" "1" "$(rc)"
+    assert_contains "T-R14 gh の出力を読めないと出す" "$(err)" "gh pr view の出力を読めません"
+    assert_not_contains "T-R14 gh の出力が JSON でなくても例外を出さない" "$(err)" "Traceback"
+    reset_calls
+    set_pr "$(head_of "$R")"
+    mkdir -p "$WORK/norepo"
+    (export GIT_CEILING_DIRECTORIES="$WORK"; run_script "$WORK/norepo" --pr 38 --atlas-notes "$WORK/atlas-notes")
+    assert_eq "T-R14 repo の外では exit 1" "1" "$(rc)"
+    assert_contains "T-R14 repo の外では repo の中で実行するよう出す" "$(err)" "git の repo の中で実行してください"
+    reset_calls
+    cp "$R/tmp/review/unified.md" "$WORK/r14-report.md"
+    : >"$R/tmp/review/unified.md"
+    run_script "$R" --pr 38 --atlas-notes "$WORK/atlas-notes" --report "$WORK/r14-report.md"
+    assert_eq "T-R14 --report の絶対パスを読む" "0" "$(rc)"
+    assert_eq "T-R14 --report の絶対パスのレポートを add する" "1" "$(add_count)"
+
+    # T-R15: 失敗の経路でも内訳を出す・--report の相対パスは cwd から・外部コマンドの不在と非 UTF-8・非 ASCII の数字
+    R="$(make_repo r15)"; set_pr "$(head_of "$R")"; set_list; reset_calls
+    write_report "$R" <<'EOF'
+- **H-1. 行番号が無い** — `src/foo.ts (Comp)`
+- **H-2. 全角の数字** — `src/foo.ts:L４２`
+
+### C-1. 付く
+**ファイル**: `src/foo.ts:L3`
+EOF
+    (export FAKE_ADD_FAIL_AT=1; run_script "$R" --pr 38 --atlas-notes "$WORK/atlas-notes")
+    assert_eq "T-R15 add の失敗は exit 1" "1" "$(rc)"
+    assert_contains "T-R15 add の失敗でも skip の内訳を出す" "$(out)" "skipped: H-1 src/foo.ts (Comp) — 行番号が無い"
+    assert_contains "T-R15 全角の数字は行番号として読まない" "$(out)" "H-2 src/foo.ts:L４２ — 行番号の書式を解釈できない"
+    reset_calls
+    run_script "$R/src" --pr 38 --atlas-notes "$WORK/atlas-notes" --report ../tmp/review/unified.md
+    assert_eq "T-R15 --report の相対パスは cwd から解決する" "0" "$(rc)"
+    assert_eq "T-R15 --report の相対パスのレポートを add する" "1" "$(add_count)"
+    reset_calls
+    run_script "$R/src" --pr 38 --atlas-notes "$WORK/atlas-notes"
+    assert_eq "T-R15 --report 未指定ならサブディレクトリからでも root の既定を読む" "1" "$(add_count)"
+    reset_calls
+    local pyabs nogh
+    pyabs="$("$PY" -c 'import sys; print(sys.executable)')"
+    nogh="$WORK/nogh"; mkdir -p "$nogh"; ln -sf "$(command -v git)" "$nogh/git"
+    (cd "$R" && PATH="$nogh" FAKE_DIR="$WORK" "$pyabs" "$TARGET" --pr 38 --atlas-notes "$WORK/atlas-notes") >"$WORK/out" 2>"$WORK/err"
+    echo $? >"$WORK/rc"
+    assert_eq "T-R15 gh が無ければ exit 1" "1" "$(rc)"
+    assert_contains "T-R15 gh が無いと出す" "$(err)" "gh が見つかりません"
+    assert_not_contains "T-R15 gh が無くても例外を出さない" "$(err)" "Traceback"
+    reset_calls
+    printf '\xff\xfe{\n' >"$WORK/gh.json"
+    run_script "$R" --pr 38 --atlas-notes "$WORK/atlas-notes"
+    assert_eq "T-R15 gh の出力が UTF-8 でなければ exit 1" "1" "$(rc)"
+    assert_contains "T-R15 gh の出力が UTF-8 でなくても読めないと出す" "$(err)" "gh pr view の出力を読めません"
+    assert_not_contains "T-R15 gh の出力が UTF-8 でなくても例外を出さない" "$(err)" "Traceback"
+    set_pr "$(head_of "$R")"
+
+    # T-R16: add のループ中の Ctrl-C でも、どこまで書いたかを出して 130 で終わる
+    # （バックグラウンドのジョブは SIGINT を無視するので、SIG_DFL に戻してから exec する）
+    R="$(make_repo r16)"; set_pr "$(head_of "$R")"; set_list; reset_calls
+    printf '%s' "$FULL_BODY" | write_report "$R"
+    (
+        cd "$R" || exit 1
+        PATH="$WORK/bin:$PATH" FAKE_DIR="$WORK" FAKE_ADD_SLEEP=3 "$PY" -c \
+            'import os, signal, sys; signal.signal(signal.SIGINT, signal.SIG_DFL); os.execv(sys.executable, [sys.executable] + sys.argv[1:])' \
+            "$TARGET" --pr 38 --atlas-notes "$WORK/atlas-notes" >"$WORK/out" 2>"$WORK/err" &
+        pid=$!
+        # 1 回目の add は FAKE_ADD_SLEEP 秒眠るので、待つ上限はそれより十分長くする（遅い環境で add 0 のまま kill しない）
+        for _ in $(seq 150); do
+            [[ "$(add_count)" -ge 2 ]] && break
+            sleep 0.1
+        done
+        kill -INT "$pid"
+        wait "$pid"
+        echo $? >"$WORK/rc"
+    )
+    assert_eq "T-R16 Ctrl-C は exit 130" "130" "$(rc)"
+    assert_contains "T-R16 Ctrl-C でも件数を出す" "$(out)" "added 1"
+    assert_contains "T-R16 Ctrl-C で中断したと出す" "$(err)" "中断しました"
+    assert_not_contains "T-R16 Ctrl-C で例外を出さない" "$(err)" "Traceback"
 
     # T-R11: repo のパスに空白があっても HEAD を正しく読む（空白で分けると HEAD のずれと誤って診断する）
     R="$(make_repo "r 11")"; set_pr "$(head_of "$R")"; set_list; reset_calls

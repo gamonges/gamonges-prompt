@@ -206,6 +206,18 @@ install_settings() {
     log_success "  ✓ settings.json → $source_file"
 }
 
+# ~/.config/nvim が自分の nvim/ を指すリンクか。install・uninstall・status が同じ判定を使う。
+# 表記の違い（末尾スラッシュ・相対パス）は解決したパスで比べる。先が無い（dangling）ときは解決できないので、
+# readlink の文字列で比べる
+nvim_link_is_ours() {  # $1=リンク, $2=自分の nvim/
+    [[ -L "$1" ]] || return 1
+    [[ "$(readlink "$1")" == "$2" ]] && return 0
+    local resolved ours
+    resolved="$(cd -P "$1" 2>/dev/null && pwd -P)" || return 1
+    ours="$(cd -P "$2" 2>/dev/null && pwd -P)" || return 1
+    [[ "$resolved" == "$ours" ]]
+}
+
 # Neovim の設定のインストール（~/.config/nvim を repo 内 nvim/ への symlink にする）。
 # Claude と Codex の共通の段で、Codex の段では張らない（同じパスを 2 つの段が扱うと、片方の uninstall が
 # もう片方の状態を壊す）。XDG_CONFIG_HOME は見ない: HOME だけを差し替えるテストが本物の設定に触れないため
@@ -220,7 +232,7 @@ install_nvim() {
     fi
 
     mkdir -p "${HOME}/.config"
-    if [[ -L "$target_link" && "$(readlink "$target_link")" == "$source_dir" ]]; then
+    if nvim_link_is_ours "$target_link" "$source_dir"; then
         log_success "  ✓ nvim (既にリンク済み)"
         return 0
     fi
@@ -1293,10 +1305,22 @@ uninstall() {
     local nvim_source="${SCRIPT_DIR}/nvim"
     local nvim_target="${HOME}/.config/nvim"
     local nvim_count=0
-    if [[ -L "$nvim_target" && "$(readlink "$nvim_target")" == "$nvim_source" ]]; then
-        rm "$nvim_target"
-        log_success "  ✓ 削除: nvim (バックアップ ${nvim_target}.pre-install.* は残置)"
-        ((nvim_count++)) || true
+    if nvim_link_is_ours "$nvim_target" "$nvim_source"; then
+        # set -e の下で rm が失敗すると uninstall がここで終わり、共通規約ブロックと Codex 側の撤去が飛ぶ
+        if rm "$nvim_target"; then
+            local nvim_backup
+            nvim_backup="$(ls -d "${nvim_target}".pre-install.* 2>/dev/null | tail -1 || true)"
+            if [[ -n "$nvim_backup" ]]; then
+                log_success "  ✓ 削除: nvim (バックアップは残置。戻すなら: mv $nvim_backup $nvim_target)"
+            else
+                log_success "  ✓ 削除: nvim"
+            fi
+            ((nvim_count++)) || true
+        else
+            log_error "  ✗ nvim のリンクを削除できません: $nvim_target"
+        fi
+    elif [[ -L "$nvim_target" ]]; then
+        log_info "  - スキップ: nvim (別のリンク先: $(readlink "$nvim_target"))"
     fi
 
     # 共通規約ブロックの除去。ユーザーがブロック外に書いた内容には触れない
@@ -1338,8 +1362,11 @@ show_status() {
     echo -e "${BLUE}[Neovim]${NC} (${nvim_target})"
     if [[ -L "$nvim_target" ]]; then
         local nvim_link=$(readlink "$nvim_target")
-        if [[ "$nvim_link" == "$nvim_source" ]]; then
+        if nvim_link_is_ours "$nvim_target" "$nvim_source" && [[ -f "$nvim_target/init.lua" ]]; then
             echo -e "  ${GREEN}✓${NC} nvim (リンク済み)"
+        elif nvim_link_is_ours "$nvim_target" "$nvim_source"; then
+            # メインチェックアウトが nvim/ の無い branch にいる間は、リンクが合っていても設定が無い
+            echo -e "  ${YELLOW}!${NC} nvim (リンク済みだが先に init.lua が無い)"
         else
             echo -e "  ${YELLOW}!${NC} nvim (別のリンク先: $nvim_link)"
         fi

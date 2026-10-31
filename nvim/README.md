@@ -6,6 +6,11 @@
 
 ## 必要なツール
 
+- Neovim 0.12 以上（`vim.lsp.enable` と、0.12 の既定の LSP のキー `grn`・`grr`・`grt` などを使う）
+- `make` と C コンパイラ（telescope-fzf-native のビルド。失敗しても `pcall` で黙って fzf なしになる）
+- `tree-sitter` CLI と C コンパイラ（nvim-treesitter の main ブランチが parser をビルドする）
+- 初回の起動にネットワーク（lazy.nvim が plugin を clone し、markdown-preview と blink.cmp がバイナリを取得する）
+
 LSP サーバとフォーマッタは mise でグローバルに入れる（mise の設定は repo の外の `~/.config/mise/config.toml`）。
 
 | 言語 | LSP | フォーマッタ・lint | mise での指定 |
@@ -37,15 +42,26 @@ mise use -g npm:typescript-language-server npm:typescript lua-language-server st
 - 差分は一時 worktree（`~/.cache/nvim/atlas/worktrees/`）に開き、作業中の worktree の branch と未コミットの変更は変えない。差分のタブを閉じる（または nvim を終える）と一時 worktree は消える
 - 一時 worktree では LSP が動き、`node_modules` は手元のチェックアウトから symlink する
 - ファイル単位の履歴は atlas に無いので、`<leader>gh` は fugitive の `:0Gclog` で開く
+- `/review` の指摘を note にする: PR の head を checkout した worktree で `python3 ~/.claude/scripts/review-to-atlas-notes.py --pr <番号>` を実行する（`--dry-run` で追加の予定だけを出せる）。`tmp/review/unified.md` のヘッダの SHA が無いか HEAD と違うと止まるので、レビューの後にコミットしたら `/review` を回し直す。note は `<leader>gp`（`:Atlas review`）で PR を開くと出る
 - **改名した repo は origin を新しい名前に直す**: atlas は手元のチェックアウトの origin の `owner/name` が PR の repo と一致するときだけそれを使う。一致しないと自前の clone（`~/.cache/nvim/atlas/repos/`）に開き、そこには `node_modules` が無いので LSP が起動しない。`gh repo view --json nameWithOwner` の名前に `git remote set-url origin …` で合わせる
+
+## repo に書かれるもの
+
+`~/.config/nvim` はメインチェックアウトの `nvim/` そのものなので、次の操作はメインチェックアウトの作業ツリーを書き換える。
+
+- `:Lazy update` は `lazy-lock.json` を、シートの `:w` は `cheatsheet.md` を書き換える。更新したら branch を切って commit する（そのまま `git pull` すると「local changes would be overwritten」で止まる）。版を試すだけなら、下の「試行」の `NVIM_APPNAME=nvim-pr` で行う
+- `zg` で足した単語は repo ではなく `stdpath("data")/spell/` に入る（`spellfile` を移してある）
+- メインチェックアウトが `nvim/` の無い branch にいる間、nvim は設定なしで起動する（`./setup.sh status` が `!` を出す）
 
 ## キーとシートの照合
 
-設定に定義した `<leader>` のキーが、すべてシートに載っているかを確かめる（何も出なければよい）:
+設定に定義した `<leader>` のキーが、すべてシートに載っているかを確かめる（何も出なければよい）。backtick ごと照合するので、`<leader>f` が `<leader>ff` の部分に合って見逃すことはない:
 
 ```bash
-cd nvim && grep -rhoE '"<leader>[^"]+"' lua | sort -u | tr -d '"' | while read -r k; do grep -qF "$k" cheatsheet.md || echo "シートに無い: $k"; done
+cd nvim && grep -rhoE '"<leader>[^"]+"' lua | sort -u | tr -d '"' | while read -r k; do grep -qF "\`$k\`" cheatsheet.md || echo "シートに無い: $k"; done
 ```
+
+照合するのは設定 → シートの向きの `<leader>` のキーだけ。`<leader>` 以外のキーと、シートにだけ残ったキー（設定から消したもの）は手で見る。
 
 ## 試行（本番の設定を変えずに試す）
 

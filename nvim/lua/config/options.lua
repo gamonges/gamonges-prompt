@@ -46,6 +46,12 @@ vim.opt.fileencoding = "utf-8"
 vim.opt.updatetime = 250
 vim.opt.timeoutlen = 300
 
+-- zg の単語の保存先。既定は runtimepath の最初の書き込めるディレクトリ（~/.config/nvim = repo の nvim/）で、
+-- メインチェックアウトの作業ツリーを汚すため、data の下へ移す
+local spell_dir = vim.fn.stdpath("data") .. "/spell"
+vim.fn.mkdir(spell_dir, "p")
+vim.opt.spellfile = spell_dir .. "/en.utf-8.add"
+
 -- 保存前にディレクトリを自動作成する
 vim.api.nvim_create_autocmd("BufWritePre", {
   group = vim.api.nvim_create_augroup("AutoCreateDir", { clear = true }),

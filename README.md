@@ -311,5 +311,6 @@ Codex では frontmatter のうち `name`・`description`・`tools`・`skills` �
 - **Scripts は実体コピーのため即時反映されません。** `shared/scripts/` を編集・pull したら `./setup.sh install` を再実行してください。忘れても hook は失敗せず古いスクリプトで静かに動き続けます（同期状態は `./setup.sh status` か `verify-skills.sh` で確認）
 - **Codex 側の agents（TOML）も生成物のため即時反映されません。** `shared/agents/` を編集したら `./setup.sh install` を再実行してください
 - リポジトリを削除すると、リンクが壊れます（アンインストールを先に実行してください）
+- メインチェックアウトが `nvim/` の無い branch にいる間、`~/.config/nvim` のリンク先に設定が無く、nvim は設定なしで起動します（`./setup.sh status` が `!` を出します）
 - `~/.claude/` 側の既存の実ファイル・実ディレクトリ（skills・agents、前回 install 後に手で改変された scripts）は `.backup.YYYYMMDDHHMMSS.<PID>` として退避してから置き換わります（`settings.json` と `~/.config/nvim` は `.pre-install.*`）。Codex 側（`~/.agents/skills` の同名の他者の実体・リンク、`~/.codex/agents` の手書きの TOML）は、退避も上書きもせず warn して配置をスキップします
 - **install はメインチェックアウトから実行してください。** worktree から実行すると symlink がその worktree を指し、削除時に設定が失われます（`./setup.sh install` が警告します）

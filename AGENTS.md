@@ -4,7 +4,7 @@
 
 ## プロジェクト概要
 
-Claude Code と Codex で使用する Skills、SubAgents のコレクション。すべてのプロジェクトで共通利用するための拡張機能を管理するリポジトリ（個人の dotfiles のうち Neovim の設定も `nvim/` に置く）。コードの実装はなく、プロンプト（Markdown）の管理が主目的。
+Claude Code と Codex で使用する Skills、SubAgents のコレクション。すべてのプロジェクトで共通利用するための拡張機能を管理するリポジトリ。コードの実装はなく、プロンプト（Markdown）の管理が主目的。
 
 
 ## セットアップ
@@ -31,7 +31,7 @@ Claude Code と Codex で使用する Skills、SubAgents のコレクション�
 
 - **Codex**（`~/.codex` が在るとき。無ければ省略し、`~/.codex` は作らない）: skills は `~/.agents/skills/<name>` への symlink（同名の他者の実体・リンクには触れず warn。`~/.agents/skills` は他のツールも書き込む共有の場所）、agents は install 時に `.md` から TOML を**生成**して `~/.codex/agents/` へ（手書きの TOML には触れない。**`shared/agents/` を編集したら `./setup.sh install` を再実行する**。scripts と同じく、忘れても古い物が静かに動き続ける）、規約は `~/.codex/AGENTS.md` のマーカーブロック 2 つ（共通規約と、Codex 専用の読み替え表 `codex/codex-rules.md`）、hook は `~/.codex/hooks.json` の自前エントリだけ。変わったら Codex の `/hooks` で信頼し直す。詳細は README の「Codex で使うときの注意」
 
-**install はメインチェックアウトから実行する。** settings.json と skills は symlink のままなので install 元のチェックアウトを全プロジェクトのランタイムが参照する。worktree から install すると、その worktree を削除した瞬間に deny リスト・hook 定義・全 skill・`~/.claude/agents/` の subagent がまとめて失われる（hook と違って何も失敗しないので気づけない）。linked worktree から実行すると `./setup.sh install` が警告する。
+**install はメインチェックアウトから実行する。** settings.json と skills は symlink のままなので install 元のチェックアウトを全プロジェクトのランタイムが参照する。worktree から install すると、その worktree を削除した瞬間に deny リスト・hook 定義・全 skill・`~/.claude/agents/` の subagent・`~/.config/nvim` の Neovim の設定がまとめて失われる（hook と違って何も失敗しないので気づけない）。linked worktree から実行すると `./setup.sh install` が警告する。
 
 構造的検証は `./shared/scripts/verify-skills.sh`（fail があれば exit 1、warn のみなら exit 0。check 4 が scripts の同期・orphan・install 元を、check 5 が listing budget を見る。Codex 側は check 8（skills）・9（暗黙起動の抑止）・10（TOML の同期）・11（AGENTS.md のブロックとサイズ）・12（hooks.json の位置と信頼）・13（Codex の版が前提を確かめた版と同じか）、7(1) が `decide_ask_or_deny` の複製と「自分のリンク」・マーカーの並びの判定の本体の一致を見る）。
 

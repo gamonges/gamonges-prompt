@@ -21,7 +21,8 @@ return {
       local telescope = require("telescope")
       telescope.setup({
         defaults = {
-          file_ignore_patterns = { "node_modules", ".git/" },
+          -- Lua のパターンなので . は任意の 1 文字に合う（".git/" だと agit/ も除外する）
+          file_ignore_patterns = { "node_modules", "%.git/" },
         },
       })
       pcall(telescope.load_extension, "fzf")

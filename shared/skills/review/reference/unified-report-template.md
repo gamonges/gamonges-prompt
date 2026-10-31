@@ -14,6 +14,7 @@ status: stable
 
 **PR #{number}**: {title}
 **ブランチ**: `{head}` → `{base}`
+**HEAD**: `{head_sha}`
 **レビュー日**: {date}
 **変更ファイル数**: {count}ファイル | **差分規模**: {small/medium/large}
 **プロジェクトタイプ**: {frontend/backend/unknown}

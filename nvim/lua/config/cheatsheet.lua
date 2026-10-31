@@ -16,8 +16,8 @@ function M.toggle()
   vim.fn.bufload(buf)
   vim.bo[buf].buflisted = false
 
-  local width = math.floor(vim.o.columns * 0.8)
-  local height = math.floor((vim.o.lines - vim.o.cmdheight) * 0.8)
+  local width = math.max(1, math.floor(vim.o.columns * 0.8))
+  local height = math.max(1, math.floor((vim.o.lines - vim.o.cmdheight) * 0.8))
   win = vim.api.nvim_open_win(buf, true, {
     relative = "editor",
     width = width,
@@ -32,6 +32,15 @@ function M.toggle()
   -- <Esc> は使わない。normal の <Esc> は検索のハイライトを消すキーで、シートの中でも使いたいため。
   -- シートは編集できるまま（覚えたら消し、知ったら書き足す。保存は :w）
   vim.keymap.set("n", "q", M.toggle, { buffer = buf, nowait = true, desc = "Close cheatsheet" })
+  -- q はバッファに張るので、閉じたら外す（残すと :e で開いた cheatsheet.md で q がマクロの記録にならない）。
+  -- 外すのはここだけ: toggle の nvim_win_close も WinClosed を起こすので、両方で外すと 2 回目が E31 になる
+  vim.api.nvim_create_autocmd("WinClosed", {
+    pattern = tostring(win),
+    once = true,
+    callback = function()
+      pcall(vim.keymap.del, "n", "q", { buffer = buf })
+    end,
+  })
 end
 
 return M

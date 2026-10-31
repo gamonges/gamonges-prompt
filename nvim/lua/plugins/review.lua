@@ -1,9 +1,17 @@
--- 既定のブランチ（origin/HEAD の先）。取れなければ origin/main
+-- 既定のブランチ（origin/HEAD の先）。今のバッファの repo で引き、取れなければ知らせて origin/main に倒す
 local function default_branch()
-  local out = vim.fn.systemlist({ "git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD" })
-  if vim.v.shell_error == 0 and out[1] and out[1] ~= "" then
-    return out[1]
+  local dir = vim.fs.dirname(vim.api.nvim_buf_get_name(0))
+  local cwd = (dir and vim.fn.isdirectory(dir) == 1) and dir or vim.fn.getcwd()
+  -- stdout だけを読む（systemlist は stderr を混ぜる）。git が無いと vim.system は例外を投げる
+  local ok, res = pcall(function()
+    return vim.system({ "git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD" }, { cwd = cwd, text = true })
+      :wait()
+  end)
+  local branch = ok and res.code == 0 and vim.trim(res.stdout or "") or ""
+  if branch ~= "" then
+    return branch
   end
+  vim.notify("既定のブランチ（origin/HEAD）を読めないので origin/main と比べます", vim.log.levels.WARN)
   return "origin/main"
 end
 
