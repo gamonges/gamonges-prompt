@@ -22,3 +22,8 @@ map("n", "<leader>tp", "<cmd>edit tmp/plan.md<cr>", { desc = "Open plan" })
 map("n", "<leader>tr", "<cmd>edit tmp/research.md<cr>", { desc = "Open research" })
 map("n", "<leader>tl", "<cmd>edit tmp/lessons.md<cr>", { desc = "Open lessons" })
 map("n", "<leader>tc", "<cmd>edit tmp/context.md<cr>", { desc = "Open context" })
+
+-- Key cheatsheet (cheatsheet.md in this config)
+map("n", "<leader>?", function()
+  require("config.cheatsheet").toggle()
+end, { desc = "Cheatsheet" })

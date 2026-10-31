@@ -1,5 +1,7 @@
 # Neovim の設定
 
+キーの一覧は [cheatsheet.md](cheatsheet.md)（nvim の中では `<leader>?` で開閉）。キーを足したら、シートも直す（下の「キーとシートの照合」）。
+
 `./setup.sh install` が `~/.config/nvim` をこのディレクトリへの symlink にする（既存の実ディレクトリ・他所へのリンクは `~/.config/nvim.pre-install.<日時>-<PID>` に退避）。プラグインは lazy.nvim が管理し、版は `lazy-lock.json` に固定する。
 
 ## 必要なツール
@@ -21,7 +23,7 @@ mise use -g npm:typescript-language-server npm:typescript lua-language-server st
 
 ## LSP と整形の振る舞い
 
-- LSP のキーは Neovim 0.12 の既定（`K` 型・ドキュメント、`grn` 名前の変更、`gra` code action、`grr` 参照、`gri` 実装、`grt` 型定義、`grx` codelens、`gO` シンボル、`[d` / `]d` 診断）
+- LSP のキーは Neovim 0.12 の既定（[cheatsheet.md](cheatsheet.md) の「LSP」）
 - `<leader>cf` で整形する。**保存では整形しない**
 - TS / JS / JSON の整形は、プロジェクトの設定に従って最初に使えるものを選ぶ: oxfmt（`.oxfmtrc.json`・`.oxfmtrc.jsonc`・`oxfmt.config.ts` がある）→ biome（`biome.json` がある）→ prettier
 - 次の LSP は、起動に要る実体がプロジェクトにあるときだけ起動する（無いと起動に失敗し、開くたびにエラーが出るため）
@@ -31,12 +33,19 @@ mise use -g npm:typescript-language-server npm:typescript lua-language-server st
 
 ## PR のレビュー（atlas.nvim）
 
-- `<leader>gd`: `:Atlas diff <既定のブランチ>...HEAD`（自分の変更）。`<leader>gp`: `:Atlas review`（今の repo の open な PR を選ぶ。番号を指定するなら `:Atlas review <番号>`）
+- `<leader>gd` で自分の変更（`:Atlas diff <既定のブランチ>...HEAD`）、`<leader>gp` で PR（`:Atlas review`）を開く。差分の中のキーは [cheatsheet.md](cheatsheet.md) の「PR のレビュー」
 - 差分は一時 worktree（`~/.cache/nvim/atlas/worktrees/`）に開き、作業中の worktree の branch と未コミットの変更は変えない。差分のタブを閉じる（または nvim を終える）と一時 worktree は消える
 - 一時 worktree では LSP が動き、`node_modules` は手元のチェックアウトから symlink する
-- `<leader>gh`: 今のファイルの履歴（fugitive の `:0Gclog`。atlas にファイル単位の履歴は無い）
-- 差分のバッファの中では、atlas のキー（`<leader>gs` レビューの送信・`<leader>ga` Approve・`<leader>gr` Request changes・`<leader>n` note・`<leader>f`・`<leader>e`・`<leader>b`・`<leader>t`）が全体のキーより優先される
+- ファイル単位の履歴は atlas に無いので、`<leader>gh` は fugitive の `:0Gclog` で開く
 - **改名した repo は origin を新しい名前に直す**: atlas は手元のチェックアウトの origin の `owner/name` が PR の repo と一致するときだけそれを使う。一致しないと自前の clone（`~/.cache/nvim/atlas/repos/`）に開き、そこには `node_modules` が無いので LSP が起動しない。`gh repo view --json nameWithOwner` の名前に `git remote set-url origin …` で合わせる
+
+## キーとシートの照合
+
+設定に定義した `<leader>` のキーが、すべてシートに載っているかを確かめる（何も出なければよい）:
+
+```bash
+cd nvim && grep -rhoE '"<leader>[^"]+"' lua | sort -u | tr -d '"' | while read -r k; do grep -qF "$k" cheatsheet.md || echo "シートに無い: $k"; done
+```
 
 ## 試行（本番の設定を変えずに試す）
 
