@@ -75,6 +75,8 @@ return {
         "python",
         "javascript",
         "typescript",
+        "tsx",
+        "json",
       })
 
       -- Enable treesitter highlighting for all supported filetypes
