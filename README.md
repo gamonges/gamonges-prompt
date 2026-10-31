@@ -25,6 +25,7 @@ shared/                  # 共通資産（正本）。Claude Code と Codex の�
 │   └── ...
 ├── scripts/             # ユーティリティスクリプト・hook
 │   ├── knowledge.py     # tmp/ の md の frontmatter の検査・目録（tmp/index.md）・版の保存（snapshot）
+│   ├── review-to-atlas-notes.py  # /review の tmp/review/unified.md の指摘を atlas.nvim の Notes にする（手動で呼ぶ）
 │   ├── statusline.py
 │   ├── sync-cursor-skills.sh
 │   └── verify-skills.sh
@@ -98,6 +99,7 @@ bash shared/scripts/tests/test-series-sync.sh    # series-sync の同期スク�
 bash shared/scripts/tests/test-codex-run.sh      # codex-run.sh の挙動（偽の companion）。codex-run.sh を編集したら
 bash shared/scripts/tests/test-knowledge.sh      # knowledge.py の規則・目録・snapshot と、skill の雛形の frontmatter（python3 と /usr/bin/python3）。knowledge.py か tmp/ に md を書く skill の雛形を編集したら
 bash shared/scripts/tests/test-series-inbox.sh   # series-run の横断の受信箱の挙動（SERIES_RUN_STATE_DIR。python3 と /usr/bin/python3）。series_inbox.py を編集したら
+bash shared/scripts/tests/test-review-to-atlas-notes.sh  # review-to-atlas-notes.py の挙動（偽の gh・偽の atlas-notes。python3 と /usr/bin/python3）。スクリプトを編集したら
 ```
 
 ### アンインストール
@@ -144,7 +146,7 @@ git pull
 - **Bash で書かれた md は通る**（`cat >`・`tee`・python）。既存の deny と同じく Read/Edit/Write/apply_patch の経路だけを守る。漏れは `knowledge.py lint` で拾う
 - **YAML との互換**: check は YAML の部分集合として寛容に読み、YAML パーサとの互換は保証しない（`title: 調査: 既存の hook` も通す）。knowledge.py が書く値（snapshot の写し）は、要るときだけ単一引用にして YAML としても読める形にする。保存庫・ナレッジ化で YAML パーサを使うときに check を厳しくする
 - **プロジェクト単位では外せない**: hook はグローバルに効き、外部の書き手（`/goal` の `tmp/goal.md`・グローバル CLAUDE.md の `tmp/plan.md`）も初回は deny を挟む。理由に雛形が出て 1 回で回復できる。外す手段を足すと、外したまま忘れても気づけない（ガードが黙って開くのと同じ型）ので足さない
-- **AGENTS.md の挙動テストの一覧に `test-knowledge.sh`・`test-series-inbox.sh` は足していない**: Codex の指示（`~/.codex/AGENTS.md` ＋ repo の AGENTS.md）は既に上限 32 KiB を超えている（F-5）。一覧は上の「挙動テスト」と `verify-skills.sh --with-behavior-tests` が持つ。F-5 の解消時に AGENTS.md へ移すかを決める
+- **AGENTS.md の挙動テストの一覧に `test-knowledge.sh`・`test-series-inbox.sh`・`test-review-to-atlas-notes.sh` は足していない**: Codex の指示（`~/.codex/AGENTS.md` ＋ repo の AGENTS.md）は既に上限 32 KiB を超えている（F-5）。一覧は上の「挙動テスト」と `verify-skills.sh --with-behavior-tests` が持つ。F-5 の解消時に AGENTS.md へ移すかを決める
 - **止まったら**: deny の理由に付けるべき frontmatter の雛形が出るので、それを先頭に足して書き直す。ask（CLI の失敗）は `./setup.sh install` 済みか（`~/.claude/scripts/knowledge.py` があるか）を確かめる
 
 ### git push の確認と .env 系の制限
