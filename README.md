@@ -65,7 +65,7 @@ cd gamonges-prompt
 | 共通規約 | `~/.claude/CLAUDE.md` のマーカーブロック | `~/.codex/AGENTS.md` のマーカーブロック 2 つ（共通規約と、Codex 専用の読み替え表 `codex/codex-rules.md`） |
 | Hook | `~/.claude/settings.json`（symlink）の定義が `~/.claude/scripts/` を実行する | `~/.codex/hooks.json` の**自前エントリだけ**（各イベントの先頭のグループ。Muxy・Orca の位置は動かさない）。変わったら Codex の `/hooks` で信頼し直す（効かない経路は「Codex で使うときの注意」） |
 | settings.json | `~/.claude/settings.json`（symlink） | — |
-| Neovim の設定 | `~/.config/nvim`（`nvim/` への symlink。既存の実ディレクトリ・他所へのリンクは `nvim.pre-install.*` に退避） | （共通。Codex の段では張らない。Codex の外部エディタも nvim） |
+| Neovim の設定 | `~/.config/nvim`（`nvim/` への symlink。既存の実ディレクトリ・実ファイル・他所へのリンクは `nvim.pre-install.*` に退避） | （共通。Codex の段では張らない。Codex の外部エディタも nvim） |
 | Scripts | `~/.claude/scripts/`（**実体コピー**。編集・pull したら `./setup.sh install` を再実行する） | （共通。Codex の hook も同じスクリプトを実行する） |
 
 install が失敗したとき・並行して実行したとき:
@@ -307,9 +307,9 @@ Codex では frontmatter のうち `name`・`description`・`tools`・`skills` �
 
 ## ⚠️ 注意事項
 
-- Skills / Agents / settings.json はシンボリックリンクのため、リポジトリ内のファイルを更新すると自動的に反映されます
+- Skills / Agents / settings.json / nvim はシンボリックリンクのため、リポジトリ内のファイルを更新すると自動的に反映されます
 - **Scripts は実体コピーのため即時反映されません。** `shared/scripts/` を編集・pull したら `./setup.sh install` を再実行してください。忘れても hook は失敗せず古いスクリプトで静かに動き続けます（同期状態は `./setup.sh status` か `verify-skills.sh` で確認）
 - **Codex 側の agents（TOML）も生成物のため即時反映されません。** `shared/agents/` を編集したら `./setup.sh install` を再実行してください
 - リポジトリを削除すると、リンクが壊れます（アンインストールを先に実行してください）
-- `~/.claude/` 側の既存の実ファイル・実ディレクトリ（skills・agents、前回 install 後に手で改変された scripts）は `.backup.YYYYMMDDHHMMSS.<PID>` として退避してから置き換わります（`settings.json` は `.pre-install.*`）。Codex 側（`~/.agents/skills` の同名の他者の実体・リンク、`~/.codex/agents` の手書きの TOML）は、退避も上書きもせず warn して配置をスキップします
+- `~/.claude/` 側の既存の実ファイル・実ディレクトリ（skills・agents、前回 install 後に手で改変された scripts）は `.backup.YYYYMMDDHHMMSS.<PID>` として退避してから置き換わります（`settings.json` と `~/.config/nvim` は `.pre-install.*`）。Codex 側（`~/.agents/skills` の同名の他者の実体・リンク、`~/.codex/agents` の手書きの TOML）は、退避も上書きもせず warn して配置をスキップします
 - **install はメインチェックアウトから実行してください。** worktree から実行すると symlink がその worktree を指し、削除時に設定が失われます（`./setup.sh install` が警告します）

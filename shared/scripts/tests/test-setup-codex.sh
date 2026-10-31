@@ -2070,6 +2070,9 @@ ino_before="$(inode "$HN1/.config/nvim" 2>/dev/null)"
 run_setup "$HN1" install
 assert_eq "T-N4 2 回目の install も成功する" "0" "$(last_rc)"
 assert_eq "T-N4 2 回目の install でリンクの inode が変わらない" "${ino_before:-none}" "$(inode "$HN1/.config/nvim" 2>/dev/null)"
+# 既存のリンクへ ln -s（-n なし）で張り直すと、リンク先（repo の nvim/）の中にリンクができる。inode では見えない
+assert_eq "T-N4 2 回目の install で repo の nvim/ の中にリンクを作らない" "0" \
+    "$(find "$NVIM_SRC" -maxdepth 1 -type l | wc -l | tr -d ' ')"
 
 # T-N2: 実ディレクトリ・実ファイルは中身を保って退避してからリンクにする
 for kind in dir file; do
@@ -2091,7 +2094,6 @@ for kind in dir file; do
     fi
     assert_eq "T-N2 [$kind] 退避した中身は変わらない" "user-owned" "$got"
     assert_eq "T-N2 [$kind] ~/.config/nvim は repo の nvim/ を指すリンクになる" "$NVIM_SRC" "$(readlink "$HN2/.config/nvim" 2>/dev/null)"
-    assert_eq "T-N2 [$kind] repo の nvim/ の中にリンクを作らない" "no" "$([[ -L "$NVIM_SRC/nvim" ]] && echo yes || echo no)"
 done
 
 # T-N3: 無関係な先を指すリンクは退避してから張り替える（退避物は元のリンク先を保つ）
@@ -2125,7 +2127,7 @@ HST="$(new_home stage-nvim)"; mkdir -p "$HST/.codex"
 : >"$HST/.config"
 stage_case "~/.config が通常ファイル" "$SETUP" "$HST" "Neovim"
 
-# T-N6: status の [Neovim] 節の 4 状態（install・uninstall と同じ判定の式）
+# T-N6: status の [Neovim] 節の 5 状態（install・uninstall と同じ判定の式）
 HN6="$(new_home nvim-status-none)"
 run_setup "$HN6" status
 assert_contains "T-N6 未インストールの nvim を示す" "$(last_out)" "nvim (未インストール)"
@@ -2137,6 +2139,10 @@ assert_not_contains "T-N6 他所を指すリンクを「リンク済み」と示
 HN6="$(new_home nvim-status-real)"; mkdir -p "$HN6/.config/nvim"
 run_setup "$HN6" status
 assert_contains "T-N6 実ディレクトリは「実ディレクトリが存在」と示す" "$(last_out)" "nvim (実ディレクトリが存在)"
+HN6="$(new_home nvim-status-file)"; mkdir -p "$HN6/.config"
+echo "user-owned" >"$HN6/.config/nvim"
+run_setup "$HN6" status
+assert_contains "T-N6 実ファイルは「実ファイルが存在」と示す（未インストールと出さない）" "$(last_out)" "nvim (実ファイルが存在)"
 
 # T-N7: uninstall は自分のリンクだけを消し、退避は残す（HN2 は最後の [file] のケース。退避とリンクがある）
 assert_eq "前提: T-N7 の HOME に nvim のリンクがある" "$NVIM_SRC" "$(readlink "$HN2/.config/nvim" 2>/dev/null)"
@@ -2167,7 +2173,7 @@ run_setup "$HN9" uninstall
 assert_eq "T-N10 uninstall は成功する" "0" "$(last_rc)"
 assert_eq "T-N10 nvim のリンクは消える" "no" "$([[ -L "$HN9/.config/nvim" ]] && echo yes || echo no)"
 assert_eq "T-N10 nvim の削除は共通の段で 1 回だけ（Neovim: 1 件）" "1" "$(last_out | grep -c 'Neovim: 1 件')"
-assert_not_contains "T-N10 Codex の段の件数の行に nvim が出ない" "$(last_out | grep 'Codex 側の削除完了')" "nvim"
+assert_not_contains "T-N10 Codex の段の件数の行に nvim を出さない" "$(last_out | grep 'Codex 側の削除完了')" "nvim"
 
 echo ""
 echo "$pass_count passed / $fail_count failed"

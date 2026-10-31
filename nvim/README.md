@@ -2,7 +2,7 @@
 
 キーの一覧は [cheatsheet.md](cheatsheet.md)（nvim の中では `<leader>?` で開閉）。キーを足したら、シートも直す（下の「キーとシートの照合」）。
 
-`./setup.sh install` が `~/.config/nvim` をこのディレクトリへの symlink にする（既存の実ディレクトリ・他所へのリンクは `~/.config/nvim.pre-install.<日時>-<PID>` に退避）。プラグインは lazy.nvim が管理し、版は `lazy-lock.json` に固定する。
+`./setup.sh install` が `~/.config/nvim` をこのディレクトリへの symlink にする（既存の実ディレクトリ・実ファイル・他所へのリンクは `~/.config/nvim.pre-install.<日時>-<PID>` に退避）。プラグインは lazy.nvim が管理し、版は `lazy-lock.json` に固定する。
 
 ## 必要なツール
 

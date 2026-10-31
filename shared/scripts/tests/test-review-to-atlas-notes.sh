@@ -318,6 +318,8 @@ EOF
   repo の外。
 - **H-4. 正しい** — `src/foo.ts:L9`
   これは付く。
+- **H-5. 範囲が逆** — `src/foo.ts:L50-42`
+  開始が終了より後。
 EOF
     run_script "$R" --pr 38 --atlas-notes "$WORK/atlas-notes"
     assert_eq "T-R4 1 件でも追加できれば exit 0" "0" "$(rc)"
@@ -326,7 +328,8 @@ EOF
     assert_contains "T-R4 行番号の無い H-1 を ID で出す" "$(out)" "H-1"
     assert_contains "T-R4 絶対パスの H-2 を ID で出す" "$(out)" "H-2"
     assert_contains "T-R4 .. を含む H-3 を ID で出す" "$(out)" "H-3"
-    assert_contains "T-R4 skip の件数を出す" "$(out)" "skipped (no line) 3"
+    assert_contains "T-R4 範囲が逆の H-5 を ID で出す" "$(out)" "H-5"
+    assert_contains "T-R4 skip の件数を出す" "$(out)" "skipped (no line) 4"
     # 全件が skip（追加 0・重複 0）なら exit 1（書き込むものが無いのに成功に見せない）
     reset_calls
     write_report "$R" <<'EOF'
@@ -340,20 +343,28 @@ EOF
     R="$(make_repo r5)"; H="$(head_of "$R")"; set_pr "$H"; reset_calls
     one_c_report "$R"
     body="$(printf '[C-1] null を返す経路がある\n\nuser が見つからないと null を返し、呼び出し側で落ちる。')"
-    note() {  # $1=commit, $2=end_line → note の JSON
-        "$PY" -c 'import json,sys; print(json.dumps([{"id":"x","file_path":"src/foo.ts","commit":sys.argv[1],"start_line":42,"end_line":int(sys.argv[2]),"body":sys.argv[3],"type":"issue","resolved":False}]))' "$1" "$2" "$body"
+    note() {  # $1=file_path, $2=commit, $3=start_line, $4=end_line, $5=body → note の JSON
+        "$PY" -c 'import json,sys; a=sys.argv; print(json.dumps([{"id":"x","file_path":a[1],"commit":a[2],"start_line":int(a[3]),"end_line":int(a[4]),"body":a[5],"type":"issue","resolved":False}]))' "$@"
     }
-    set_list "$(note "$H" 50)"
+    set_list "$(note src/foo.ts "$H" 42 50 "$body")"
     run_script "$R" --pr 38 --atlas-notes "$WORK/atlas-notes"
     assert_eq "T-R5 全件が重複なら exit 0" "0" "$(rc)"
     assert_eq "T-R5 重複は add しない" "0" "$(add_count)"
     assert_contains "T-R5 重複の件数を出す" "$(out)" "skipped (duplicate) 1"
-    reset_calls; set_list "$(note "$H" 51)"
-    run_script "$R" --pr 38 --atlas-notes "$WORK/atlas-notes"
-    assert_eq "T-R5 end_line だけが違う note は重複にしない" "1" "$(add_count)"
-    reset_calls; set_list "$(note "fedcba9876543210fedcba9876543210fedcba98" 50)"
-    run_script "$R" --pr 38 --atlas-notes "$WORK/atlas-notes"
-    assert_eq "T-R5 commit だけが違う note は重複にしない" "1" "$(add_count)"
+    # 5 項目を 1 つずつ変える（どれか 1 つでも違えば別の指摘。鍵から 1 つ落とす回帰を捕まえる）
+    local kind
+    for kind in file_path commit start_line end_line body; do
+        reset_calls
+        case "$kind" in
+            file_path) set_list "$(note src/bar.ts "$H" 42 50 "$body")" ;;
+            commit) set_list "$(note src/foo.ts fedcba9876543210fedcba9876543210fedcba98 42 50 "$body")" ;;
+            start_line) set_list "$(note src/foo.ts "$H" 41 50 "$body")" ;;
+            end_line) set_list "$(note src/foo.ts "$H" 42 51 "$body")" ;;
+            body) set_list "$(note src/foo.ts "$H" 42 50 "[C-1] 別の指摘")" ;;
+        esac
+        run_script "$R" --pr 38 --atlas-notes "$WORK/atlas-notes"
+        assert_eq "T-R5 $kind だけが違う note は重複にしない" "1" "$(add_count)"
+    done
     # list の出力が JSON でない → exit 1（空の一覧として扱うと重複の判定が黙って外れる）
     reset_calls; printf 'not json\n' >"$WORK/list.out"
     run_script "$R" --pr 38 --atlas-notes "$WORK/atlas-notes"
@@ -385,6 +396,15 @@ EOF
     assert_eq "T-R7 --dry-run は add 0 回" "0" "$(add_count)"
     assert_contains "T-R7 予定の一覧を出す" "$(out)" "C-1"
     assert_contains "T-R7 予定に場所を出す" "$(out)" "src/foo.ts:42-50"
+    # 全件が skip でも --dry-run は書き込まないので exit 0（予定の確認に使う）
+    reset_calls
+    write_report "$R" <<'EOF'
+- **H-1. 行番号が無い** — `src/foo.tsx (ComponentName)`
+  既存パターンとの一貫性。
+EOF
+    run_script "$R" --pr 38 --atlas-notes "$WORK/atlas-notes" --dry-run
+    assert_eq "T-R7 全件が skip でも --dry-run は exit 0" "0" "$(rc)"
+    assert_contains "T-R7 skip した ID を出す" "$(out)" "H-1"
 
     # T-R8: ヘッダの PR 番号が違う・無い
     R="$(make_repo r8)"; set_pr "$(head_of "$R")"; set_list; reset_calls
@@ -394,12 +414,15 @@ EOF
     run_script "$R" --pr 38 --atlas-notes "$WORK/atlas-notes"
     assert_eq "T-R8 別の PR のレポートは exit 1" "1" "$(rc)"
     assert_eq "T-R8 別の PR のレポートでは add 0 回" "0" "$(add_count)"
-    assert_contains "T-R8 レポートの PR 番号を出す" "$(err)" "39"
+    assert_contains "T-R8 レポートの PR 番号を出す" "$(err)" "PR #39"
     reset_calls
     write_report "$R" '' <"$WORK/r8.body"
     run_script "$R" --pr 38 --atlas-notes "$WORK/atlas-notes"
     assert_eq "T-R8 PR 番号の無いレポートは exit 1" "1" "$(rc)"
     assert_eq "T-R8 PR 番号の無いレポートでは add 0 回" "0" "$(add_count)"
+    # rc だけだと、検査が消えても別の例外（None の書式化）で exit 1 になって通る
+    assert_contains "T-R8 PR 番号が無いと出す" "$(err)" "PR 番号（**PR #N**）がありません"
+    assert_not_contains "T-R8 PR 番号の欠如で例外を出さない" "$(err)" "Traceback"
 
     # T-R9: レポートが HEAD のコミットより古い（レビュー後にコミットした）
     R="$(make_repo r9)"; set_pr "$(head_of "$R")"; set_list; reset_calls
@@ -412,6 +435,13 @@ EOF
     ct="$(git -C "$R" log -1 --format=%ct HEAD)"
     assert_contains "T-R9 HEAD のコミット時刻を出す" "$(err)" "$(date -r "$ct" '+%Y-%m-%d %H:%M:%S')"
     assert_contains "T-R9 レポートの時刻を出す" "$(err)" "2025-12-01 00:00:00"
+
+    # T-R11: repo のパスに空白があっても HEAD を正しく読む（空白で分けると HEAD のずれと誤って診断する）
+    R="$(make_repo "r 11")"; set_pr "$(head_of "$R")"; set_list; reset_calls
+    one_c_report "$R"
+    run_script "$R" --pr 38 --atlas-notes "$WORK/atlas-notes"
+    assert_eq "T-R11 パスに空白のある repo でも exit 0" "0" "$(rc)"
+    assert_eq "T-R11 パスに空白のある repo でも add 1 回" "1" "$(add_count)"
 
     # T-R10: --atlas-notes 無しは XDG_DATA_HOME と NVIM_APPNAME で探し、NVIM_APPNAME を引き継ぐ
     R="$(make_repo r10)"; set_pr "$(head_of "$R")"; set_list; reset_calls
@@ -437,6 +467,10 @@ PYS=(python3)
 if [[ -x /usr/bin/python3 ]] && \
     [[ "$(/usr/bin/python3 -c 'import sys; print(sys.version)')" != "$(python3 -c 'import sys; print(sys.version)')" ]]; then
     PYS+=(/usr/bin/python3)
+fi
+
+if [[ "${#PYS[@]}" -eq 1 ]]; then
+    echo "警告: /usr/bin/python3 が無いか python3 と同じ版なので、/usr/bin/python3 での 2 本目の実行は行いません（3.9 で動くことを確かめていません）" >&2
 fi
 
 if [[ ! -f "$TARGET" ]]; then

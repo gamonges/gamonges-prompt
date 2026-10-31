@@ -8,7 +8,7 @@
 PR の head を checkout した worktree で実行する。行番号は HEAD のコミットのものとして付けるので、
 HEAD が PR の head と違う・レポートが別の PR のもの・レポートがその後のコミットより古いときは止める。
 
-終了コード: 0 = 1 件以上を追加した、または追加するものがすべて既にあった
+終了コード: 0 = 1 件以上を追加した、追加するものがすべて既にあった、または --dry-run
             1 = 書き込めなかった（理由は stderr）。2 = 引数の誤り
 
 標準ライブラリだけで、python 3.9 で動く書き方にする（/usr/bin/python3 で動かす経路があるため）。
@@ -107,6 +107,8 @@ def locate(ref):
         return None, "repo 相対のパスでない"
     start = int(m.group(2))
     end = int(m.group(3)) if m.group(3) else start
+    if end < start:
+        return None, "行の範囲が逆"
     return (path, start, end), None
 
 
@@ -138,7 +140,8 @@ def main():
     res = run(["git", "rev-parse", "--show-toplevel", "HEAD"])
     if res.returncode != 0:
         fail("git の repo の中で実行してください:\n" + res.stderr.rstrip())
-    root, head = res.stdout.split()[:2]
+    # root はパスに空白を含みうるので、行で分ける
+    root, head = res.stdout.splitlines()[:2]
     if head != head_oid:
         fail(
             "HEAD が PR の head と違います（行番号がずれるため止めます）\n"
