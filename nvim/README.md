@@ -29,6 +29,15 @@ mise use -g npm:typescript-language-server npm:typescript lua-language-server st
   - oxlint・biome: 設定のあるプロジェクトの `node_modules/.bin/` に実体がある。`npm install` の前は起動しない
 - 選ばれたフォーマッタは `:ConformInfo`、attach した LSP は `:checkhealth vim.lsp` で見る
 
+## PR のレビュー（atlas.nvim）
+
+- `<leader>gd`: `:Atlas diff <既定のブランチ>...HEAD`（自分の変更）。`<leader>gp`: `:Atlas review`（今の repo の open な PR を選ぶ。番号を指定するなら `:Atlas review <番号>`）
+- 差分は一時 worktree（`~/.cache/nvim/atlas/worktrees/`）に開き、作業中の worktree の branch と未コミットの変更は変えない。差分のタブを閉じる（または nvim を終える）と一時 worktree は消える
+- 一時 worktree では LSP が動き、`node_modules` は手元のチェックアウトから symlink する
+- `<leader>gh`: 今のファイルの履歴（fugitive の `:0Gclog`。atlas にファイル単位の履歴は無い）
+- 差分のバッファの中では、atlas のキー（`<leader>gs` レビューの送信・`<leader>ga` Approve・`<leader>gr` Request changes・`<leader>n` note・`<leader>f`・`<leader>e`・`<leader>b`・`<leader>t`）が全体のキーより優先される
+- **改名した repo は origin を新しい名前に直す**: atlas は手元のチェックアウトの origin の `owner/name` が PR の repo と一致するときだけそれを使う。一致しないと自前の clone（`~/.cache/nvim/atlas/repos/`）に開き、そこには `node_modules` が無いので LSP が起動しない。`gh repo view --json nameWithOwner` の名前に `git remote set-url origin …` で合わせる
+
 ## 試行（本番の設定を変えずに試す）
 
 worktree の設定を本番の `~/.config/nvim` と分けて試すには、別の `NVIM_APPNAME` を使う。プラグイン・データ・キャッシュも `nvim-pr` の下に分かれる。
