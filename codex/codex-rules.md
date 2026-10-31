@@ -43,4 +43,5 @@
 | hook の理由に「[要確認]」とあって操作が止められた | 理由の末尾の次の行動に従う。既定はユーザーに確認し、ユーザー自身に実行してもらう（理由を言い換えて同じ操作を再実行しない）。SKILL.md の lint が frontmatter の欠落で止めたときは、直した内容でなら再実行してよい |
 | git 操作（add・commit・reset・push 等） | exec_command で 1 回ずつ実行する。write_stdin（対話シェルへの入力）はどの hook も通らない |
 | SKILL.md の編集 | apply_patch ツールで行う。シェルの `apply_patch <<'EOF'` や exec_command での書き換えは Bash として届き、lint を通らない |
+| Neovim の設定・`/review` の指摘を atlas の Notes にする | 設定は gamonges-prompt の `nvim/`（`~/.config/nvim` はそこへの symlink）。Notes にするときは `python3 ~/.claude/scripts/review-to-atlas-notes.py --pr <番号>` を、サンドボックスの外での実行の承認を求めて実行する（`gh` がネットワークを、atlas-notes が `~/.local/share/<NVIM_APPNAME>` への書き込みを要るため） |
 | 作業ディレクトリ以外のリポジトリでの git commit | workdir を使わず、`git -C <repo> commit …` か、wrapper で包まない `cd <repo> && git commit …` と 1 本のコマンドに書く。workdir は hook に渡らず、`bash -lc "cd … && git commit"` は contract-link の基点の解決に当たらない |

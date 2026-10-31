@@ -4,7 +4,7 @@ Claude Code と Codex で使用するための Skills と SubAgents のコレク
 
 ## 概要
 
-このリポジトリには、すべてのプロジェクトで共通して使用できる Claude の拡張機能が含まれています。
+このリポジトリには、すべてのプロジェクトで共通して使用できる Claude の拡張機能が含まれています。個人の Neovim の設定（`nvim/`）も管理しています。
 
 ### 📁 構成
 
@@ -25,6 +25,7 @@ shared/                  # 共通資産（正本）。Claude Code と Codex の�
 │   └── ...
 ├── scripts/             # ユーティリティスクリプト・hook
 │   ├── knowledge.py     # tmp/ の md の frontmatter の検査・目録（tmp/index.md）・版の保存（snapshot）
+│   ├── review-to-atlas-notes.py  # /review の tmp/review/unified.md の指摘を atlas.nvim の Notes にする（手動で呼ぶ）
 │   ├── statusline.py
 │   ├── sync-cursor-skills.sh
 │   └── verify-skills.sh
@@ -32,6 +33,8 @@ shared/                  # 共通資産（正本）。Claude Code と Codex の�
 
 claude/                  # Claude Code 固有
 └── settings.json        # hook 定義・deny リスト等（~/.claude/settings.json へ symlink）
+
+nvim/                    # Neovim の設定（~/.config/nvim へ symlink。Claude と Codex の共通の段で扱う）
 
 codex/                   # Codex 固有
 ├── codex-rules.md       # Codex 専用の読み替え表（~/.codex/AGENTS.md にマーカーブロックで配置）
@@ -62,6 +65,7 @@ cd gamonges-prompt
 | 共通規約 | `~/.claude/CLAUDE.md` のマーカーブロック | `~/.codex/AGENTS.md` のマーカーブロック 2 つ（共通規約と、Codex 専用の読み替え表 `codex/codex-rules.md`） |
 | Hook | `~/.claude/settings.json`（symlink）の定義が `~/.claude/scripts/` を実行する | `~/.codex/hooks.json` の**自前エントリだけ**（各イベントの先頭のグループ。Muxy・Orca の位置は動かさない）。変わったら Codex の `/hooks` で信頼し直す（効かない経路は「Codex で使うときの注意」） |
 | settings.json | `~/.claude/settings.json`（symlink） | — |
+| Neovim の設定 | `~/.config/nvim`（`nvim/` への symlink。既存の実ディレクトリ・実ファイル・他所へのリンクは `nvim.pre-install.*` に退避） | （共通。Codex の段では張らない。Codex の外部エディタも nvim） |
 | Scripts | `~/.claude/scripts/`（**実体コピー**。編集・pull したら `./setup.sh install` を再実行する） | （共通。Codex の hook も同じスクリプトを実行する） |
 
 install が失敗したとき・並行して実行したとき:
@@ -95,6 +99,7 @@ bash shared/scripts/tests/test-series-sync.sh    # series-sync の同期スク�
 bash shared/scripts/tests/test-codex-run.sh      # codex-run.sh の挙動（偽の companion）。codex-run.sh を編集したら
 bash shared/scripts/tests/test-knowledge.sh      # knowledge.py の規則・目録・snapshot と、skill の雛形の frontmatter（python3 と /usr/bin/python3）。knowledge.py か tmp/ に md を書く skill の雛形を編集したら
 bash shared/scripts/tests/test-series-inbox.sh   # series-run の横断の受信箱の挙動（SERIES_RUN_STATE_DIR。python3 と /usr/bin/python3）。series_inbox.py を編集したら
+bash shared/scripts/tests/test-review-to-atlas-notes.sh  # review-to-atlas-notes.py の挙動（偽の gh・偽の atlas-notes。python3 と /usr/bin/python3）。スクリプトを編集したら
 ```
 
 ### アンインストール
@@ -141,7 +146,7 @@ git pull
 - **Bash で書かれた md は通る**（`cat >`・`tee`・python）。既存の deny と同じく Read/Edit/Write/apply_patch の経路だけを守る。漏れは `knowledge.py lint` で拾う
 - **YAML との互換**: check は YAML の部分集合として寛容に読み、YAML パーサとの互換は保証しない（`title: 調査: 既存の hook` も通す）。knowledge.py が書く値（snapshot の写し）は、要るときだけ単一引用にして YAML としても読める形にする。保存庫・ナレッジ化で YAML パーサを使うときに check を厳しくする
 - **プロジェクト単位では外せない**: hook はグローバルに効き、外部の書き手（`/goal` の `tmp/goal.md`・グローバル CLAUDE.md の `tmp/plan.md`）も初回は deny を挟む。理由に雛形が出て 1 回で回復できる。外す手段を足すと、外したまま忘れても気づけない（ガードが黙って開くのと同じ型）ので足さない
-- **AGENTS.md の挙動テストの一覧に `test-knowledge.sh`・`test-series-inbox.sh` は足していない**: Codex の指示（`~/.codex/AGENTS.md` ＋ repo の AGENTS.md）は既に上限 32 KiB を超えている（F-5）。一覧は上の「挙動テスト」と `verify-skills.sh --with-behavior-tests` が持つ。F-5 の解消時に AGENTS.md へ移すかを決める
+- **AGENTS.md の挙動テストの一覧に `test-knowledge.sh`・`test-series-inbox.sh`・`test-review-to-atlas-notes.sh` は足していない**: Codex の指示（`~/.codex/AGENTS.md` ＋ repo の AGENTS.md）は既に上限 32 KiB を超えている（F-5）。一覧は上の「挙動テスト」と `verify-skills.sh --with-behavior-tests` が持つ。F-5 の解消時に AGENTS.md へ移すかを決める
 - **止まったら**: deny の理由に付けるべき frontmatter の雛形が出るので、それを先頭に足して書き直す。ask（CLI の失敗）は `./setup.sh install` 済みか（`~/.claude/scripts/knowledge.py` があるか）を確かめる
 
 ### git push の確認と .env 系の制限
@@ -302,9 +307,9 @@ Codex では frontmatter のうち `name`・`description`・`tools`・`skills` �
 
 ## ⚠️ 注意事項
 
-- Skills / Agents / settings.json はシンボリックリンクのため、リポジトリ内のファイルを更新すると自動的に反映されます
+- Skills / Agents / settings.json / nvim はシンボリックリンクのため、リポジトリ内のファイルを更新すると自動的に反映されます
 - **Scripts は実体コピーのため即時反映されません。** `shared/scripts/` を編集・pull したら `./setup.sh install` を再実行してください。忘れても hook は失敗せず古いスクリプトで静かに動き続けます（同期状態は `./setup.sh status` か `verify-skills.sh` で確認）
 - **Codex 側の agents（TOML）も生成物のため即時反映されません。** `shared/agents/` を編集したら `./setup.sh install` を再実行してください
 - リポジトリを削除すると、リンクが壊れます（アンインストールを先に実行してください）
-- `~/.claude/` 側の既存の実ファイル・実ディレクトリ（skills・agents、前回 install 後に手で改変された scripts）は `.backup.YYYYMMDDHHMMSS.<PID>` として退避してから置き換わります（`settings.json` は `.pre-install.*`）。Codex 側（`~/.agents/skills` の同名の他者の実体・リンク、`~/.codex/agents` の手書きの TOML）は、退避も上書きもせず warn して配置をスキップします
+- `~/.claude/` 側の既存の実ファイル・実ディレクトリ（skills・agents、前回 install 後に手で改変された scripts）は `.backup.YYYYMMDDHHMMSS.<PID>` として退避してから置き換わります（`settings.json` と `~/.config/nvim` は `.pre-install.*`）。Codex 側（`~/.agents/skills` の同名の他者の実体・リンク、`~/.codex/agents` の手書きの TOML）は、退避も上書きもせず warn して配置をスキップします
 - **install はメインチェックアウトから実行してください。** worktree から実行すると symlink がその worktree を指し、削除時に設定が失われます（`./setup.sh install` が警告します）
