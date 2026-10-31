@@ -4,7 +4,7 @@
 
 ## プロジェクト概要
 
-Claude Code と Codex で使用する Skills、SubAgents のコレクション。すべてのプロジェクトで共通利用するための拡張機能を管理するリポジトリ。コードの実装はなく、プロンプト（Markdown）の管理が主目的。
+Claude Code と Codex で使用する Skills、SubAgents のコレクション。すべてのプロジェクトで共通利用するための拡張機能を管理するリポジトリ（個人の dotfiles のうち Neovim の設定も `nvim/` に置く）。コードの実装はなく、プロンプト（Markdown）の管理が主目的。
 
 
 ## セットアップ
@@ -19,11 +19,11 @@ Claude Code と Codex で使用する Skills、SubAgents のコレクション�
 
 **他端末への展開時の手順**: `git pull && ./setup.sh migrate && ./setup.sh install`
 
-**ディレクトリの役割**: 共通資産（skills・agents・scripts・global-rules.md）は `shared/` が正本。`claude/` に残るのは Claude Code 固有の `settings.json` だけ（旧パス `claude/{skills,agents,scripts}` の互換 symlink は移行の後に外した。旧パスを指すリンクは `./setup.sh migrate` が張り替える）。Codex 固有のもの（読み替え表 `codex-rules.md`・agents の TOML 生成器 `gen-agents.py`）は `codex/`。新しいファイルは `shared/` に置く。
+**ディレクトリの役割**: 共通資産（skills・agents・scripts・global-rules.md）は `shared/` が正本。`claude/` に残るのは Claude Code 固有の `settings.json` だけ（旧パス `claude/{skills,agents,scripts}` の互換 symlink は移行の後に外した。旧パスを指すリンクは `./setup.sh migrate` が張り替える）。Codex 固有のもの（読み替え表 `codex-rules.md`・agents の TOML 生成器 `gen-agents.py`）は `codex/`。新しいファイルは `shared/` に置く。Neovim の設定はトップレベルの `nvim/`（Claude と Codex のどちらにも属さない）。
 
 配置方式は 2 通り（`~/.codex` が在れば、Codex にも同じ資産を展開する。3 つ目の方式ではなく、下の 2 方式の Codex 版）:
 
-- **skills / agents / settings.json**: symlink。repo の更新が即座に反映される
+- **skills / agents / settings.json / nvim**: symlink。repo の更新が即座に反映される（nvim は `~/.config/nvim` へ。Claude と Codex の共通の段が 1 回だけ張る）
   - **subagent 定義は `shared/agents/<カテゴリ>/` に一本化している。** Claude Code がユーザーレベルの subagent を読み込むのは `~/.claude/agents/` だけで、サブフォルダも再帰的に読み、識別子は frontmatter の `name` で決まる
   - setup.sh はファイルを basename で `~/.claude/agents/` に平置きの symlink にするので、`name` とファイル名を一致させ、ツリー全体で一意にする
   - `~/.claude/agents/` を初めて作った install の後は、セッションを開き直すまで読み込まれない。旧配置先 `~/.claude/sub-agents/`（読み込まれない）のリンクは `./setup.sh migrate` が撤去する

@@ -4,7 +4,7 @@ Claude Code と Codex で使用するための Skills と SubAgents のコレク
 
 ## 概要
 
-このリポジトリには、すべてのプロジェクトで共通して使用できる Claude の拡張機能が含まれています。
+このリポジトリには、すべてのプロジェクトで共通して使用できる Claude の拡張機能が含まれています。個人の Neovim の設定（`nvim/`）も管理しています。
 
 ### 📁 構成
 
@@ -32,6 +32,8 @@ shared/                  # 共通資産（正本）。Claude Code と Codex の�
 
 claude/                  # Claude Code 固有
 └── settings.json        # hook 定義・deny リスト等（~/.claude/settings.json へ symlink）
+
+nvim/                    # Neovim の設定（~/.config/nvim へ symlink。Claude と Codex の共通の段で扱う）
 
 codex/                   # Codex 固有
 ├── codex-rules.md       # Codex 専用の読み替え表（~/.codex/AGENTS.md にマーカーブロックで配置）
@@ -62,6 +64,7 @@ cd gamonges-prompt
 | 共通規約 | `~/.claude/CLAUDE.md` のマーカーブロック | `~/.codex/AGENTS.md` のマーカーブロック 2 つ（共通規約と、Codex 専用の読み替え表 `codex/codex-rules.md`） |
 | Hook | `~/.claude/settings.json`（symlink）の定義が `~/.claude/scripts/` を実行する | `~/.codex/hooks.json` の**自前エントリだけ**（各イベントの先頭のグループ。Muxy・Orca の位置は動かさない）。変わったら Codex の `/hooks` で信頼し直す（効かない経路は「Codex で使うときの注意」） |
 | settings.json | `~/.claude/settings.json`（symlink） | — |
+| Neovim の設定 | `~/.config/nvim`（`nvim/` への symlink。既存の実ディレクトリ・他所へのリンクは `nvim.pre-install.*` に退避） | （共通。Codex の段では張らない。Codex の外部エディタも nvim） |
 | Scripts | `~/.claude/scripts/`（**実体コピー**。編集・pull したら `./setup.sh install` を再実行する） | （共通。Codex の hook も同じスクリプトを実行する） |
 
 install が失敗したとき・並行して実行したとき:
