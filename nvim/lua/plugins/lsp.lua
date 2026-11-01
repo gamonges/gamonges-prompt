@@ -46,16 +46,32 @@ return {
       start_only_if("oxlint", local_bin("oxlint"))
       start_only_if("biome", local_bin("biome"))
       -- typescript は monorepo の上位に hoist されうるので、root から上へ探す
-      start_only_if("ts_ls", function(root)
+      local function has_tsserver(root)
         for dir in vim.fs.parents(vim.fs.joinpath(root, "x")) do
           if vim.uv.fs_stat(vim.fs.joinpath(dir, "node_modules/typescript/lib/tsserver.js")) then
             return true
           end
         end
         return false
-      end)
+      end
+      start_only_if("ts_ls", has_tsserver)
+      -- TypeScript 7 は tsserver.js を持たず、tsc 自身が LSP になる（tsc --lsp）。ts_ls が起動しないときだけ使う。
+      -- ts_ls と tsc は同じ規則（lock ファイル）で root を決めるので、同じ root で判定すれば両方つくことはない。
+      -- 一時 worktree（atlas）のようにプロジェクトの tsc が見えなくても、tsc は PATH の版で起動する
+      -- lspconfig の root_dir より先に判定する: lspconfig の root_dir は TS 7 の tsc が見つからないと WARN を出すので、
+      -- 後で判定すると ts_ls のプロジェクトで開くたびに WARN が出る。root は lspconfig の ts_ls・tsc と同じ規則で引く
+      local orig_tsc_root_dir = vim.lsp.config.tsc.root_dir
+      vim.lsp.config("tsc", {
+        root_dir = function(bufnr, on_dir)
+          local lockfiles = { "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lockb", "bun.lock" }
+          local root = vim.fs.root(bufnr, { lockfiles, { ".git" } }) or vim.fn.getcwd()
+          if not has_tsserver(root) then
+            orig_tsc_root_dir(bufnr, on_dir)
+          end
+        end,
+      })
 
-      vim.lsp.enable({ "ts_ls", "lua_ls", "bashls", "marksman", "basedpyright", "ruff", "oxlint", "biome" })
+      vim.lsp.enable({ "ts_ls", "tsc", "lua_ls", "bashls", "marksman", "basedpyright", "ruff", "oxlint", "biome" })
     end,
   },
 

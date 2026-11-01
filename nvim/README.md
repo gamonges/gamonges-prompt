@@ -15,7 +15,7 @@ LSP サーバとフォーマッタは mise でグローバルに入れる（mise
 
 | 言語 | LSP | フォーマッタ・lint | mise での指定 |
 |------|-----|-------------------|--------------|
-| TS / JS | ts_ls | プロジェクトの node_modules（oxfmt・biome・prettier・oxlint） | `npm:typescript-language-server`・`npm:typescript` |
+| TS / JS | ts_ls（TypeScript 7 は tsc） | プロジェクトの node_modules（oxfmt・biome・prettier・oxlint） | `npm:typescript-language-server`・`npm:typescript` |
 | Lua | lua_ls | stylua | `lua-language-server`・`stylua` |
 | Shell | bashls | shfmt・shellcheck（bashls が呼ぶ） | `npm:bash-language-server`・`shfmt`・`shellcheck` |
 | Markdown | marksman | prettier | `marksman`・`npm:prettier` |
@@ -32,7 +32,8 @@ mise use -g npm:typescript-language-server npm:typescript lua-language-server st
 - `<leader>cf` で整形する。**保存では整形しない**
 - TS / JS / JSON の整形は、プロジェクトの設定に従って最初に使えるものを選ぶ: oxfmt（`.oxfmtrc.json`・`.oxfmtrc.jsonc`・`oxfmt.config.ts` がある）→ biome（`biome.json` がある）→ prettier
 - 次の LSP は、起動に要る実体がプロジェクトにあるときだけ起動する（無いと起動に失敗し、開くたびにエラーが出るため）
-  - ts_ls: root から上のどこかに `node_modules/typescript/lib/tsserver.js` がある。**プロジェクトの外の `.ts` では起動しない**（グローバルの `typescript@7` はネイティブ版で tsserver を持たない）
+  - ts_ls: root から上のどこかに `node_modules/typescript/lib/tsserver.js` がある
+  - tsc（TypeScript 7 のネイティブ版。`tsc --lsp`）: ts_ls が起動しないとき（tsserver.js が無いとき）だけ起動する。両方がつくことはない。プロジェクトの `node_modules/.bin/tsc` が 7 未満なら PATH の `tsc`（グローバルの `typescript@7`）を使うので、プロジェクトの外の `.ts` や、`node_modules` の揃わない atlas の一時 worktree でも型を引ける
   - oxlint・biome: 設定のあるプロジェクトの `node_modules/.bin/` に実体がある。`npm install` の前は起動しない
 - 選ばれたフォーマッタは `:ConformInfo`、attach した LSP は `:checkhealth vim.lsp` で見る
 
@@ -40,7 +41,7 @@ mise use -g npm:typescript-language-server npm:typescript lua-language-server st
 
 - `<leader>gd` で自分の変更（`:Atlas diff <既定のブランチ>...HEAD`）、`<leader>gp` で PR（`:Atlas review`）を開く。差分の中のキーは [cheatsheet.md](cheatsheet.md) の「PR のレビュー」
 - 差分は一時 worktree（`~/.cache/nvim/atlas/worktrees/`）に開き、作業中の worktree の branch と未コミットの変更は変えない。差分のタブを閉じる（または nvim を終える）と一時 worktree は消える
-- 一時 worktree では LSP が動き、`node_modules` は手元のチェックアウトから symlink する
+- 一時 worktree では LSP が動き、`node_modules` は手元のチェックアウトから symlink する。link されるのは root の `node_modules` だけで、pnpm の monorepo のパッケージ配下（`v2/node_modules` など）は無い。TS 7 の repo は PATH の `tsc` で型を引けるが、依存パッケージの型は解決できないことがある
 - ファイル単位の履歴は atlas に無いので、`<leader>gh` は fugitive の `:0Gclog` で開く
 - `/review` の指摘を note にする: PR の head を checkout した worktree で `python3 ~/.claude/scripts/review-to-atlas-notes.py --pr <番号>` を実行する（`--dry-run` で追加の予定だけを出せる）。`tmp/review/unified.md` のヘッダの SHA が無いか HEAD と違うと止まるので、レビューの後にコミットしたら `/review` を回し直す。note は `<leader>gp`（`:Atlas review`）で PR を開くと出る
 - **改名した repo は origin を新しい名前に直す**: atlas は手元のチェックアウトの origin の `owner/name` が PR の repo と一致するときだけそれを使う。一致しないと自前の clone（`~/.cache/nvim/atlas/repos/`）に開き、そこには `node_modules` が無いので LSP が起動しない。`gh repo view --json nameWithOwner` の名前に `git remote set-url origin …` で合わせる
