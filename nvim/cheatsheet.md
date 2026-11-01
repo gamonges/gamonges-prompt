@@ -69,11 +69,11 @@ atlas の差分のタブでは、未接続のまま送ると何も送らずに�
 
 | キー | 動作 |
 |------|------|
-| `c` / `C` | コメントを書く / 送る |
-| `s` / `S` | suggestion を書く / 送る |
+| `c` / `C` | コメントを pending に積む / その場で投稿する（explorer の中ではファイルへのコメント） |
+| `s` / `S` | suggestion を pending に積む / その場で投稿する |
 | `<leader>n` | note（自分だけのメモ）を足す |
-| `<leader>gs` | レビューを送信する |
-| `<leader>ga` / `<leader>gr` | Approve / Request changes |
+| `<leader>gs` | pending を Comment としてレビューを送る |
+| `<leader>ga` / `<leader>gr` | pending を Approve / Request changes として送る |
 | `<leader>t` | タスクを足す |
 | `x` | スレッドの resolved を切り替える |
 | `]c` / `[c` | 次 / 前のコメント |
@@ -96,6 +96,15 @@ atlas の差分のタブでは、未接続のまま送ると何も送らずに�
 | `f`（review panel の中） | panel の表示の絞り込みを切り替える |
 
 差分のタブを閉じる（`:tabclose`）と一時 worktree が消える。
+
+#### レビューの手順（`:at review` / `<leader>gp` で PR を開いてから）
+
+0. **（任意）AI の指摘を下敷きにする**: note は PR を開くときに読まれるので、開く前に済ませる。差分のタブを `:tabc` で閉じ、PR の head を checkout した worktree で `/review` → `python3 ~/.claude/scripts/review-to-atlas-notes.py --pr <番号>`（`--dry-run` で予定だけ）→ `:at review <番号>` で開き直す。`]n` / `[n` で辿る
+1. **全体を掴む**: `gR` で review panel、`gC` でコミットの一覧、`]r` / `[r` でコミットを移る、`K` で詳細
+2. **ファイルごとに読む**: `]u` で次の未レビューのファイルへ → `]h` / `[h` で hunk を移る → 読み終えたら `-` で済みにする。型や定義を見るときは `gf` で新しいタブに開いて `K` / `<C-]>` を使い、**そのタブだけ** `:tabc` で閉じて戻る（差分のタブを閉じると一時 worktree が消える）
+3. **指摘を書く**: 基本は `c` / `s` で pending に積む（`C` / `S` は 1 件ずつ即座に投稿され、通知も 1 件ずつ飛ぶ）。`gT` でテンプレート、自分だけのメモは `<leader>n`
+4. **送る**: `<leader>ga`（Approve）・`<leader>gr`（Request changes）・`<leader>gs`（Comment）のどれか 1 つで、積んだ pending をまとめて送る。差分の中の `<leader>gs` は Git status ではない
+5. **終える**: 差分のタブを `:tabc` で閉じる
 
 ## 2. LSP（Neovim 0.12 の既定）
 
