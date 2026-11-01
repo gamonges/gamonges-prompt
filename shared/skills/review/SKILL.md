@@ -133,6 +133,7 @@ find ./tmp/review -mindepth 1 -maxdepth 1 -type f -delete 2>/dev/null; mkdir -p 
 base_branch=$(gh pr view "$pr_number" --json baseRefName --jq '.baseRefName')
 pr_title=$(gh pr view "$pr_number" --json title --jq '.title')
 pr_body=$(gh pr view "$pr_number" --json body --jq '.body')
+head_sha=$(git rev-parse HEAD)  # unified.md のヘッダに書く。Notes の変換スクリプトがこの SHA と HEAD の一致で鮮度を判定する
 changed_files=$(git diff --name-only "${base_branch}...HEAD")
 full_diff=$(git diff "${base_branch}...HEAD")
 commit_log=$(git log --oneline "${base_branch}...HEAD")
@@ -328,7 +329,7 @@ Confirm every selected subagent has started. Re-launch any that failed. Codex �
 `mkdir -p ./tmp/review` してから、**`./reference/unified-report-template.md`** に記載されたテンプレートに従って `./tmp/review/unified.md` を生成する。
 
 テンプレートには以下のセクションが含まれる（順序固定）:
-- ヘッダ（PR 番号 / ブランチ / レビュー日 / 差分規模 / プロジェクトタイプ）
+- ヘッダ（PR 番号 / ブランチ / レビュー対象の HEAD の SHA（Phase 1 の `$head_sha`。40 桁のまま） / レビュー日 / 差分規模 / プロジェクトタイプ）
 - ❌ CI Failures（Phase 1.6 で `_ci-failures.md` が生成された場合のみ）
 - CI 前提確認 / 変更サマリ / 👀 人間レビュー観点
 - ❌ Critical Issues / ⚠️ Minor Issues / ℹ️ Info / ✅ Good Points

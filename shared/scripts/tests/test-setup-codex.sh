@@ -383,8 +383,14 @@ echo "== status / uninstall =="
 run_setup "$H1" status
 assert_eq "status は成功する" "0" "$(last_rc)"
 linked_lines="$(last_out | grep -c 'リンク済み' || true)"
-# settings.json 1 行 + skills + agents
-assert_count_eq "status が全リンクを「リンク済み」と表示する" "$((EXPECTED_SKILLS + EXPECTED_AGENTS + 1))" "$linked_lines"
+# settings.json 1 行 + nvim 1 行 + skills + agents
+assert_count_eq "status が全リンクを「リンク済み」と表示する" "$((EXPECTED_SKILLS + EXPECTED_AGENTS + 2))" "$linked_lines"
+# 件数だけだと、別の行が増えても通る
+# 見出しと括弧の間に色のエスケープが入るので、2 つに分けて見る
+assert_contains "T-N6 status に [Neovim] 節がある" "$(last_out)" "[Neovim]"
+assert_contains "T-N6 [Neovim] 節は \$HOME/.config/nvim を示す" "$(last_out | grep -F '[Neovim]')" "($H1/.config/nvim)"
+assert_contains "T-N6 status が nvim をリンク済みと示す" "$(last_out)" "nvim (リンク済み)"
+assert_not_contains "T-N9 ~/.codex が無い HOME の status に Codex の nvim の行は出ない" "$(last_out)" "nvim: [Neovim] 節の共通のリンクを使う"
 
 # install が何も置いていないと「0 件残る」が空振りで通る。撤去前に置かれていた件数を先に見る
 pre_skills="$(find "$H1/.claude/skills" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')"
@@ -2045,6 +2051,187 @@ assert_eq "C-1 skills の実ファイルの退避がある" "my own file" "$(cat
 assert_eq "C-1 agents の実ディレクトリは退避してからリンクを張る" "yes" "$([[ -L "$HBK/.claude/agents/$agent_md" ]] && echo yes || echo no)"
 assert_eq "C-1 agents の実ディレクトリの退避がある（中にリンクを入れない）" "1" \
     "$(find "$HBK/.claude/agents" -maxdepth 1 -name "${agent_md}.backup.*" -type d | wc -l | tr -d ' ')"
+
+# ===========================================================================
+# N: Neovim の設定（~/.config/nvim → <repo>/nvim）。Claude と Codex の共通の段で 1 回だけ扱う
+# ===========================================================================
+echo "== N: Neovim の設定のリンク =="
+NVIM_SRC="$REPO_ROOT/nvim"
+assert_eq "前提: repo に nvim/init.lua がある" "yes" "$([[ -f "$NVIM_SRC/init.lua" ]] && echo yes || echo no)"
+
+# T-N1: ~/.config が無い HOME
+HN1="$(new_home nvim-fresh)"
+run_setup "$HN1" install
+assert_eq "T-N1 install は成功する" "0" "$(last_rc)"
+assert_eq "T-N1 ~/.config/nvim は repo の nvim/ を指す" "$NVIM_SRC" "$(readlink "$HN1/.config/nvim" 2>/dev/null)"
+
+# T-N4: 2 回目の install はリンクを作り直さない。mini repo で回す: 実 repo で回すと、回帰で張られたリンクが
+# 作業ツリーに残り、以後の実行も落ち続ける
+MN4="$(make_mini_repo nvim-twice)"; mkdir -p "$MN4/nvim"; echo "-- init" >"$MN4/nvim/init.lua"
+HN4="$(new_home nvim-twice)"
+run_setup_with "$MN4/setup.sh" "$HN4" install
+assert_eq "前提: T-N4 のリンクは mini repo の nvim/ を指す" "$MN4/nvim" "$(readlink "$HN4/.config/nvim" 2>/dev/null)"
+ino_before="$(inode "$HN4/.config/nvim" 2>/dev/null)"
+run_setup_with "$MN4/setup.sh" "$HN4" install
+assert_eq "T-N4 2 回目の install も成功する" "0" "$(last_rc)"
+assert_eq "T-N4 2 回目の install でリンクの inode が変わらない" "${ino_before:-none}" "$(inode "$HN4/.config/nvim" 2>/dev/null)"
+# 既存のリンクへ ln -s（-n なし）で張り直すと、リンク先（nvim/）の中にリンクができる。inode では見えない
+assert_eq "T-N4 2 回目の install でリンク先の nvim/ の中にリンクを作らない" "0" \
+    "$(find "$MN4/nvim" -maxdepth 1 -type l | wc -l | tr -d ' ')"
+
+# T-N2: 実ディレクトリ・実ファイルは中身を保って退避してからリンクにする
+for kind in dir file; do
+    HN2="$(new_home "nvim-real-$kind")"
+    mkdir -p "$HN2/.config"
+    if [[ "$kind" == dir ]]; then
+        mkdir -p "$HN2/.config/nvim" && echo "user-owned" >"$HN2/.config/nvim/init.lua"
+    else
+        echo "user-owned" >"$HN2/.config/nvim"
+    fi
+    run_setup "$HN2" install
+    assert_eq "T-N2 [$kind] install は成功する" "0" "$(last_rc)"
+    assert_eq "T-N2 [$kind] 退避が 1 件できる" "1" \
+        "$(find "$HN2/.config" -maxdepth 1 -name 'nvim.pre-install.*' | wc -l | tr -d ' ')"
+    if [[ "$kind" == dir ]]; then
+        got="$(cat "$HN2"/.config/nvim.pre-install.*/init.lua 2>/dev/null)"
+    else
+        got="$(cat "$HN2"/.config/nvim.pre-install.* 2>/dev/null)"
+    fi
+    assert_eq "T-N2 [$kind] 退避した中身は変わらない" "user-owned" "$got"
+    assert_eq "T-N2 [$kind] ~/.config/nvim は repo の nvim/ を指すリンクになる" "$NVIM_SRC" "$(readlink "$HN2/.config/nvim" 2>/dev/null)"
+done
+
+# T-N3: 無関係な先を指すリンクは退避してから張り替える（退避物は元のリンク先を保つ）
+HN3="$(new_home nvim-foreign)"
+mkdir -p "$HN3/.config"
+ln -s "$WORK/unrelated-nvim" "$HN3/.config/nvim"
+run_setup "$HN3" install
+assert_eq "T-N3 install は成功する" "0" "$(last_rc)"
+assert_eq "T-N3 ~/.config/nvim は repo の nvim/ に張り替わる" "$NVIM_SRC" "$(readlink "$HN3/.config/nvim" 2>/dev/null)"
+assert_eq "T-N3 退避したリンクは元の先を指す" "$WORK/unrelated-nvim" \
+    "$(readlink "$(find "$HN3/.config" -maxdepth 1 -name 'nvim.pre-install.*' | head -1)" 2>/dev/null)"
+
+# T-N1 [XDG]: XDG_CONFIG_HOME は見ない（HOME だけを差し替えるテストが本物の設定に触れないため）
+HN7="$(new_home nvim-xdg)"
+mkdir -p "$HN7/xdg"
+XDG_CONFIG_HOME="$HN7/xdg" run_setup "$HN7" install
+assert_eq "T-N1 [XDG] XDG_CONFIG_HOME があっても install は成功する" "0" "$(last_rc)"
+assert_eq "T-N1 [XDG] XDG_CONFIG_HOME の下に nvim を作らない" "no" "$([[ -e "$HN7/xdg/nvim" || -L "$HN7/xdg/nvim" ]] && echo yes || echo no)"
+assert_eq "T-N1 [XDG] リンクは \$HOME/.config/nvim に置く" "$NVIM_SRC" "$(readlink "$HN7/.config/nvim" 2>/dev/null)"
+
+# T-N5: nvim/ が無い repo（mini repo は nvim/ を写さない）では警告して続行し、リンクを作らない
+MN5="$(make_mini_repo nvim-absent)"
+HN5="$(new_home nvim-absent)"
+run_setup_with "$MN5/setup.sh" "$HN5" install
+assert_eq "T-N5 nvim/ が無くても install は成功する" "0" "$(last_rc)"
+assert_contains "T-N5 nvim/ が無いことを警告する" "$(last_out)" "$MN5/nvim"
+assert_eq "T-N5 ~/.config/nvim を作らない" "no" "$([[ -e "$HN5/.config/nvim" || -L "$HN5/.config/nvim" ]] && echo yes || echo no)"
+
+# T-N1 [段]: nvim の段が失敗しても install は止まらず、段の失敗として一覧に出る（~/.config が通常ファイル）
+HST="$(new_home stage-nvim)"; mkdir -p "$HST/.codex"
+: >"$HST/.config"
+stage_case "~/.config が通常ファイル" "$SETUP" "$HST" "Neovim"
+
+# T-N6: status の [Neovim] 節の 5 状態（install・uninstall と同じ判定の式）
+HN6="$(new_home nvim-status-none)"
+run_setup "$HN6" status
+assert_contains "T-N6 未インストールの nvim を示す" "$(last_out)" "nvim (未インストール)"
+HN6="$(new_home nvim-status-foreign)"; mkdir -p "$HN6/.config"
+ln -s "$WORK/unrelated-nvim" "$HN6/.config/nvim"
+run_setup "$HN6" status
+assert_contains "T-N6 他所を指すリンクは「別のリンク先」と示す" "$(last_out)" "nvim (別のリンク先: $WORK/unrelated-nvim)"
+assert_not_contains "T-N6 他所を指すリンクを「リンク済み」と示さない" "$(last_out)" "nvim (リンク済み)"
+HN6="$(new_home nvim-status-real)"; mkdir -p "$HN6/.config/nvim"
+run_setup "$HN6" status
+assert_contains "T-N6 実ディレクトリは「実ディレクトリが存在」と示す" "$(last_out)" "nvim (実ディレクトリが存在)"
+HN6="$(new_home nvim-status-file)"; mkdir -p "$HN6/.config"
+echo "user-owned" >"$HN6/.config/nvim"
+run_setup "$HN6" status
+assert_contains "T-N6 実ファイルは「実ファイルが存在」と示す（未インストールと出さない）" "$(last_out)" "nvim (実ファイルが存在)"
+
+# T-N12: status はリンクが合っていても、リンク先に設定（init.lua）が無ければ ✓ にしない
+# （メインチェックアウトが nvim/ の無い branch にいる間、nvim は設定なしで黙って起動する）
+MN12="$(make_mini_repo nvim-noinit)"; mkdir -p "$MN12/nvim"
+HN12="$(new_home nvim-noinit)"
+run_setup_with "$MN12/setup.sh" "$HN12" install
+assert_eq "前提: T-N12 のリンクは mini repo の nvim/ を指す" "$MN12/nvim" "$(readlink "$HN12/.config/nvim" 2>/dev/null)"
+run_setup_with "$MN12/setup.sh" "$HN12" status
+assert_contains "T-N12 init.lua が無ければ ! を出す" "$(last_out)" "nvim (リンク済みだが先に init.lua が無い)"
+assert_not_contains "T-N12 init.lua が無ければ「リンク済み」の ✓ を出さない" "$(last_out)" "nvim (リンク済み)"
+echo "-- init" >"$MN12/nvim/init.lua"
+run_setup_with "$MN12/setup.sh" "$HN12" status
+assert_contains "T-N12 init.lua があれば ✓ を出す" "$(last_out)" "nvim (リンク済み)"
+mv "$MN12/nvim" "$MN12/nvim.away"
+run_setup_with "$MN12/setup.sh" "$HN12" status
+assert_contains "T-N12 リンク先が無ければ ! を出す" "$(last_out)" "nvim (リンク済みだが先に init.lua が無い)"
+mv "$MN12/nvim.away" "$MN12/nvim"
+
+# T-N13: 末尾スラッシュなど表記の違うリンクも、install・status・uninstall の 3 か所で自分のリンクとみなす
+# （文字列で比べると「他所へのリンク」として退避が溜まり、status は「別のリンク先」、uninstall は消さない）
+MN13="$(make_mini_repo nvim-slash)"; mkdir -p "$MN13/nvim"; echo "-- init" >"$MN13/nvim/init.lua"
+# 入口ごとに別の HOME で始める（install が先に張り直すと、status と uninstall は正しい表記しか見ない）
+for entry in install status uninstall; do
+    HN13="$(new_home "nvim-slash-$entry")"; mkdir -p "$HN13/.config"
+    ln -s "$MN13/nvim/" "$HN13/.config/nvim"
+    run_setup_with "$MN13/setup.sh" "$HN13" "$entry"
+    case "$entry" in
+        install)
+            assert_eq "T-N13 表記の違う自分のリンクは退避しない" "0" "$(find "$HN13/.config" -maxdepth 1 -name 'nvim.pre-install.*' | wc -l | tr -d ' ')"
+            assert_contains "T-N13 表記の違う自分のリンクは「既にリンク済み」" "$(last_out)" "nvim (既にリンク済み)" ;;
+        status)
+            assert_contains "T-N13 status は表記の違う自分のリンクを ✓ にする" "$(last_out)" "nvim (リンク済み)" ;;
+        uninstall)
+            assert_eq "T-N13 uninstall は表記の違う自分のリンクを消す" "no" "$([[ -L "$HN13/.config/nvim" ]] && echo yes || echo no)" ;;
+    esac
+done
+
+# T-N7: uninstall は自分のリンクだけを消し、退避は残す（HN2 は最後の [file] のケース。退避とリンクがある）
+assert_eq "前提: T-N7 の HOME に nvim のリンクがある" "$NVIM_SRC" "$(readlink "$HN2/.config/nvim" 2>/dev/null)"
+run_setup "$HN2" uninstall
+assert_eq "T-N7 uninstall は成功する" "0" "$(last_rc)"
+assert_eq "T-N7 自分の nvim/ を指すリンクは消える" "no" "$([[ -L "$HN2/.config/nvim" || -e "$HN2/.config/nvim" ]] && echo yes || echo no)"
+assert_eq "T-N7 nvim.pre-install.* は残る" "1" "$(find "$HN2/.config" -maxdepth 1 -name 'nvim.pre-install.*' | wc -l | tr -d ' ')"
+assert_contains "T-N7 削除の件数の行に Neovim の件数が出る" "$(last_out)" "Neovim: 1 件"
+assert_contains "T-N7 退避があれば戻し方を添える" "$(last_out)" "戻すなら: mv $HN2/.config/nvim.pre-install."
+
+# T-N8: 他所へのリンクと実ディレクトリは uninstall で消さない
+HN8="$(new_home nvim-un-foreign)"; mkdir -p "$HN8/.config"
+ln -s "$WORK/unrelated-nvim" "$HN8/.config/nvim"
+run_setup "$HN8" uninstall
+assert_eq "T-N8 他所を指すリンクは残る" "$WORK/unrelated-nvim" "$(readlink "$HN8/.config/nvim" 2>/dev/null)"
+assert_contains "T-N8 他所を指すリンクを残したことを出す" "$(last_out)" "スキップ: nvim (別のリンク先: $WORK/unrelated-nvim)"
+HN8="$(new_home nvim-un-real)"; mkdir -p "$HN8/.config/nvim"
+echo "user-owned" >"$HN8/.config/nvim/init.lua"
+run_setup "$HN8" uninstall
+assert_eq "T-N8 実ディレクトリは中身ごと残る" "user-owned" "$(cat "$HN8/.config/nvim/init.lua" 2>/dev/null)"
+
+# T-N9 / T-N10: ~/.codex のある HOME。nvim は共通の段で扱い、Codex の段は触れない
+HN9="$(make_codex_home nvim)"
+run_setup "$HN9" install
+assert_eq "前提: T-N9 の install は成功する" "0" "$(last_rc)"
+run_setup "$HN9" status
+assert_contains "T-N9 [Codex] 節に共通のリンクを使う旨の 1 行が出る" \
+    "$(last_out | sed -n '/\[Codex\]/,$p')" "nvim: [Neovim] 節の共通のリンクを使う（Codex の外部エディタも nvim）"
+run_setup "$HN9" uninstall
+assert_eq "T-N10 uninstall は成功する" "0" "$(last_rc)"
+assert_eq "T-N10 nvim のリンクは消える" "no" "$([[ -L "$HN9/.config/nvim" ]] && echo yes || echo no)"
+assert_eq "T-N10 nvim の削除は共通の段で 1 回だけ（Neovim: 1 件）" "1" "$(last_out | grep -c 'Neovim: 1 件')"
+assert_not_contains "T-N10 Codex の段の件数の行に nvim を出さない" "$(last_out | grep 'Codex 側の削除完了')" "nvim"
+assert_not_contains "T-N10 退避が無ければ戻し方を出さない" "$(last_out)" "戻すなら"
+
+# T-N11（regression）: nvim のリンクを消せなくても uninstall を最後まで続ける
+# （rm が set -e で uninstall を終わらせ、共通規約ブロックと Codex 側の撤去が飛んだ）
+HN11="$(new_home nvim-un-readonly)"
+run_setup "$HN11" install
+assert_eq "前提: T-N11 の install は成功する" "0" "$(last_rc)"
+assert_eq "前提: T-N11 の CLAUDE.md に共通規約ブロックがある" "1" "$(grep -cF "$GB" "$HN11/.claude/CLAUDE.md" 2>/dev/null)"
+chmod 555 "$HN11/.config"
+run_setup "$HN11" uninstall
+chmod 755 "$HN11/.config"
+assert_contains "T-N11 nvim のリンクを消せないことを出す" "$(last_out)" "✗ nvim のリンクを削除できません: $HN11/.config/nvim"
+assert_eq "T-N11 共通規約ブロックの撤去まで進む" "0" "$(grep -cF "$GB" "$HN11/.claude/CLAUDE.md" 2>/dev/null)"
+assert_contains "T-N11 削除の件数の行まで進む" "$(last_out)" "削除完了"
+assert_contains "T-N11 消せなかった nvim は件数に入れない" "$(last_out)" "Neovim: 0 件"
 
 echo ""
 echo "$pass_count passed / $fail_count failed"

@@ -7,6 +7,7 @@
 # このスクリプトは、リポジトリ内の Skills, Agents (subagent 定義), settings.json を ~/.claude/ 配下に
 # シンボリックリンクとして、Scripts を実体コピーとして配置します。
 # これにより、すべてのプロジェクトで共通して使用できるようになります。
+# nvim/ は ~/.config/nvim へ symlink します（Claude と Codex の共通の段。Codex の段では張りません）。
 #
 # ~/.codex が在れば、Codex にも同じ資産を展開します（無ければ省略。~/.codex は作りません）:
 #   - skills  ~/.agents/skills/<name> への symlink（衝突する他者の実体・リンクは触らず warn）
@@ -205,6 +206,47 @@ install_settings() {
     log_success "  ✓ settings.json → $source_file"
 }
 
+# ~/.config/nvim が自分の nvim/ を指すリンクか。install・uninstall・status が同じ判定を使う。
+# 表記の違い（末尾スラッシュ・相対パス）は解決したパスで比べる。先が無い（dangling）ときは解決できないので、
+# readlink の文字列で比べる
+nvim_link_is_ours() {  # $1=リンク, $2=自分の nvim/
+    [[ -L "$1" ]] || return 1
+    [[ "$(readlink "$1")" == "$2" ]] && return 0
+    local resolved ours
+    resolved="$(cd -P "$1" 2>/dev/null && pwd -P)" || return 1
+    ours="$(cd -P "$2" 2>/dev/null && pwd -P)" || return 1
+    [[ "$resolved" == "$ours" ]]
+}
+
+# Neovim の設定のインストール（~/.config/nvim を repo 内 nvim/ への symlink にする）。
+# Claude と Codex の共通の段で、Codex の段では張らない（同じパスを 2 つの段が扱うと、片方の uninstall が
+# もう片方の状態を壊す）。XDG_CONFIG_HOME は見ない: HOME だけを差し替えるテストが本物の設定に触れないため
+install_nvim() {
+    log_info "Neovim の設定をインストールしています..."
+    local source_dir="${SCRIPT_DIR}/nvim"
+    local target_link="${HOME}/.config/nvim"
+
+    if [[ ! -d "$source_dir" ]]; then
+        log_warning "  ! ソースディレクトリが存在しません: $source_dir"
+        return 0
+    fi
+
+    mkdir -p "${HOME}/.config"
+    if nvim_link_is_ours "$target_link" "$source_dir"; then
+        log_success "  ✓ nvim (既にリンク済み)"
+        return 0
+    fi
+    # 実ディレクトリ・実ファイル・他所へのリンクは先に退避する。replace_link の mv -fh は、
+    # 置き換え先が実ディレクトリだとその中へ移すため
+    if [[ -L "$target_link" || -e "$target_link" ]]; then
+        local backup_path="${target_link}.pre-install.$(date +%Y%m%d%H%M%S)-$$"
+        mv "$target_link" "$backup_path"
+        log_warning "  ! 既存をバックアップ: $backup_path"
+    fi
+    replace_link "$source_dir" "$target_link"
+    log_success "  ✓ nvim → $source_dir"
+}
+
 # install 元が linked worktree なら警告する。
 #
 # settings.json と skills は symlink のままなので、install 元のチェックアウトを全プロジェクトの
@@ -363,7 +405,7 @@ warn_if_worktree() {
     git_common=$(git -C "$SCRIPT_DIR" rev-parse --git-common-dir 2>/dev/null) || return 0
     if [[ "$git_dir" != "$git_common" ]]; then
         log_warning "  ! linked worktree から実行しています: ${SCRIPT_DIR}"
-        log_warning "    settings.json / skills の symlink がこの worktree を指すため、削除すると設定が失われます"
+        log_warning "    settings.json / skills / nvim の symlink がこの worktree を指すため、削除すると設定が失われます"
         log_warning "    可能ならメインチェックアウトから install してください"
     fi
 }
@@ -1178,6 +1220,8 @@ show_codex_status() {
     else
         echo -e "  ${YELLOW}!${NC} hooks.json: 無いか、jq が使えない"
     fi
+    # リンクの状態の判定は [Neovim] 節に任せる（同じパスを 2 か所で判定しない）
+    echo -e "  ${BLUE}·${NC} nvim: [Neovim] 節の共通のリンクを使う（Codex の外部エディタも nvim）"
 }
 
 # アンインストール
@@ -1257,13 +1301,35 @@ uninstall() {
         fi
     fi
 
+    # Neovim の設定の削除（共通の段。uninstall_codex は触れない）。自分の nvim/ を指すリンクだけを消す
+    local nvim_source="${SCRIPT_DIR}/nvim"
+    local nvim_target="${HOME}/.config/nvim"
+    local nvim_count=0
+    if nvim_link_is_ours "$nvim_target" "$nvim_source"; then
+        # set -e の下で rm が失敗すると uninstall がここで終わり、共通規約ブロックと Codex 側の撤去が飛ぶ
+        if rm "$nvim_target"; then
+            local nvim_backup
+            nvim_backup="$(ls -d "${nvim_target}".pre-install.* 2>/dev/null | tail -1 || true)"
+            if [[ -n "$nvim_backup" ]]; then
+                log_success "  ✓ 削除: nvim (バックアップは残置。戻すなら: mv $nvim_backup $nvim_target)"
+            else
+                log_success "  ✓ 削除: nvim"
+            fi
+            ((nvim_count++)) || true
+        else
+            log_error "  ✗ nvim のリンクを削除できません: $nvim_target"
+        fi
+    elif [[ -L "$nvim_target" ]]; then
+        log_info "  - スキップ: nvim (別のリンク先: $(readlink "$nvim_target"))"
+    fi
+
     # 共通規約ブロックの除去。ユーザーがブロック外に書いた内容には触れない
     uninstall_marker_block "CLAUDE.md の共通規約ブロック" "${CLAUDE_DIR}/CLAUDE.md" "$GLOBAL_RULES_BEGIN" "$GLOBAL_RULES_END"
 
     # Codex 側（自分が置いたものだけ）
     uninstall_codex
 
-    log_info "削除完了 - Scripts: ${scripts_count} 件, Skills: ${skills_count} 件, Commands: ${commands_count} 件, Agents: ${agents_count} 件, Settings: ${settings_count} 件"
+    log_info "削除完了 - Scripts: ${scripts_count} 件, Skills: ${skills_count} 件, Commands: ${commands_count} 件, Agents: ${agents_count} 件, Settings: ${settings_count} 件, Neovim: ${nvim_count} 件"
 }
 
 # 状態表示
@@ -1288,6 +1354,28 @@ show_status() {
         echo -e "  ${YELLOW}!${NC} settings.json (実ファイルが存在)"
     else
         echo -e "  ${RED}✗${NC} settings.json (未インストール)"
+    fi
+
+    echo ""
+    local nvim_source="${SCRIPT_DIR}/nvim"
+    local nvim_target="${HOME}/.config/nvim"
+    echo -e "${BLUE}[Neovim]${NC} (${nvim_target})"
+    if [[ -L "$nvim_target" ]]; then
+        local nvim_link=$(readlink "$nvim_target")
+        if nvim_link_is_ours "$nvim_target" "$nvim_source" && [[ -f "$nvim_target/init.lua" ]]; then
+            echo -e "  ${GREEN}✓${NC} nvim (リンク済み)"
+        elif nvim_link_is_ours "$nvim_target" "$nvim_source"; then
+            # メインチェックアウトが nvim/ の無い branch にいる間は、リンクが合っていても設定が無い
+            echo -e "  ${YELLOW}!${NC} nvim (リンク済みだが先に init.lua が無い)"
+        else
+            echo -e "  ${YELLOW}!${NC} nvim (別のリンク先: $nvim_link)"
+        fi
+    elif [[ -d "$nvim_target" ]]; then
+        echo -e "  ${YELLOW}!${NC} nvim (実ディレクトリが存在)"
+    elif [[ -e "$nvim_target" ]]; then
+        echo -e "  ${YELLOW}!${NC} nvim (実ファイルが存在)"
+    else
+        echo -e "  ${RED}✗${NC} nvim (未インストール)"
     fi
 
     echo ""
@@ -1463,6 +1551,8 @@ main() {
             install_md_links "Agents" "$REPO_AGENTS_DIR" "$CLAUDE_AGENTS_DIR"
             echo ""
             install_settings
+            echo ""
+            run_stage "Neovim" install_nvim
             echo ""
             # CLAUDE.md の段で止まると install_codex に到達しないので、段として走らせる
             run_stage "Claude の共通規約" install_global_rules
