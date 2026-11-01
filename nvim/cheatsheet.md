@@ -33,6 +33,20 @@
 | `<leader>gl` | log（`--oneline`） |
 | `<leader>gh` | 今のファイルの履歴（`:0Gclog`。quickfix に出る） |
 
+### Claude Code（claudecode.nvim）
+
+Orca の別ペインにいる Claude Code に、ファイルや選択範囲を渡す。先に Claude 側で `/ide` を打って接続しておく。
+
+| キー | 動作 |
+|------|------|
+| `<leader>a` | グループ（押して待つと which-key に一覧が出る） |
+| visual の `<leader>as` | 選択範囲を Claude に送る |
+| `<leader>ab` | 今のバッファを Claude に渡す |
+| neo-tree の中の `<leader>as` | カーソル下のファイルを Claude に渡す |
+| `<leader>ai` | 接続の状態 |
+
+atlas の差分のタブでは、未接続のまま送ると何も送らずに警告だけ出る（そのタブの cwd では参照のパスがずれるため）。
+
 ### PR のレビュー（atlas）
 
 | キー | 動作 |
