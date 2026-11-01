@@ -15,6 +15,7 @@
 | `<C-d>` / `<C-u>` | 半画面スクロール（カーソルを中央に） |
 | normal の `<Esc>` | 検索のハイライトを消す |
 | `<leader>cf` | 整形（conform）。**保存時の自動整形は無い** |
+| `<leader>prismad` | カーソル下の TS の型名から `.prisma` の enum / model / type / view の定義へ飛ぶ（名前で探す。複数なら quickfix。差分の中では新しいタブに開く） |
 | `<leader>tp` / `<leader>tr` / `<leader>tc` / `<leader>tl` | `tmp/plan.md` / `research.md` / `context.md` / `lessons.md`（廃止予定）を開く |
 
 ### コマンドの短縮形（`:` の直後に打ったときだけ展開する）

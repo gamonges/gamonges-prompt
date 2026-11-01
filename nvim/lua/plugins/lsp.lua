@@ -71,7 +71,7 @@ return {
         end,
       })
 
-      vim.lsp.enable({ "ts_ls", "tsc", "lua_ls", "bashls", "marksman", "basedpyright", "ruff", "oxlint", "biome" })
+      vim.lsp.enable({ "ts_ls", "tsc", "lua_ls", "bashls", "marksman", "basedpyright", "ruff", "oxlint", "biome", "prismals" })
     end,
   },
 

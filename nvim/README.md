@@ -20,6 +20,7 @@ LSP サーバとフォーマッタは mise でグローバルに入れる（mise
 | Shell | bashls | shfmt・shellcheck（bashls が呼ぶ） | `npm:bash-language-server`・`shfmt`・`shellcheck` |
 | Markdown | marksman | prettier | `marksman`・`npm:prettier` |
 | Python | basedpyright | ruff（LSP と整形） | `npm:basedpyright`・`ruff` |
+| Prisma | prismals | prismals（`<leader>cf` が LSP の整形に倒れる） | `npm:@prisma/language-server` |
 
 ```bash
 mise use -g npm:typescript-language-server npm:typescript lua-language-server stylua \

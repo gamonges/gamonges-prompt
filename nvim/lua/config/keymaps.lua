@@ -33,6 +33,44 @@ end
 cabbrev("mp", "MarkdownPreviewToggle")
 cabbrev("at", "Atlas")
 
+-- Jump from a TS type name to its Prisma schema definition (enum / model / type / view).
+-- No LSP links TS to .prisma; the generated client reuses the schema's names, so match by name.
+-- Search tracked files with git grep: the generated client is gitignored and absent in atlas's temp worktree.
+local function prisma_definition()
+  local name = vim.fn.expand("<cword>")
+  if not name:match("^[%a_][%w_]*$") then
+    vim.notify("カーソルの下に名前がありません", vim.log.levels.WARN)
+    return
+  end
+  -- atlas's diff buffers are not files; fall back to cwd (the diff tab is tcd'd to the temp worktree)
+  local root = vim.fs.root(0, ".git") or vim.fs.root(vim.fn.getcwd(), ".git")
+  if not root then
+    vim.notify("git の repo の外です", vim.log.levels.WARN)
+    return
+  end
+  local pattern = "^[[:space:]]*(enum|model|type|view)[[:space:]]+" .. name .. "[[:space:]]*\\{"
+  local res = vim.system({ "git", "grep", "-n", "--column", "-E", pattern, "--", "*.prisma" }, { cwd = root, text = true }):wait()
+  local items = {}
+  for line in (res.stdout or ""):gmatch("[^\n]+") do
+    local file, lnum, col, text = line:match("^(.-):(%d+):(%d+):(.*)$")
+    if file then
+      table.insert(items, { filename = vim.fs.joinpath(root, file), lnum = tonumber(lnum), col = tonumber(col), text = text })
+    end
+  end
+  if #items == 0 then
+    vim.notify(("Prisma に %s の定義はありません"):format(name), vim.log.levels.WARN)
+  elseif #items == 1 then
+    vim.cmd("normal! m'")
+    -- Don't replace a special buffer (atlas's diff) in place; open the schema in a new tab like atlas's gf
+    vim.cmd((vim.bo.buftype == "" and "edit " or "tabedit ") .. vim.fn.fnameescape(items[1].filename))
+    vim.api.nvim_win_set_cursor(0, { items[1].lnum, items[1].col - 1 })
+  else
+    vim.fn.setqflist({}, " ", { title = "Prisma: " .. name, items = items })
+    vim.cmd("copen")
+  end
+end
+map("n", "<leader>prismad", prisma_definition, { desc = "Go to Prisma definition" })
+
 -- Key cheatsheet (cheatsheet.md in this config)
 map("n", "<leader>?", function()
   require("config.cheatsheet").toggle()

@@ -78,6 +78,7 @@ return {
         "typescript",
         "tsx",
         "json",
+        "prisma",
       })
 
       -- Enable treesitter highlighting for all supported filetypes
