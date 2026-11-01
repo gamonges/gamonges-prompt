@@ -17,6 +17,13 @@
 | `<leader>cf` | 整形（conform）。**保存時の自動整形は無い** |
 | `<leader>tp` / `<leader>tr` / `<leader>tc` / `<leader>tl` | `tmp/plan.md` / `research.md` / `context.md` / `lessons.md`（廃止予定）を開く |
 
+### コマンドの短縮形（`:` の直後に打ったときだけ展開する）
+
+| 打つ | 展開 |
+|------|------|
+| `:mp` | `:MarkdownPreviewToggle` |
+| `:at` | `:Atlas`（`:at review` のように引数も続けられる） |
+
 ### Git（fugitive）
 
 | キー | 動作 |

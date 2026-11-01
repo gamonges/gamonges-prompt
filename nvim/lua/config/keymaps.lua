@@ -23,6 +23,16 @@ map("n", "<leader>tr", "<cmd>edit tmp/research.md<cr>", { desc = "Open research"
 map("n", "<leader>tl", "<cmd>edit tmp/lessons.md<cr>", { desc = "Open lessons" })
 map("n", "<leader>tc", "<cmd>edit tmp/context.md<cr>", { desc = "Open context" })
 
+-- Command-line abbreviations (user commands must start uppercase, so short lowercase names need cabbrev).
+-- Expand only when the whole ":" cmdline is the abbreviation; otherwise "/at" or ":echo at" would expand too.
+local function cabbrev(lhs, rhs)
+  map("ca", lhs, function()
+    return (vim.fn.getcmdtype() == ":" and vim.fn.getcmdline() == lhs) and rhs or lhs
+  end, { expr = true, desc = ":" .. lhs .. " -> :" .. rhs })
+end
+cabbrev("mp", "MarkdownPreviewToggle")
+cabbrev("at", "Atlas")
+
 -- Key cheatsheet (cheatsheet.md in this config)
 map("n", "<leader>?", function()
   require("config.cheatsheet").toggle()
