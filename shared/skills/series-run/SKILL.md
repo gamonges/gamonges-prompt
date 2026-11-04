@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 > **`/series-run` と明示して起動する。** 自然言語からは起動しない。
 
-1 つの対応を複数の PR に分ける（シリーズ）とき、横断計画の LGTM の後から全段の完了までを 1 つのセッション（coordinator）で監督する。初動で series-init の手順を行って worktree と `series.md` を用意し、作業単位（worktree）ごとに工程別の worker（design → implement → review → fix → recheck）を起動し、push の後の CI と bot の結果を待って（checks）、worker からの質問と完了報告をここに集める。ユーザーには、仕様・範囲の判断と、ユーザー専用の操作だけを回す。
+1 つの対応を複数の PR に分ける（シリーズ）とき、横断計画の LGTM の後から全段の完了までを 1 つのセッション（coordinator）で監督する。初動で series-init の手順を行って worktree と `series.md` を用意し、作業単位（worktree）ごとに工程別の worker（design → implement → review → fix → recheck）を起動し、push の後の CI の結果を待って bot の既存の指摘を拾い（checks）、worker からの質問と完了報告をここに集める。ユーザーには、仕様・範囲の判断と、ユーザー専用の操作だけを回す。
 
 本文はツールに依存しない。起動・待ち合わせ・応答などは adapter の操作名で書き、ツールのコマンドは adapter のファイルにだけ置く。
 
@@ -204,6 +204,6 @@ review の工程の完了の証拠を確かめたら（`review: 済み`）、coo
 - 横断計画を書き換えない
 - worker の worktree のソースを coordinator が直さない。例外は `tmp/fixes.md`（5 の仕分けと、4 の「`完了` にする前」から fix に入るとき）・`tmp/checks.md`・`tmp/meaning-card.md`・`tmp/meaning-card.html`・`.claude/settings.local.json` の `advisorModel` キーだけ（段の型の「checks の工程」「worker のモデルと advisor」・`./reference/meaning-card.md`）
 - coordinator は push しない（push は implement・fix の worker だけ）
-- 外部への操作は、`## 運用の約束` に書いた bot の起動のコメントと `workflow_dispatch` だけを coordinator が行う（段の型の「checks の工程」の 1）。ほかの PR へのコメント・レビューはしない
+- 外部への操作は、`## 運用の約束` に書いた `workflow_dispatch` だけを coordinator が行う（段の型の「checks の工程」の 1）。bot の起動を含め、PR へのコメント・レビュー・review thread への返信・resolve はしない（bot は返信でも課金される。返信は人が `/review-comments` で行う）
 - coordinator は `/create-pr` の手順を代わりに行わない（ユーザーが意図して打つという関門を残す）
 - PR 本文は、4 の完了報告の 3 で coordinator が書くと仕分けた範囲だけを書く

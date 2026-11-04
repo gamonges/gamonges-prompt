@@ -33,6 +33,7 @@ coordinator が worker を起動するときに渡す指示（spec）の雛形�
 - `tmp/` はコミットしない
 - `git checkout`・`git restore` でファイルを戻さない（権限確認で止まる。戻すなら patch で退避する）
 - `series.md` を書かない（書き手の口は決まっている）
+- PR にコメントしない。review thread（bot・人とも）への返信・resolve もしない（Greptile などの bot は返信でも課金される。返信は人が `/review-comments` で行う）
 - push は、Change に push の手順があるときだけ、その手順で行う
 - <状態ファイルの `## 運用の約束` から、リポジトリ固有の制約・環境の準備・検査のコマンド（push の前に回す。「要らない」ならその旨）を写す>
 

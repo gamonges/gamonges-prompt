@@ -74,33 +74,33 @@ worker を起動する直前（工程の再試行を含む）に、その工程�
 
 ## checks の工程
 
-push の後に、CI と bot の結果を coordinator が待つ。implement の後（`pr: 済み` の後）と fix の後（`fix: 済み` の後）の両方に入り、判定はこの節 1 か所に置く。worker を起動しないが時間がかかるので、状態は `checks: 確認中` を持つ。
+push の後に、CI の結果を coordinator が待ち、bot が PR に既に付けた指摘を拾う。implement の後（`pr: 済み` の後）と fix の後（`fix: 済み` の後）の両方に入り、判定はこの節 1 か所に置く。worker を起動しないが時間がかかるので、状態は `checks: 確認中` を持つ。
 
 1. **入口**（`pr: 済み` か `fix: 済み` を確かめた時）
    - `## 工程の記録` に checks の行を足す: 起動時刻＝入口の時刻、起動時の HEAD＝`git -C <wt> rev-parse HEAD`、要約の先頭に `前: implement` か `前: fix`。作業単位を `checks: 確認中` にする
    - 前の `tmp/checks.md` があれば `tmp/checks.archived-<日時>.md` に移す（triage の fixes.md と同じ暫定。下の「工程の境目での `tmp/` の退避」）
    - `前: fix` なら意味のカードを書き直す（`./meaning-card.md`。`round: fix-<巡>`）。HTML は html-view に `--no-open` を付けて作り（開かない）、パスを状態の表と受信箱に出す。書き直しで (d)(e) が前のカードから変わったら、PR 本文の「前提」の項目とケースの動作確認の項目を、下の「PR 本文の更新」の手順で書き換える（実装に即した記述なので coordinator が書く。`/create-pr` は implement の時点のカードを写したきりのため）
-   - `## 運用の約束` に bot があれば、起動の文面を PR にコメントする（`gh pr comment <PR> --repo <段のリポジトリ> --body "<起動の文面>"`）。完了の印が空の bot は起動しない（運用の約束を埋めるまで）
+   - bot（Greptile など）を PR へのコメントで起動しない。checks は fix の巡ごとに入るので、起動すると巡の数だけ bot の課金が発生するため。bot が自動でレビューしていれば、その指摘を 3 で拾う
    - `## 運用の約束` に dispatch する workflow があれば、workflow ごとに `gh workflow run <ファイル名> --ref <ブランチ> --repo <段のリポジトリ>` を打ち、`gh api repos/<owner>/<repo>/actions/workflows/<ファイル名> --jq .name` で表示名を引いて checks の行の要約に控える（`gh pr checks` の `workflow` は表示名で、運用の約束に書くのはファイル名のため）
 2. **確かめる時**: pr の工程の 3 と同じ（出来事を 1 つ処理するたび・時間切れのたび・worker が 0 体でターンを終える前とユーザーの返事が来るたび。SKILL.md の 4）。判定が済むまで毎回 3〜4 を当てる
 3. **判定**: 次を集め、全部そろったら判定する
    - **PR のチェック**: `gh pr checks <PR> --repo <段のリポジトリ> --json name,bucket,workflow,event,link`（`--required` を付けない全件）。pending・fail でも rc=0 で JSON を返す。**チェックが 0 件のときは rc=1 で JSON を出さず、標準エラーに `no checks reported` と出す**ので、それを 0 件とする。それ以外の rc≠0 は取得の失敗で、判定せず次の確かめる時にやり直す。dispatch する workflow の表示名と同じで `event` が `pull_request` のチェックは除く（その workflow は dispatch の run を正にする）
    - **dispatch の run**: workflow ごとに `gh run list --repo <段のリポジトリ> --workflow <ファイル名> --branch <ブランチ> --event workflow_dispatch --commit <checks の行の HEAD> --json databaseId,status,conclusion`。run id を checks の行の要約に控える
-   - **bot**: 起動の後に、bot のアカウントが完了の印を持つコメントか review を付けたら届いたとみなす（受け付け・開始の通知では届いたとみなさない）。指摘は、bot の未解決の review thread のうち重大度が P0・P1 のもの（取り方は `../../review-comments/SKILL.md` の GraphQL）。人のレビュアーの thread は checks で扱わない（今までどおり `review-comments`）
+   - **bot**: 結果を待たない。判定の時点で、`## 運用の約束` の bot のアカウントの未解決の review thread のうち重大度が P0・P1 のものを指摘とする（取り方は `../../review-comments/SKILL.md` の Phase 1 の GraphQL だけを使う。同じ skill の Phase 5・6 の返信・resolve は行わない。bot への返信も bot の課金にかかるため。返信は人が `/review-comments` で行う）。thread が無ければ 0 件で、bot の分は判定を止めない。人のレビュアーの thread は checks で扱わない（今までどおり `review-comments`）
    - 判定の表: **上から当て、最初に当たった行で決める**。チェックが全件で 0 件で、dispatch する workflow も無いときは、CI の分は fail・pending が無いとみなし、bot だけで表を当てる
 
      | 状況 | 次 |
      |------|----|
      | dispatch の run が入口から 5 分たっても見つからない | ③（「dispatch し直す／飛ばす」）。ほかが pending でも先に聞く（PR のチェックは 40 分を超えて pending でありうるので、待つ行を先に置くと 5 分の判定に届かない） |
      | dispatch の対の無い workflow の必須チェック（`gh pr checks <PR> --repo <R> --required --json name,bucket,workflow`）が 1 件以上あり、その全部が `skipping` | ③（必須チェックが 0 件ならこの行に当てない。CI が動いていない。「dispatch する workflow を運用の約束に足すか／飛ばすか」） |
-     | pending のチェック・終わっていない dispatch の run・まだ見つからない dispatch の run（入口から 5 分未満）・届いていない bot がある | 待つ（下の 4 の上限まで）。まだ見つからない run をここに入れないと、5 分未満でほかが全部済んだときに最後の行に落ちる |
+     | pending のチェック・終わっていない dispatch の run・まだ見つからない dispatch の run（入口から 5 分未満）がある | 待つ（下の 4 の上限まで）。まだ見つからない run をここに入れないと、5 分未満でほかが全部済んだときに最後の行に落ちる |
      | fail のチェック・失敗した dispatch の run（必須でないものも含む）・bot の未解決の P0/P1 がある | 1 指摘 1 行で `tmp/checks.md` に書いて 5 へ |
      | 上のどれにも当たらない | `tmp/checks.md` を「指摘なし」で書いて 5 へ |
 
-4. **上限**: 入口の時刻から `## 運用の約束` の「checks の上限」（既定 45 分）を超えても pending・bot の結果が来ないなら、③で「待つ（もう 1 回の上限）／失敗として扱う／飛ばす」を聞く。この③は 1 回に 1 つだけ立てる（`未回答` の間は立て直さない）。checks の③は、作業単位を `checks: 判断待ち` にする
+4. **上限**: 入口の時刻から `## 運用の約束` の「checks の上限」（既定 45 分）を超えても pending が終わらないなら、③で「待つ（もう 1 回の上限）／失敗として扱う／飛ばす」を聞く。この③は 1 回に 1 つだけ立てる（`未回答` の間は立て直さない）。checks の③は、作業単位を `checks: 判断待ち` にする
    - checks の③の答えごとの書き方と次（どれも checks の行の要約に答えと `Q-<n>` を書く）:
      - **待つ**: `checks: 確認中` に戻し、checks の行の要約に「上限の延長: <答えた時刻>」を書く（上限はその時刻から数える）
-     - **失敗として扱う**: `tmp/checks.md` に、判明済みの指摘（表の fail の行に当たるもの）を書いたうえで、未完了のチェック・run・届いていない bot を 1 行ずつ「時間切れ」として足し、5 へ（triage・recheck の 4 が指摘として読む。判明済みの指摘を落とすと、CI の fail が入力から消える）
+     - **失敗として扱う**: `tmp/checks.md` に、判明済みの指摘（表の fail の行に当たるもの）を書いたうえで、未完了のチェック・run を 1 行ずつ「時間切れ」として足し、5 へ（triage・recheck の 4 が指摘として読む。判明済みの指摘を落とすと、CI の fail が入力から消える）
      - **飛ばす**: `tmp/checks.md` の本文を `飛ばした（③ Q-<n>）: <理由>` の 1 行にして（frontmatter の `head` は書く。再開の推定で checks をやり直さないため）5 へ。triage・recheck は指摘 0 件として読む
      - **dispatch し直す**: 入口の dispatch をやり直し、5 分の数え始めを今にする（checks の行の要約に「dispatch し直した: <時刻>」を書く）
      - **dispatch する workflow を運用の約束に足す**: ③の (ii) の答えとして `## 運用の約束` を書き直し、入口の dispatch からやり直す

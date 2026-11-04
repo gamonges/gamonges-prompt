@@ -107,7 +107,7 @@ worker を起動するたびに 1 行足し、工程が終わったらその行�
 - 環境の準備の手順（`.env` の複製・依存の install など）。要らないなら「要らない」と書く（空のままにしない）
 - 工程ごとの model と advisor（既定: implement・fix は `claude-sonnet-5-5` と advisor `opus`、review・recheck は advisor 無し）。worktree ごとの `.claude/settings.local.json` の `check-ignore` の結果も控える（`./stage-type.md` の「worker のモデルと advisor」）
 - 検査のコマンド（push の前に worker が回す。重い typecheck は書かず checks に任せる）。要らないなら「要らない」
-- bot: アカウント・起動の文面・完了の印・重大度の書式（例: `greptile-apps[bot]`・`@greptile-apps review`・本文に `greptile_summary`・`P0`/`P1`）。無ければ「無い」。完了の印が空の bot は起動しない
+- bot: アカウントと重大度の書式（例: `greptile-apps[bot]`・`P0`/`P1`）。無ければ「無い」。series-run は bot を起動せず、PR に既に付いた指摘を checks で拾うだけ（`./stage-type.md` の「checks の工程」）
 - dispatch する workflow（ドラフトでは CI が動かないリポジトリで、checks の入口に `workflow_dispatch` を打つ workflow のファイル名）。無ければ「無い」
 - checks の上限（既定 45 分。入口の時刻から数える）
 
@@ -156,7 +156,7 @@ review・recheck・外部のレビュー（bot や人）の指摘のうち、直
 |--------|------|
 | `未着手` | まだどの工程の worker も起動していない（監督の開始のときの既定） |
 | `<工程>: 作業中` | その工程の worker が動いている |
-| `checks: 確認中` | coordinator が CI と bot の結果を待っている（`./stage-type.md` の「checks の工程」。worker は動いていない） |
+| `checks: 確認中` | coordinator が CI の結果を待っている（`./stage-type.md` の「checks の工程」。worker は動いていない） |
 | `<工程>: 済み` | その工程の完了の証拠を確かめた。次は段の型の「次」（3 の起動、または pr の工程・triage の処理。`recheck: 済み` の次は `完了`。`checks: 済み` の次は、checks の行の要約の `前:` で決まる: `前: implement` なら review、`前: fix` なら recheck）を待つ |
 | `<工程>: 判断待ち` | ③の問いへのユーザーの答えを待っている。worker が問うてきた③も、coordinator が自分から回した③（2 回目の失敗・PR が open でない・push の手順で止めた・recheck の指摘など）も、その③のもとになった工程の名前で書く。工程を始める前の作業単位（`未着手`）に立てた③は、次に起動する工程の名前で書く（例: `design: 判断待ち`）。`<工程>: 済み` の後に立てた③（`完了` にする前の確認など）は、その済んだ工程の名前で書く（例: triage が 0 件の後なら `triage: 判断待ち`）。triage の③が残るときは `triage: 判断待ち`。checks の③（上限・必須チェックが全部 skipping・dispatch の run が見つからない）は `checks: 判断待ち`。`worktree 待ち` と `ユーザーの操作待ち（/create-pr）` の作業単位に立てた③は、状態を書き換えない（③の表には出す。書き換えると、その状態で行う確かめから外れる） |
 | `ユーザーの操作待ち（<操作>）` | ④の依頼を待っている。pr の工程の `/create-pr` を含む。④が 2 つ以上なら `ユーザーの操作待ち（/create-pr ほか）` のように並べる |
