@@ -2694,7 +2694,7 @@ dc() {  # $1=ラベル, $2=期待（hit|none）, $3=prompt, $4=hook の起動に
         got="unexpected: $out"
     fi
     # 「出力なし」は異常終了でも成り立つので、終了コードも見る
-    assert_equal "DC $1" "$2 rc=0" "$got rc=$rc"
+    assert_equal "$1" "$2 rc=0" "$got rc=$rc"
 }
 dc "DC-1 通知ブロックの中だけに訂正の語 → 出さない" none "$DC_NOTE_1"
 dc "DC-2 通知の無い訂正 → 出す" hit "$DC_FIX"
@@ -2704,10 +2704,17 @@ dc "DC-5 通知 2 つ・間は普通の文 → 出さない" none "$DC_NOTE_1"$'
 dc "DC-5b 通知 2 つの間の訂正 → 出す（貪欲な除去で消さない）" hit "$DC_NOTE_1"$'\n'"$DC_FIX"$'\n'"$DC_NOTE_2"
 dc "DC-6 閉じていない通知は除かない → 出す" hit $'<task-notification>\n<result>やり直す</result>'
 dc "DC-7 perl が失敗しても元の文字列で照合 → 出す" hit "$DC_NOTE_1"$'\n'"$DC_FIX" "$DC_FAKE_PERL"
+# DC-7 は訂正の語がブロックの外にあるので、ブロックを除いた文字列で照合しても通る。語をブロックの中だけに置く
+dc "DC-7b perl が失敗したら通知の中だけの語でも出す（元の文字列で照合）" hit "$DC_NOTE_1" "$DC_FAKE_PERL"
 dc "DC-8 他セッションのメッセージの中だけに訂正の語 → 出さない" none "$DC_PEER"
 dc "DC-8b 他セッションのメッセージの外の訂正 → 出す" hit "$DC_PEER"$'\n'"$DC_FIX"
 dc "DC-8c 他セッションのメッセージ 2 つ・間は普通の文 → 出さない" none "$DC_PEER"$'\n了解です\n'"$DC_PEER"
 dc "DC-8d 他セッションのメッセージ 2 つの間の訂正 → 出す（貪欲な除去で消さない）" hit "$DC_PEER"$'\n'"$DC_FIX"$'\n'"$DC_PEER"
+dc "DC-8e 閉じていない他セッションのメッセージは除かない → 出す" hit $'<agent-message from="a1">\nやり直す'
+dc "DC-8f perl が失敗したら他セッションのメッセージの中だけの語でも出す（元の文字列で照合）" hit "$DC_PEER" "$DC_FAKE_PERL"
+# 行が並ぶ長い後続にする。grep は行単位で照合するので、改行が無いと入力を最後まで読み、SIGPIPE が起きない
+DC_LONG_TAIL="$(printf 'a%.0s\n' $(seq 1 80000))"
+dc "DC-9 先頭の行の訂正 + 約 160KB の後続 → 出す（照合が入力を読み切らずに終わっても見落とさない）" hit "$DC_FIX"$'\n'"$DC_LONG_TAIL"
 
 echo
 echo "${pass_count} passed / ${fail_count} failed"

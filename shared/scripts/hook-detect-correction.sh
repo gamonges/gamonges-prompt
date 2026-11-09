@@ -34,7 +34,14 @@ MATCH_TEXT=$(printf '%s' "$PROMPT" | perl -0777 -pe 's/<task-notification>.*?<\/
 # - stop doing / wrong approach / no, that / no, you / no, the
 TRIGGER_REGEX='違うので|そうじゃない|やり直|違うので直|なぜ.*した(のですか[？\?]|ですか[？\?]|[？\?]$)|間違(っ|い)てる|間違(っ|い)ています|間違いです|間違って(いる|い|る)よ|間違いだよ|stop doing|wrong approach|no, that|no, you|no, the'
 
-if echo "$MATCH_TEXT" | grep -qE "$TRIGGER_REGEX"; then
+# hook-block-tmp-commit.sh の matches() の複製。echo | grep -q は、grep が最初のマッチで終わると書き手が
+# SIGPIPE で死に、pipefail で照合が偽になる（約 64KB を超える入力で、前半の訂正を見落とした）。
+# grep -c は入力を読み切るので SIGPIPE が起きない
+matches() {  # $1=入力, $2=拡張正規表現
+  [[ "$(printf '%s\n' "$1" | grep -cE "$2" || true)" -gt 0 ]]
+}
+
+if matches "$MATCH_TEXT" "$TRIGGER_REGEX"; then
   cat <<'EOF'
 {
   "hookSpecificOutput": {
