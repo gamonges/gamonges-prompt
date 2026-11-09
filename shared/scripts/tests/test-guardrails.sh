@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ガードレールの「挙動」のリグレッションテスト。構造の検査は verify-skills.sh が担う。
 #
-# 対象はいずれも fail-open 型の不具合（ガードが黙って開く / error が黙って消える）で、
+# 対象は主に fail-open 型の不具合（ガードが黙って開く / error が黙って消える）で、
 # 壊れても何も起きない。通常の動作確認では検知できないため、回帰を捉える手段はここしかない。
 #
 # 検査対象は repo 側の実体に固定する。install 済み（~/.claude/scripts/）を見ると、
@@ -29,6 +29,7 @@ TMP_HOOK="$REPO_ROOT/shared/scripts/hook-block-tmp-commit.sh"
 CONFIRM_HOOK="$REPO_ROOT/shared/scripts/hook-confirm-destructive-git.sh"
 CURL_HOOK="$REPO_ROOT/shared/scripts/hook-confirm-external-curl.sh"
 ENV_HOOK="$REPO_ROOT/shared/scripts/hook-guard-env-files.sh"
+CORRECTION_HOOK="$REPO_ROOT/shared/scripts/hook-detect-correction.sh"
 LINT="$REPO_ROOT/shared/skills/verify-scenario/scripts/verification-lint.mjs"
 ORPHAN="$REPO_ROOT/shared/skills/worktree-cleanup/scripts/find-orphan-collections.mjs"
 
@@ -42,7 +43,7 @@ fail_count=0
 pass() { echo -e "${GREEN}[PASS]${NC} $1"; pass_count=$((pass_count + 1)); }
 fail() { echo -e "${RED}[FAIL]${NC} $1"; fail_count=$((fail_count + 1)); }
 
-for required in "$HOOK" "$TMP_HOOK" "$LINT" "$ORPHAN"; do
+for required in "$HOOK" "$TMP_HOOK" "$CORRECTION_HOOK" "$LINT" "$ORPHAN"; do
     if [[ ! -f "$required" ]]; then
         echo "test-guardrails.sh: 検査対象が見つからない: $required" >&2
         exit 2
@@ -2666,6 +2667,54 @@ out="$(jq -nc '{tool_name:"Read",tool_input:{file_path:"README.md"}}' | PATH="$E
 rc=$?
 assert_equal "EV jq が無ければ deny" "deny" "$(decision_of "$out")"
 assert_equal "EV jq が無くても exit 0" "0" "$rc"
+
+# --- DC: 訂正検知 hook は、ユーザーの発言でないブロック（通知・他セッションのメッセージ）に反応しない ---
+# この hook は fail-open 型ではない（誤発火は余計な指示が 1 回出るだけ）が、入口が
+# verify-skills.sh --with-behavior-tests にあり回し忘れないので、ここに置く。
+# 入力の形は、実際に UserPromptSubmit に届いたもの（transcript の記録）に合わせている
+DC_NOTE_1=$'<task-notification>\n<task-id>t1</task-id>\n<status>completed</status>\n<summary>Agent "a" finished</summary>\n<result>判定をやり直す設計にした</result>\n</task-notification>'
+DC_NOTE_2=$'<task-notification>\n<task-id>t2</task-id>\n<status>completed</status>\n<result>計画をやり直した</result>\n</task-notification>'
+DC_PEER=$'Another Claude session sent a message:\n<agent-message from="a1">\n[Subagent hand-back] 修正前でも「やり直」で検知される\n</agent-message>\n\nThat "other Claude session" is an agent working inside this same session.'
+DC_FIX='違うので直して'
+DC_FAKE_PERL="$WORK/dc-fake-perl"
+mkdir -p "$DC_FAKE_PERL"
+printf '#!/bin/sh\nexit 1\n' >"$DC_FAKE_PERL/perl"
+chmod +x "$DC_FAKE_PERL/perl"
+dc() {  # $1=ラベル, $2=期待（hit|none）, $3=prompt, $4=hook の起動に足す PATH の先頭（任意）
+    local out rc got
+    # 偽の perl はこの hook の起動にだけ渡す（本ファイル自身も perl を使う）。
+    # trace を外すのは、検知のたびに hook が実 HOME のログへ追記するため
+    out="$(jq -nc --arg p "$3" '{prompt:$p}' | env -u CLAUDE_CODE_HOOK_TRACE PATH="${4:+$4:}$PATH" bash "$CORRECTION_HOOK" 2>/dev/null)"
+    rc=$?
+    if [[ -z "$out" ]]; then
+        got=none
+    elif printf '%s' "$out" | jq -e '.hookSpecificOutput.additionalContext | length > 0' >/dev/null 2>&1; then
+        got=hit
+    else
+        got="unexpected: $out"
+    fi
+    # 「出力なし」は異常終了でも成り立つので、終了コードも見る
+    assert_equal "$1" "$2 rc=0" "$got rc=$rc"
+}
+dc "DC-1 通知ブロックの中だけに訂正の語 → 出さない" none "$DC_NOTE_1"
+dc "DC-2 通知の無い訂正 → 出す" hit "$DC_FIX"
+dc "DC-3 通知の後の訂正 → 出す" hit "$DC_NOTE_1"$'\n'"$DC_FIX"
+dc "DC-4 通知の前の訂正 → 出す" hit "$DC_FIX"$'\n'"$DC_NOTE_1"
+dc "DC-5 通知 2 つ・間は普通の文 → 出さない" none "$DC_NOTE_1"$'\n了解です\n'"$DC_NOTE_2"
+dc "DC-5b 通知 2 つの間の訂正 → 出す（貪欲な除去で消さない）" hit "$DC_NOTE_1"$'\n'"$DC_FIX"$'\n'"$DC_NOTE_2"
+dc "DC-6 閉じていない通知は除かない → 出す" hit $'<task-notification>\n<result>やり直す</result>'
+dc "DC-7 perl が失敗しても元の文字列で照合 → 出す" hit "$DC_NOTE_1"$'\n'"$DC_FIX" "$DC_FAKE_PERL"
+# DC-7 は訂正の語がブロックの外にあるので、ブロックを除いた文字列で照合しても通る。語をブロックの中だけに置く
+dc "DC-7b perl が失敗したら通知の中だけの語でも出す（元の文字列で照合）" hit "$DC_NOTE_1" "$DC_FAKE_PERL"
+dc "DC-8 他セッションのメッセージの中だけに訂正の語 → 出さない" none "$DC_PEER"
+dc "DC-8b 他セッションのメッセージの外の訂正 → 出す" hit "$DC_PEER"$'\n'"$DC_FIX"
+dc "DC-8c 他セッションのメッセージ 2 つ・間は普通の文 → 出さない" none "$DC_PEER"$'\n了解です\n'"$DC_PEER"
+dc "DC-8d 他セッションのメッセージ 2 つの間の訂正 → 出す（貪欲な除去で消さない）" hit "$DC_PEER"$'\n'"$DC_FIX"$'\n'"$DC_PEER"
+dc "DC-8e 閉じていない他セッションのメッセージは除かない → 出す" hit $'<agent-message from="a1">\nやり直す'
+dc "DC-8f perl が失敗したら他セッションのメッセージの中だけの語でも出す（元の文字列で照合）" hit "$DC_PEER" "$DC_FAKE_PERL"
+# 行が並ぶ長い後続にする。grep は行単位で照合するので、改行が無いと入力を最後まで読み、SIGPIPE が起きない
+DC_LONG_TAIL="$(printf 'a%.0s\n' $(seq 1 80000))"
+dc "DC-9 先頭の行の訂正 + 約 160KB の後続 → 出す（照合が入力を読み切らずに終わっても見落とさない）" hit "$DC_FIX"$'\n'"$DC_LONG_TAIL"
 
 echo
 echo "${pass_count} passed / ${fail_count} failed"

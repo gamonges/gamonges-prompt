@@ -172,6 +172,87 @@ status: stable
 
 `gh pr checks` 実行不可（gh 未認証等）または空配列の場合は `_ci-failures.md` を作成しないだけで処理は続行する（CI 失敗未検出として扱う）。
 
+### Phase 1.7: Static Scan
+
+リポジトリが ast-grep の規則（`sgconfig.yml`）を持つときだけ、差分のファイルにかける。規則はリポジトリが持ち、ここは実行と受け渡しだけを行う。どの分岐でも結果を `$static_scan` に 1 行で残し、Phase 2.5 で `_overview.md` に書く（黙って何もしない分岐を作らない）。ブロックの最後に出力する 1 行が `$static_scan` の値なので、それを控えて Phase 2.5 で使う（別の Bash 呼び出しではシェル変数が残らない。`base_branch` も同じなので、Phase 1 の値をこの呼び出しの中で代入してから実行する。Phase 1.7 を流し直すと、前回の結果を消してから作る）。
+
+```bash
+mkdir -p tmp/review
+# 前回の結果を消す。残すと、ヒットの無い今回の実行でも古いヒットが今回の結果として渡る
+rm -f tmp/review/_static-scan.md tmp/review/_static-scan.rows tmp/review/_static-scan.err tmp/review/_static-scan.paths
+root=$(git rev-parse --show-toplevel)
+# 判定は先に当たったもので止める
+if [ ! -f "$root/sgconfig.yml" ]; then
+  static_scan="規則なし（sgconfig.yml が無い）"
+elif ! command -v ast-grep >/dev/null 2>&1; then
+  # xargs に起動させてからでは、stdout が空の「失敗」と区別できない
+  static_scan="未導入（ast-grep が無い）"
+elif [ -z "${base_branch:-}" ]; then
+  # 空のままだと差分は HEAD...HEAD になり、「対象なし」に化ける
+  static_scan="失敗（base_branch が空。Phase 1 の取得をやり直す）"
+elif ! git diff --name-only --diff-filter=d -z "${base_branch}...HEAD" > tmp/review/_static-scan.paths 2> tmp/review/_static-scan.err; then
+  static_scan="失敗（$(head -n 1 tmp/review/_static-scan.err)）"
+else
+  if [ ! -s tmp/review/_static-scan.paths ]; then
+    # GNU xargs は空入力でも 1 回起動し、パスの無い scan は $root 全体を走査する
+    static_scan="対象なし（差分に検査対象のファイルが無い）"
+  else
+    # --config を明示するのは、ast-grep が親ディレクトリへ設定を探し、repo の外の設定を拾うため。
+    # `--` は、差分のファイル名をオプションとして読ませないため（`--max-results=1` という名前のファイルで残りのヒットが黙って落ちる）
+    (cd "$root" && xargs -0 -r ast-grep scan --config "$root/sgconfig.yml" --json=stream --) \
+      < tmp/review/_static-scan.paths \
+      > tmp/review/_static-scan.jsonl 2> tmp/review/_static-scan.err
+    # error 重大度のヒットは、成功でも定型の 2 行を stderr に出して非 0 で終わる。
+    # xargs の終了コード（GNU 123・BSD 1）もヒットと失敗を区別しないので、定型行を除いた stderr で判定する
+    # 空行は別の -e にする（macOS の grep は空の選択肢 `(…|)` を構文エラーにする）。
+    # grep 自体が失敗したら元の stderr を使う（捨てると失敗が 0 件に化ける）
+    grep -v -E -e '^Error: [0-9]+ error\(s\) found in code\.$' \
+      -e '^Help: Scan succeeded and found error level diagnostics in the codebase\.$' -e '^$' \
+      tmp/review/_static-scan.err > tmp/review/_static-scan.err.real
+    [ $? -le 1 ] || cp tmp/review/_static-scan.err tmp/review/_static-scan.err.real
+    hits=$(grep -c . tmp/review/_static-scan.jsonl)
+    err_head=$(head -n 1 tmp/review/_static-scan.err.real)
+    if [ "$hits" -gt 0 ] && [ -n "$err_head" ]; then
+      static_scan="一部失敗（${hits} 件、tmp/review/_static-scan.md・${err_head}）"
+    elif [ "$hits" -gt 0 ]; then
+      static_scan="${hits} 件（tmp/review/_static-scan.md）"
+    elif [ -n "$err_head" ]; then
+      static_scan="失敗（${err_head}）"
+    else
+      static_scan="0 件"
+    fi
+    if [ "$hits" -gt 0 ]; then
+      # range の行は 0 始まり。message の改行は表の行を割るので空白にする。
+      # 失敗したら rows を消す（リダイレクトで jq の前に作られるので、残すと途中までの rows から md が作られる）
+      jq -r '"| `\(.file):L\(.range.start.line + 1)` | \(.ruleId) | \(.message | gsub("[\\r\\n]+"; " ") | gsub("\\|"; "\\|")) |"' \
+        tmp/review/_static-scan.jsonl > tmp/review/_static-scan.rows \
+        || { rm -f tmp/review/_static-scan.rows; static_scan="一部失敗（${hits} 件、rows の生成に失敗）"; }
+    fi
+    # err は失敗の証拠なので、定型行以外があるときだけ残す
+    if [ -n "$err_head" ]; then mv tmp/review/_static-scan.err.real tmp/review/_static-scan.err; else rm -f tmp/review/_static-scan.err tmp/review/_static-scan.err.real; fi
+    rm -f tmp/review/_static-scan.jsonl
+  fi
+fi
+# 後始末は全分岐の後に置く（git diff が失敗した分岐にも paths が残りうる）。空の err は失敗の証拠ではないので消す
+rm -f tmp/review/_static-scan.paths
+[ -s tmp/review/_static-scan.err ] || rm -f tmp/review/_static-scan.err
+echo "$static_scan"
+```
+
+`tmp/review/_static-scan.rows` があるときだけ、次の形で `tmp/review/_static-scan.md` を作り、rows を消す（ヒットが 0 件なら作らない）:
+
+<!-- tmp-frontmatter: tmp/review/_static-scan.md -->
+```yaml
+---
+type: Review Report
+title: PR #{number} の静的検査のヒット
+description: {ヒットの件数と規則 ID を 1 文}
+status: stable
+---
+```
+
+本文は見出し `# 静的検査のヒット` と、`| file:L | 規則 ID | メッセージ |` の表（rows の各行）。
+
 ### Phase 1.5: Detect Project Type
 
 Detect the project type to determine which agents and rules to use. 判定手順は `./reference/project-detection.md` を参照する。
@@ -246,12 +327,15 @@ status: stable
 
 ## 横展開の確認対象
 ...
+
+## 静的検査
+{Phase 1.7 の $static_scan の 1 行。規則なし・未導入・対象なし も省かずに書く}
 EOF
 ```
 
 Phase 3 で各サブエージェントには以下のみを渡す:
 - PR メタデータ（番号、ベースブランチ、変更ファイル数）
-- スナップショットファイルのパス（`tmp/review/_pr-diff.snapshot`, `tmp/review/_overview.md`）
+- スナップショットファイルのパス（`tmp/review/_pr-diff.snapshot`, `tmp/review/_overview.md`。`tmp/review/_static-scan.md` があればそれも）
 - 観点別チェックリスト（agent 固有）
 - 出力テンプレート
 
@@ -302,6 +386,7 @@ backend-reviewer / database-reviewer 起動時に渡すチェックリスト（�
   - `tmp/review/_pr-diff.snapshot` を読んで full diff を把握する旨
   - `tmp/review/_commits.snapshot` を読んでコミット履歴を把握する旨
   - `tmp/review/_overview.md` を読んで Phase 2 の分析結果（目的・アプローチ・設計判断・影響範囲・人間レビュー観点）を把握する旨。`## 横展開の確認対象` に項目があれば、自分の観点に関わる項目について、この PR で足した兄弟に当たっていない箇所を指摘する旨（観点で受け持ちを分けるので、特定のサブエージェントには絞らない）
+  - `tmp/review/_static-scan.md` があれば読む旨。ヒットは「has-many を上限なしで読む箇所」などの候補で、1 件ごとの入口から呼ぶかは呼び出し元をたどって判断する旨（機械の検出は形の観点の材料で、代わりではない）
 - Subagent Output Template
 - Relevant `.cursor/rules/` content（agent ごとに異なるため inline は維持）
 - **CI exclusion rule**: 「CI で検出される問題（型エラー、lint 違反、テスト失敗）は指摘対象外」

@@ -664,6 +664,7 @@ shared/skills/review-plan/reference/report-template.md|tmp/plan-review.md
 shared/skills/review-strategic-ddd/reference/review-checklist.md|tmp/strategic-ddd-review.md
 shared/skills/review/SKILL.md|tmp/review/_ci-failures.md
 shared/skills/review/SKILL.md|tmp/review/_overview.md
+shared/skills/review/SKILL.md|tmp/review/_static-scan.md
 shared/skills/review/SKILL.md|tmp/review/{agent-name}-review.md
 shared/skills/review/reference/edge-case-reverification.md|tmp/review/_edge-{category}-review.md
 shared/skills/review/reference/unified-report-template.md|tmp/review/unified.md

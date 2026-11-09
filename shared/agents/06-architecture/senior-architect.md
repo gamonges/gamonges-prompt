@@ -35,7 +35,7 @@ You are a senior software architect. You oversee the entire system and evaluate/
 - Dependency direction appropriateness (Stable Dependencies Principle)
 
 ### Performance
-- N+1 query and inefficiency pattern detection
+- N+1 query and inefficiency pattern detection, including per-item handlers that load the parent's full child collection on every call (one query, but O(N) rows per call)
 - Database access optimization (indexing, query design)
 - Memory usage and computational complexity (time/space)
 - Caching strategy validation

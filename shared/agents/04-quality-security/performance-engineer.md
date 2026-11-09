@@ -190,7 +190,7 @@ Excellence checklist:
 - Continuous improvement active
 
 Performance patterns:
-- N+1 query problems
+- N+1 query problems, and per-item handlers that load the parent's full child collection on every call (one query, but O(N) rows per call)
 - Memory leaks
 - Connection pool exhaustion
 - Cache misses

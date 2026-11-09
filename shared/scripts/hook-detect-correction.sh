@@ -21,6 +21,12 @@ if [[ -z "$PROMPT" ]]; then
   exit 0
 fi
 
+# 通知（task-notification）と他セッションのメッセージ（agent-message）はユーザーの発言ではないので、
+# 閉じたブロックだけを照合から外す。先頭一致にしないのは、ブロックと訂正が混ざった入力で訂正を見落とさないため。
+# 除去に失敗したら元の文字列で照合する（誤発火は余計な指示が 1 回出るだけで、訂正の見落としより軽い）。
+# bash の ${var//…/} は長い入力で数分かかるので使わない
+MATCH_TEXT=$(printf '%s' "$PROMPT" | perl -0777 -pe 's/<task-notification>.*?<\/task-notification>//gs; s/<agent-message\b[^>]*>.*?<\/agent-message>//gs' 2>/dev/null) || MATCH_TEXT="$PROMPT"
+
 # 訂正パターン (連語化して誤発火を抑制):
 # - 違うので / そうじゃない / やり直し / 違うので直し
 # - なぜ.*した(のですか? / ですか? / 末尾の ?) — 疑問形シーケンスを連語で要求 (文字クラス誤用を解消)
@@ -28,7 +34,14 @@ fi
 # - stop doing / wrong approach / no, that / no, you / no, the
 TRIGGER_REGEX='違うので|そうじゃない|やり直|違うので直|なぜ.*した(のですか[？\?]|ですか[？\?]|[？\?]$)|間違(っ|い)てる|間違(っ|い)ています|間違いです|間違って(いる|い|る)よ|間違いだよ|stop doing|wrong approach|no, that|no, you|no, the'
 
-if echo "$PROMPT" | grep -qE "$TRIGGER_REGEX"; then
+# hook-block-tmp-commit.sh の matches() の複製。echo | grep -q は、grep が最初のマッチで終わると書き手が
+# SIGPIPE で死に、pipefail で照合が偽になる（約 64KB を超える入力で、前半の訂正を見落とした）。
+# grep -c は入力を読み切るので SIGPIPE が起きない
+matches() {  # $1=入力, $2=拡張正規表現
+  [[ "$(printf '%s\n' "$1" | grep -cE "$2" || true)" -gt 0 ]]
+}
+
+if matches "$MATCH_TEXT" "$TRIGGER_REGEX"; then
   cat <<'EOF'
 {
   "hookSpecificOutput": {
