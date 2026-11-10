@@ -37,6 +37,8 @@ skill / subagent のプロンプトは Claude 5 世代の挙動に合わせる�
 
 モデルバージョンに依存する設計判断は**本節に集約**する。モデル更新時はここだけを更新すればよい構造を保つ。個別の skill / reference に `## 設計思想（{model} baseline）` のような節を作らない。
 
+運用の値として skill に置くもの（series-run の工程ごとの既定のモデルと、advisor の組み合わせの表: `../series-run/reference/state-format.md` の `## 運用の約束`・`../series-run/reference/stage-type.md` の「worker のモデルと advisor」）は、モデルを更新したらここから辿って見直す。
+
 ## 起動制御フィールドの選び方
 
 `description` は skill 一覧に常駐するため、使わない skill を隠すと budget が空く。ただし**隠し方を誤ると呼び出しが壊れる**。
