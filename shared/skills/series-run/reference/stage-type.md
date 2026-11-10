@@ -57,12 +57,30 @@ implement と fix の worker が使う。初回かどうかの判定をここ 1 
 
 ## worker のモデルと advisor
 
-worker を起動する直前（工程の再試行を含む）に、その工程の `## 運用の約束` の model と advisor を当てる。agent が codex の工程では、どちらも当てない（Codex に advisor は無い）。
+worker を起動する直前（工程の再試行を含む）に、その工程の `## 運用の約束` の model と effort と advisor を当てる。agent が codex の工程では、どれも当てない（Codex に advisor は無い）。
 
-1. **model**: adapter の「worker の起動」「工程の再試行」に model を渡す（運用の約束に指定があるときだけ）
-2. **advisor**: `<wt>/.claude/settings.local.json` の `advisorModel` キーだけを、Bash から python で書き換える（JSON を読み、指定があればキーを足し・指定が無ければ外し、ほかのキーはそのまま書き戻す。ファイルが無く外すだけなら作らない）。Edit・Write ツールは使わない（`.claude/` の下の書き込みに確認が出うる）。前の起動の状態を信じず、起動のたびに工程の指定どおりに書く
-3. **初回の確認**: その worktree で最初に書く前に、`git -C <wt> check-ignore -v .claude/settings.local.json` で無視の対象かを確かめ、結果を `## 運用の約束` に控える。対象でなければ書かずに③で聞く（コミットに混ざるため）
-4. **起動の後**: キーを読み直す。指定と違えば（起動の途中で書き換えられた）書き直さずに③で回す（毎回の起動で起きるなら、起動の後に書く形へ替えるかをユーザーが決める）
+1. **model と effort**: adapter の「worker の起動」「工程の再試行」に model と effort を渡す（運用の約束に指定があるときだけ）。effort が無い工程（この項目より前に作った状態ファイルなど）は、effort を渡さない。effort があって model が無い組は、Orca の `--effort` が `--model` を要るので渡せない。③で聞き直す
+2. **組み合わせの確認**: advisor を書く前に、実行モデルと advisor の組を次の表で確かめる。起動のたびに確かめる（初動・再開・再試行・監督の途中で運用の約束を変えた後のどれも、この起動の直前を通るため）。外れていたら `advisorModel` を書かずに起動を止め、③で「advisor を外して起動するか、advisor を替えるか」を聞く。advisor が実行モデルより下位だと、Claude Code はエラーを出さずに advisor を付けないため、黙って起動すると advisor 無しで動く
+
+   | 実行モデル | 付けられる advisor |
+   |-----------|-------------------|
+   | `claude-fable-5-2` | `claude-fable-5-2` のみ |
+   | `claude-opus-5-5` | `claude-fable-5-2`・`claude-opus-5-5` |
+   | `claude-sonnet-5-5` | `claude-fable-5-2`・`claude-opus-5-5`・`claude-sonnet-5-5` |
+
+   advisor の別名は、`opus` を `claude-opus-5-5`、`sonnet` を `claude-sonnet-5-5` と読み替えて引く（この項目より前の状態ファイルの advisor は `opus`）。`fable` と表に無いモデルは組み合わせを判定せず、そのまま書いてよいかを③で聞く（推測で通さない）。advisor が無い工程は確かめない。model が無いのに advisor がある工程は、実行モデルが Claude Code の既定に決まって表を引けないので、同じく③で聞く。出典は Claude Code の docs の advisor の「Choose an advisor model」
+
+   この節の③（1 と 2）を待つ間は、作業単位を起動しようとした工程の `<工程>: 判断待ち` にする（`./state-format.md` の状態の表）。答えのとおりに `## 運用の約束` を直してから、同じ工程を同じ操作（worker の起動か工程の再試行）で起動し直す。そのときも 1 から当て直す。「そのまま書いてよい」と答えた組は、運用の約束のその工程に「組み合わせはユーザーが確かめ済み」と控え、以後の起動では聞かない（控えないと、起動し直すたびに同じ③が立つ）。その工程の model か advisor を変えたら、控えを外す
+3. **advisor**: `<wt>/.claude/settings.local.json` の `advisorModel` キーだけを、Bash から python で書き換える（JSON を読み、指定があればキーを足し・指定が無ければ外し、ほかのキーはそのまま書き戻す。ファイルが無く外すだけなら作らない）。Edit・Write ツールは使わない（`.claude/` の下の書き込みに確認が出うる）。前の起動の状態を信じず、起動のたびに工程の指定どおりに書く
+4. **初回の確認**: その worktree で最初に書く前に、`git -C <wt> check-ignore -v .claude/settings.local.json` で無視の対象かを確かめ、結果を `## 運用の約束` に控える。対象でなければ書かずに③で聞く（コミットに混ざるため）
+5. **起動の後**: キーを読み直す。指定と違えば（起動の途中で書き換えられた）書き直さずに③で回す（毎回の起動で起きるなら、起動の後に書く形へ替えるかをユーザーが決める）
+
+既定値（state-format の `## 運用の約束`）の理由。値そのものは state-format だけに置く:
+
+- design: 計画の誤りは下流の全工程に広がるので、最も能力の高いモデルを使う。計画レビューの独立した目は、review-plan が起動する Codex が担う
+- implement・fix: LGTM の計画は仕様が明確なので Sonnet で足りる。迷う箇所だけ advisor に聞く。effort は high に留める（xhigh 以上の Sonnet は自分からレビュー用のサブエージェントを起動し、`/implement` のレビューの反復と重なる）
+- review・recheck: レビューは Opus の強み。実装した Sonnet とは違うモデルで読む。recheck は `/code-review` の強さで深さを決めるので、セッションの effort は medium に留める
+- effort を明示するのは、渡さないと worker の effort が設定の継承やモデルの既定（`medium`）で決まり、工程の意図から外れるため
 
 ## pr の工程
 

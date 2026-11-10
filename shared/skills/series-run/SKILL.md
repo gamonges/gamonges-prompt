@@ -87,7 +87,7 @@ series-init の手順 9 の報告のうち「次の手順」は出さずに 2 �
 2. adapter の「監督の開始」
 3. series-run.md を state-format の書式で作る。series.md の段から作業単位の行を作り、既定は `未着手`（worktree には実際のパスを書く）、handoff に回った段は `worktree 待ち`、段が 2 つ以上の作業単位、series-init で対象外にした段、1 の確認で横断計画の worktree を分けないと答えた段は `対象外` にする（引き継ぎの入口では、0 で確かめた現在地を書く）。`worktree 待ち` の段ごとに `## ユーザーへの依頼` に `R-<n>`（handoff のパスと、作れるようになる条件。base が別の段を指すなら「その段の implement が push した後」）を立てる。続けて受信箱の `register`（`--terminal` は adapter の「自分の terminal の識別子」）と `render` を行う（`./reference/inbox.md`。失敗しても監督は止めず、7 の 4 で報告する）
 4. 次を 1 回でユーザーに確かめる
-   - `## 運用の約束`（state-format の項目: リポジトリ固有の制約・工程ごとの agent と model と advisor・環境の準備・検査のコマンド・bot・dispatch する workflow・checks の上限）。環境の準備・検査のコマンド・bot・dispatch する workflow が空のときは「要らない」「無い」で合っているかも含める（空のまま始めると、最初の工程が環境の不足で失敗し、再試行を 1 回使い切ってからユーザーに回るため。検査と CI を黙って飛ばさないため）
+   - `## 運用の約束`（state-format の項目: リポジトリ固有の制約・工程ごとの agent と model と effort と advisor（advisor と実行モデルの組み合わせは、起動の直前にも確かめる。段の型の「worker のモデルと advisor」。ここで外れていれば、この確認の中で一緒に聞く）・環境の準備・検査のコマンド・bot・dispatch する workflow・checks の上限）。環境の準備・検査のコマンド・bot・dispatch する workflow が空のときは「要らない」「無い」で合っているかも含める（空のまま始めると、最初の工程が環境の不足で失敗し、再試行を 1 回使い切ってからユーザーに回るため。検査と CI を黙って飛ばさないため）
    - context.md（worktree が無い段は series-init の handoff のファイル `tmp/handoff/<repo>.md`）の「シリーズでの担当」に「前提」（本番に出ていることなど）がある段: 前提を待たずに着手してよいか。待つと答えた段は `対象外`（理由: 前提待ち）にする（series-run は本番の状態を判定しない。段の型の「起動の前の確認」の順序）
 
 ### 3. 起動

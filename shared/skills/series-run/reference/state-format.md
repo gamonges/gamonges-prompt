@@ -105,7 +105,13 @@ worker を起動するたびに 1 行足し、工程が終わったらその行�
 - リポジトリ固有の制約（typecheck の流し方・ローカルの DB や port の使い方など）。spec の「作業の制約」に写す
 - 工程ごとの agent の指定（既定は claude。review と recheck は claude に固定）
 - 環境の準備の手順（`.env` の複製・依存の install など）。要らないなら「要らない」と書く（空のままにしない）
-- 工程ごとの model と advisor（既定: implement・fix は `claude-sonnet-5-5` と advisor `opus`、review・recheck は advisor 無し）。worktree ごとの `.claude/settings.local.json` の `check-ignore` の結果も控える（`./stage-type.md` の「worker のモデルと advisor」）
+- 工程ごとの model と effort と advisor。既定は次のとおり（既定の理由と当て方は `./stage-type.md` の「worker のモデルと advisor」）。モデルは完全な ID で書く。ユーザーが別名で答えたら完全な ID に直して書く（`fable` は直さずに聞き直す。解決先がセッションの種類で変わるため）
+  - design: `claude-fable-5-2`・effort `high`・advisor 無し
+  - implement・fix: `claude-sonnet-5-5`・effort `high`・advisor `claude-opus-5-5`
+  - review: `claude-opus-5-5`・effort `high`・advisor 無し
+  - recheck: `claude-opus-5-5`・effort `medium`・advisor 無し
+
+  worktree ごとの `.claude/settings.local.json` の `check-ignore` の結果も控える
 - 検査のコマンド（push の前に worker が回す。重い typecheck は書かず checks に任せる）。要らないなら「要らない」
 - bot: アカウントと重大度の書式（例: `greptile-apps[bot]`・`P0`/`P1`）。無ければ「無い」。series-run は bot を起動せず、PR に既に付いた指摘を checks で拾うだけ（`./stage-type.md` の「checks の工程」）
 - dispatch する workflow（ドラフトでは CI が動かないリポジトリで、checks の入口に `workflow_dispatch` を打つ workflow のファイル名）。無ければ「無い」
