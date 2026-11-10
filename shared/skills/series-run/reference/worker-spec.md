@@ -16,7 +16,7 @@ coordinator が worker を起動するときに渡す指示（spec）の雛形�
 - リポジトリ: <段のリポジトリ。`owner/repo`。push の手順 2 の照合に使う>
 
 ## Change
-<段の型の「起動する skill」。push がある工程では、段の型の「push の手順」を手順ごと写し、手順 1 で比べる前の段のブランチ（引いたもの）も書く。recheck では強さ・PR 番号と、段の型の「recheck の工程」の 2・3 を写す。例: `/implement tmp/plan.md` を実行し、次の手順で push する: …。implement・fix では「この工程の前の試行がコミットを残していれば、それを確かめて、残りの作業（push を含む）だけを行う」を書く（段の型の「工程の基準の HEAD と、試行の起動時の HEAD・時刻」。工程の再試行は spec を差し替えないので、1 回目から書く）。design では「`/design` だけを行い、`/plan-lgtm` は打たない」を、plan-lgtm では「`/plan-lgtm` だけを行い、`/implement` は打たない」を書く（次の skill は別の工程の worker が行う。段の型の工程の表）。再設計の巡の design では、段の型の「再設計で design に戻す」の 5 も書く>
+<段の型の「起動する skill」。push がある工程では、段の型の「push の手順」を手順ごと写し、手順 1 で比べる前の段のブランチ（引いたもの）も書く。recheck では強さ・PR 番号と、段の型の「recheck の工程」の 2・3 を写す。例: `/implement tmp/plan.md` を実行し、次の手順で push する: …。implement・fix では「この工程の前の試行がコミットを残していれば、それを確かめて、残りの作業（push を含む）だけを行う」を書く（段の型の「工程の基準の HEAD と、試行の起動時の HEAD・時刻」。工程の再試行は spec を差し替えないので、1 回目から書く）。どの工程でも「Change の skill が終わったら、続く別の skill（段の型の工程の表で次の工程が起動する skill。例: design の後の `/plan-lgtm`、plan-lgtm の後の `/implement`）は打たずに完了を報告する」を書く（次の skill は別の工程の worker が行う）。再設計の巡の design では、段の型の「再設計で design に戻す」の、design の spec の Change に書く文も写す>
 
 ## Constraints
 
