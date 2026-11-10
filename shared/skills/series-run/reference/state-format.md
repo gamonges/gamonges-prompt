@@ -76,9 +76,9 @@ timestamp: <最後に書いた日時>
 
 worker を起動するたびに 1 行足し、工程が終わったらその行の成否・要約・成果物を埋める。
 
-- **試行**: その工程の何回目の試行か（段の型の「失敗したとき」の上限の数え方に従う。起動そのものの失敗は数えない）。fix・recheck の 2 巡目は `2-1` のように巡を添える（段の型の「fix の 2 巡目」）
+- **試行**: その工程の何回目の試行か（段の型の「失敗したとき」の上限の数え方に従う。起動そのものの失敗は数えない）。fix・recheck の 2 巡目は `2-1` のように巡を添える（段の型の「fix の 2 巡目」）。design・plan-lgtm の再設計の巡も `2-1`・`3-1` のように添える（段の型の「再設計で design に戻す」）
 - **工程の基準の HEAD・起動時の HEAD・起動時刻**: 段の型の「工程の基準の HEAD と、試行の起動時の HEAD・時刻」
-- **design の工程**: 段の型の「工程の境目での `tmp/` の退避」の 3 点を要約の欄に写す
+- **plan-lgtm の工程**: 段の型の「工程の境目での `tmp/` の退避」の 3 点を要約の欄に写す
 - **triage**: 指摘ごとの仕分け（直す / 後の段で配線される（その段の名前）/ 直さない（`K-<n>`））を、別の行か脚注で残す。直さないものの理由は `## 直さないと決めた指摘` に書き、ここには番号だけを書く（中身を 2 か所に書かない）。後の段に回した指摘には「届け済み」として、届けた先の工程と口（`spec` / `send`）を書く。0 件で fix と recheck を飛ばしたら、両方の行に「飛ばした（0 件）」と書く
 - **checks**: 試行の欄は空、起動時刻は入口の時刻（上限の数え始め）、起動時の HEAD は入口の HEAD。要約の先頭に `前: implement` か `前: fix`、続けて dispatch した workflow の表示名と run id、判定（指摘の件数）を書く（`./stage-type.md` の「checks の工程」）
 - **③の 2 段目（coordinator が自答）**: 問いの元の工程の行に、問いの要旨・答え・引用（`D-<n>`・`K-<n>`・節の名前）を書く。`## ユーザーへの依頼` には書かない（SKILL.md の 4「質問」）
@@ -107,6 +107,7 @@ worker を起動するたびに 1 行足し、工程が終わったらその行�
 - 環境の準備の手順（`.env` の複製・依存の install など）。要らないなら「要らない」と書く（空のままにしない）
 - 工程ごとの model と effort と advisor。既定は次のとおり（既定の理由と当て方は `./stage-type.md` の「worker のモデルと advisor」）。モデルは完全な ID で書く。ユーザーが別名で答えたら完全な ID に直して書く（`fable` は直さずに聞き直す。解決先がセッションの種類で変わるため）
   - design: `claude-fable-5-2`・effort `high`・advisor 無し
+  - plan-lgtm: `claude-opus-5-5`・effort `high`・advisor 無し
   - implement・fix: `claude-sonnet-5-5`・effort `high`・advisor `claude-opus-5-5`
   - review: `claude-opus-5-5`・effort `high`・advisor 無し
   - recheck: `claude-opus-5-5`・effort `medium`・advisor 無し

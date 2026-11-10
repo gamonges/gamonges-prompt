@@ -15,7 +15,8 @@ series-init は同じリポジトリでスタックになる段を 1 つの work
 
 | 工程 | 担当 | 起動する skill | 入力（その skill の実行条件を満たす状態） | 出力 | 完了の証拠 | 次 |
 |------|------|---------------|------------------------------------------|------|-----------|----|
-| design | worker | `/design` → `/plan-lgtm` | `tmp/context.md`（series-init の引き継ぎ。`outline:`・`series:` を持つ） | `tmp/plan.md`・`tmp/plan-review.md` | 完了報告が成功、かつ `tmp/plan-review.md` の `**総合判定**` が LGTM・`**対象**` が `tmp/plan.md`・plan-review.md が plan.md より新しい（plan-lgtm と同じ 3 点）、かつ plan-review.md の更新時刻が試行の起動時刻より後（前の試行・既存の worktree の残骸で通さない） | implement |
+| design | worker | `/design` | `tmp/context.md`（series-init の引き継ぎ。`outline:`・`series:` を持つ） | `tmp/plan.md` | 完了報告が成功、かつ `tmp/plan.md` の更新時刻が試行の起動時刻より後（前の試行・既存の worktree の残骸で通さない） | plan-lgtm |
+| plan-lgtm | worker | `/plan-lgtm tmp/plan.md` | design の完了の証拠（`tmp/plan.md`） | `tmp/plan-review.md`（revise が `tmp/plan.md` を直す） | 完了報告が成功、かつ `tmp/plan-review.md` の `**総合判定**` が LGTM・`**対象**` が `tmp/plan.md`・plan-review.md が plan.md より新しい（plan-lgtm と同じ 3 点）、かつ plan-review.md の更新時刻が試行の起動時刻より後（前の試行・既存の worktree の残骸で通さない） | implement |
 | implement | worker | `/implement tmp/plan.md` → push（下の「push の手順」） | LGTM の `tmp/plan.md` | コミット・リモートのブランチ | 完了報告が成功、かつ `git -C <wt> log <工程の基準の HEAD>..HEAD` が空でなく、`git -C <wt> rev-parse @{u}` が HEAD と一致 | pr |
 | pr | ユーザー（④） | `/create-pr` | リモートのブランチ（`/create-pr` は push の手順を持たず、`gh pr create --head <今のブランチ>` を打つだけ。`../../create-pr/SKILL.md:L231-239`） | open のドラフト PR | `gh pr list --repo <段のリポジトリ> --head <ブランチ> --state open` に PR があり、series.md の `## 段` のその段に PR が登録された。`<ブランチ>` は `git -C <wt> branch --show-current`（series.md のブランチ列は、この登録で初めて埋まる）。coordinator は別のリポジトリで動くことがあるので `--repo` を付ける | checks |
 | checks | coordinator | — | open の PR と push 済みの HEAD | `tmp/checks.md`（CI の失敗と bot の P0/P1） | 下の「checks の工程」の判定が済んだ | review（`前: implement`）か recheck（`前: fix`） |
@@ -27,13 +28,20 @@ series-init は同じリポジトリでスタックになる段を 1 つの work
 - 前の工程の完了の証拠は、次の工程の入力（実行条件）を含む。implement の push が無いと `/create-pr` が作る PR の head が無く、pr の工程の open の PR が無いと `/review` が止まる
 - review の worker を claude に固定するのは、Codex では `~/.agents/skills/review` に同名の別実装があると `tmp/review/unified.md` が作られないため（この repo の `README.md:L121`。実行時に読む必要は無い）。recheck を claude に固定するのは、組み込みの `code-review` が Claude Code にしか無いため。ほかの工程は claude を既定にし、状態ファイルの `## 運用の約束` で工程ごとに変えられる
 - 1 つの worktree には同時に 1 体の worker だけを入れる。工程は `tmp/` の成果物を前の工程が書いて次の工程が読むので、並列にするのは worktree の間だけ
+- design と plan-lgtm を別の worker に分けるのは、計画を作るモデルと、レビュー・修正を反復するモデルを別にするため（既定の理由は「worker のモデルと advisor」）。**再設計で design に戻す**: plan-lgtm の worker が `要再設計` で「`/design` で再設計する」を問うてきたら、③としてユーザーに聞く。ユーザーが再設計を選んだら、次の順に行う（plan-lgtm のモデルで計画を作り直さないため）
+  1. 答えは `## ユーザーの決定` に書かない（工程の流れだけを決める答えで、以後の工程の spec に写す決定ではない）。記録は 3 で扱いが決まってから書く
+  2. その worker には、adapter の「質問に答える」で「`/design` は打たずに plan-lgtm を中断し、失敗で報告する。残りに『再設計で戻す』と書く」と返す
+  3. その失敗の報告は、`Q-<n>` の答えが再設計で、残りに「再設計で戻す」があるものだけをこの扱いにする（どちらかが無ければ「失敗したとき」の通常の扱い）。この扱いに決まったら、`## 工程の記録` の plan-lgtm の行の要約に「再設計で戻す（`Q-<n>`）」と、`tmp/plan-review.md` の `**総合判定**` と Critical の見出しを写す（次の plan-lgtm が plan-review.md を作り直しても、戻した理由が残る）。再試行に数えず、worker を adapter の「worker を解放する」で解放し、続けて SKILL.md の手順の 3 の 1〜5 で design を「worker の起動」で起動する（作業単位は `plan-lgtm: 作業中` から直接 `design: 作業中` にする）
+  4. 巡を 1 つ進める。工程の記録には design を `2-1`（3 巡目は `3-1`）と書き、続く plan-lgtm も同じ巡で 1 から数える。試行の上限の 2 回は巡ごと。工程の基準の HEAD も取り直す（「fix の 2 巡目」と同じ書き方）
+  5. design の spec の Change には「`tmp/plan-review.md` の要再設計の指摘を読み、それを解消する計画を作る。既存の `tmp/plan.md` は作り直す（`/design` が上書きを問うたら上書き）」と書く。工程の再試行は spec を差し替えないので、この巡の試行すべてに効く
+  6. 次の巡に入るかも、そのつど同じ③でユーザーが決める（自動では戻さない）
 
 ## 工程の基準の HEAD と、試行の起動時の HEAD・時刻
 
 worker を起動する直前に、`git -C <wt> rev-parse HEAD` と起動時刻を、状態ファイルの `## 工程の記録` のその試行の行に書く（試行の起動時の HEAD・時刻）。その工程の 1 回目の試行では、同じ HEAD を「工程の基準の HEAD」にも書き、再試行・再開では書き換えない。
 
 - implement・fix の「新しいコミット」は、工程の基準の HEAD から数える。前の試行がコミットした後に push だけで失敗したとき、再試行は前の試行のコミットを確かめて push だけを再開してよい（成果は工程の単位で評価する）。worker は段の型を読まず、工程の再試行は spec を差し替えないので、このことは 1 回目の spec の Change に最初から書いておく（`./worker-spec.md` の埋め方）
-- design・review・recheck の「起動時刻より後」は、試行の起動時刻を使う（前の試行の成果物を今回の成果と取り違えないため）。前の試行の正しい成果を捨てないよう、design の 1 回目の spec の Change には「前の試行の `tmp/plan.md` が残っていれば、それを入力に `/plan-lgtm` だけを回し直してよい」と書く（判定を作り直すので、plan-review.md の更新時刻が今回の試行の後になる。工程の再試行は spec を差し替えないので、1 回目から書く）
+- design・plan-lgtm・review・recheck の「起動時刻より後」は、試行の起動時刻を使う（前の試行の成果物を今回の成果と取り違えないため）。plan-lgtm の再試行は、前の試行が revise で直した `tmp/plan.md` を入力にそのまま回し直す（review-plan は `tmp/plan-review.md` を毎回作り直すので、判定は今回の試行のものになる）
 
 ## push の手順
 
@@ -77,7 +85,8 @@ worker を起動する直前（工程の再試行を含む）に、その工程�
 
 既定値（state-format の `## 運用の約束`）の理由。値そのものは state-format だけに置く:
 
-- design: 計画の誤りは下流の全工程に広がるので、最も能力の高いモデルを使う。計画レビューの独立した目は、review-plan が起動する Codex が担う
+- design: 計画の誤りは下流の全工程に広がるので、計画を作る 1 回だけ最も能力の高いモデルを使う（料金の高いモデルを、レビューと修正の反復に使わないため）
+- plan-lgtm: レビューと修正の反復を、計画を書いたモデルとは別のモデルで回す。レビューは Opus の強み。初回の review-plan が起動する Codex も、もう 1 つの独立した目になる
 - implement・fix: LGTM の計画は仕様が明確なので Sonnet で足りる。迷う箇所だけ advisor に聞く。effort は high に留める（xhigh 以上の Sonnet は自分からレビュー用のサブエージェントを起動し、`/implement` のレビューの反復と重なる）
 - review・recheck: レビューは Opus の強み。実装した Sonnet とは違うモデルで読む。recheck は `/code-review` の強さで深さを決めるので、セッションの effort は medium に留める
 - effort を明示するのは、渡さないと worker の effort が設定の継承やモデルの既定（`medium`）で決まり、工程の意図から外れるため
@@ -194,6 +203,7 @@ fix の後に、PR を組み込みの `code-review` で見直す。組み込み�
   - どちらも、止めた worker は adapter の「worker を解放する」で解放する（起動し直すときは新しく起動する）
   - 手順 4（強制の push）→ `R-<n>`。作業単位を `ユーザーの操作待ち（強制の push）` にする。worker は解放済みで terminal は無いので、内容にはユーザーが自分の terminal で打つものを書く（worktree のパスと `git -C <wt> push --force-with-lease`）。ユーザーが打ったと伝えたとき、時間切れのたび、worker が 0 体でターンを終える前とユーザーの返事が来るたび（SKILL.md の 4）に、`@{u}` と HEAD の一致を確かめ、一致すれば `## 工程の記録` のその試行の行の成否を「成功（強制の push はユーザー）」で埋め（順序の判定はこの行を見る）、`R-<n>` を `済み`、作業単位を `<工程>: 済み` にする
   - 手順 1（前の段の取り込み）・手順 2（照合の不一致）・手順 3（upstream の向き）→ `Q-<n>`。作業単位を `<工程>: 判断待ち` にする。手順 1 で「取り込む」と答えたら、同じ工程を「worker の起動」で起動し直す（spec の Change に「前の段のブランチを取り込んでから push の手順を行う」と書く）。「取り込まない」なら、手順 1 を省いてよいかを同じ答えで決め、省くなら spec にそう書いて同じ形で起動し直す。手順 2・3 は、問いに不一致の中身（toplevel と Target・origin とリポジトリ・upstream の向き）を示し、ユーザーが直した（または spec の Target を直すと答えた）後に、同じ形で起動し直す。どちらも試行の回数に数えない（`## 工程の記録` には新しい行を足し、試行の欄に前と同じ番号と「（取り込みの後）」を書く。工程の基準の HEAD は書き換えない）
+- plan-lgtm の worker が、ユーザーが再設計を選んだことを失敗で報告したときは、再試行せず design の工程に戻す（「工程」の「再設計で design に戻す」）
 - それ以外で、完了報告が失敗、または成功の報告でも完了の証拠を満たさないときは、同じ工程を 1 回だけ起動し直す。2 回目も失敗ならユーザーに回す（③として扱う）
   - 失敗の報告・止めた試行の後は、adapter の「工程の再試行」で起動し直す
   - 成功の報告で証拠を満たさないときは、その試行は成功として終わっていて再試行の対象にならないので、adapter の「worker を解放する」の後、「worker の起動」で新しく起動する（試行の回数は 2 回目として数える）
@@ -215,4 +225,4 @@ SKILL.md の 4 の「`完了` にする前」で、後の段から届いた指�
 
 同じ worktree で工程が進むと、後の工程の skill が前の工程の `tmp/` の成果物を上書きする（例: fix-lgtm-implement の中の review-plan が `tmp/plan-review.md` を作り直す）。工程の境目での `tmp/` の退避の規則は、`feat-tmp-okf-document` の決定に従う（未決）。
 
-決まるまでは、design の工程の完了の証拠を確かめたときに、`tmp/plan-review.md` の `**総合判定**`・`**対象**`・更新時刻の 3 点を状態ファイルの `## 工程の記録` の要約の欄に写す（後の工程が同じファイルを上書きしても、判定の記録が残る。写す規則の正典はここ）。ファイルそのものは動かさない（退避の規則を先取りしないため）。triage が `tmp/fixes.md` を書く前に既存のものを `tmp/fixes.archived-<日時>.md` に移すのも、checks の入口で `tmp/checks.md` を `tmp/checks.archived-<日時>.md` に移すのも、この決定が出るまでの暫定である。
+決まるまでは、plan-lgtm の工程の完了の証拠を確かめたときに、`tmp/plan-review.md` の `**総合判定**`・`**対象**`・更新時刻の 3 点を状態ファイルの `## 工程の記録` の要約の欄に写す（後の工程が同じファイルを上書きしても、判定の記録が残る。写す規則の正典はここ）。ファイルそのものは動かさない（退避の規則を先取りしないため）。triage が `tmp/fixes.md` を書く前に既存のものを `tmp/fixes.archived-<日時>.md` に移すのも、checks の入口で `tmp/checks.md` を `tmp/checks.archived-<日時>.md` に移すのも、この決定が出るまでの暫定である。
