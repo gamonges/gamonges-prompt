@@ -62,8 +62,8 @@ coordinator が worker を起動するときに渡す指示（spec）の雛形�
 
 ## 埋め方
 
-- **Change** と **Observable acceptance** は、段の型（`./stage-type.md`）の工程の行から写す。言い換えない（coordinator が完了の証拠を確かめるときに、worker と同じ基準を使うため）。push がある工程（implement・fix・fix-light）では、段の型の「push の手順」も Change に写す。fix-light では、段の型の「軽い fix」の 4 の Change に書く文も写す。worker は段の型を読まない
+- **Change** と **Observable acceptance** は、段の型（`./stage-type.md`）の工程の行から写す。言い換えない（coordinator が完了の証拠を確かめるときに、worker と同じ基準を使うため）。push がある工程（implement・fix・fix-light）では、段の型の「push の手順」を、番号の無い項目（`<branch>` の書き方・push の前の検査）も含めて Change に写す。fix-light では、段の型の「軽い fix」の 4 の Change に書く文も写す。worker は段の型を読まない
 - **作業の制約** の最後の行は、状態ファイルの `## 運用の約束` から写す。リポジトリに依存しない制約は雛形の行で足りる
-- **これまでに直さないと決めた指摘** は、recheck の worker が `code-review` の指摘に `[既決 K-<n>]` を付ける照合の相手（段の型の「recheck の工程」の 3）。番号を変えずに写す
+- **これまでに直さないと決めた指摘** は、recheck の worker が `code-review` の指摘に `[既決 K-<n>]` を付ける照合の相手（段の型の「recheck の工程」の 3）。fix-light の worker には、その挙動を変えないための制約（変える必要があれば質問で聞く）。番号を変えずに写す
 - **この作業単位に効くユーザーの決定**・**これまでに直さないと決めた指摘**・**前の段から引き継いだ指摘** は、欄を消さない。0 件でも「なし」と書く（写し忘れと区別するため）。写したら、状態ファイルの `## ユーザーの決定` の配布済み・triage の記録の届け済みに、この作業単位と口（`spec`）を足す
 - 完了報告の 3 文は、今の adapter（Orca）の完了報告に添える要約の文の数（3 文）にそろえてある
