@@ -670,6 +670,7 @@ shared/skills/review/reference/edge-case-reverification.md|tmp/review/_edge-{cat
 shared/skills/review/reference/unified-report-template.md|tmp/review/unified.md
 shared/skills/series-run/reference/meaning-card.md|tmp/meaning-card.md
 shared/skills/series-run/reference/stage-type.md|tmp/checks.md
+shared/skills/series-run/reference/stage-type.md|tmp/code-review.md
 shared/skills/series-sync/reference/series-format.md|tmp/context.md
 shared/skills/series-sync/reference/series-format.md|tmp/handoff/<repo>.md
 shared/skills/series-sync/reference/series-format.md|tmp/series.draft.md

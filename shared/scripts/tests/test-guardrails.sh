@@ -2128,10 +2128,16 @@ for cmd in 'git push origin feature' 'git push -u origin feat-main' 'git push or
     'git push origin HEAD:feature' 'git push origin HEAD' 'git push' 'git push origin' \
     'git push --follow-tags origin feature' 'git push origin v1.0' 'git push -o ci.skip origin feature' \
     'git push --push-option=ci.skip origin feature' 'git push origin refs/tags/v1.0' \
-    "git -C $DGP_FEAT push -u origin HEAD" "git -C $DGP_FEAT push"; do
+    "git -C $DGP_FEAT push -u origin HEAD" "git -C $DGP_FEAT push" \
+    "git -C $DGP_FEAT push -u origin HEAD:feature" "git -C $DGP_FEAT push origin HEAD:feature"; do
     dgp "pass: $cmd" pass "$cmd" "$DGP_FEAT"
 done
 dgp "pass: cwd の無い入力でも -C で feature の repo を指す" pass "git -C $DGP_FEAT push -u origin HEAD" ""
+# series-run の push の手順 2 は upstream の無いブランチで打つ。DGP_FEAT は upstream を持つので、その分岐を通らない
+dgp "pass: upstream の無いブランチの -u origin HEAD:feature（push の手順 2）" pass "git -C $DGP_TRUNK push -u origin HEAD:feature" "$DGP_TRUNK"
+dgp "ask: <branch> をコマンド置換で書いた手順 2" ask "git -C $DGP_TRUNK push -u origin HEAD:\$(git branch --show-current)" "$DGP_TRUNK"
+# 判定の値だけでは、どの分岐が止めたかが分からない。コマンド置換の検査で止まっていることを理由で見る
+assert_contains "DG-P 理由: 手順 2 のコマンド置換" "$(dgp_reason "git -C $DGP_TRUNK push -u origin HEAD:\$(git branch --show-current)" "$DGP_TRUNK")" "展開されるまで値の決まらない文字"
 # shlex は改行を空白として読む。区切りとして扱わないと、2 行目の push が 1 行目の echo の引数に化ける
 dgp "ask: 改行の後ろの push" ask $'echo hi\ngit push origin main' "$DGP_FEAT"
 # ラッパーでないコマンドの引数の中の文（PR 本文など）を push と取り違えない

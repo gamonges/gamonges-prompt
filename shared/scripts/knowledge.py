@@ -57,6 +57,7 @@ TYPES = [
     ("Feedback", "feedback.md"),
     ("Meaning Card", "meaning-card.md"),
     ("Checks", "checks.md"),
+    ("Code Review", "code-review.md"),
 ]
 
 # tmp/ の直下の、生ログと画像の置き場。中の md は文書として扱わない
