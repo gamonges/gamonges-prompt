@@ -2128,7 +2128,8 @@ for cmd in 'git push origin feature' 'git push -u origin feat-main' 'git push or
     'git push origin HEAD:feature' 'git push origin HEAD' 'git push' 'git push origin' \
     'git push --follow-tags origin feature' 'git push origin v1.0' 'git push -o ci.skip origin feature' \
     'git push --push-option=ci.skip origin feature' 'git push origin refs/tags/v1.0' \
-    "git -C $DGP_FEAT push -u origin HEAD" "git -C $DGP_FEAT push"; do
+    "git -C $DGP_FEAT push -u origin HEAD" "git -C $DGP_FEAT push" \
+    "git -C $DGP_FEAT push -u origin HEAD:feature" "git -C $DGP_FEAT push origin HEAD:feature"; do
     dgp "pass: $cmd" pass "$cmd" "$DGP_FEAT"
 done
 dgp "pass: cwd の無い入力でも -C で feature の repo を指す" pass "git -C $DGP_FEAT push -u origin HEAD" ""
