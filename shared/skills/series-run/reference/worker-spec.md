@@ -16,7 +16,7 @@ coordinator が worker を起動するときに渡す指示（spec）の雛形�
 - リポジトリ: <段のリポジトリ。`owner/repo`。push の手順 2 の照合に使う>
 
 ## Change
-<段の型の「起動する skill」。push がある工程では、段の型の「push の手順」を手順ごと写し、手順 1 で比べる前の段のブランチ（引いたもの）も書く。recheck では強さ・PR 番号と、段の型の「recheck の工程」の 2・3 を写す。例: `/implement tmp/plan.md` を実行し、次の手順で push する: …。implement・fix・fix-light では「この工程の前の試行がコミットを残していれば、それを確かめて、残りの作業（push を含む）だけを行う」を書く（段の型の「工程の基準の HEAD と、試行の起動時の HEAD・時刻」。工程の再試行は spec を差し替えないので、1 回目から書く）。どの工程でも「Change の skill が終わったら、続く別の skill（段の型の工程の表で次の工程が起動する skill。例: design の後の `/plan-lgtm`、plan-lgtm の後の `/implement`）は打たずに完了を報告する」を書く（次の skill は別の工程の worker が行う）。再設計の巡の design では、段の型の「再設計で design に戻す」の、design の spec の Change に書く文も写す>
+<段の型の「起動する skill」。push がある工程では、段の型の「push の手順」を手順ごと写し、手順 1 で比べる前の段のブランチ（引いたもの）も書く。recheck では強さ・PR 番号・範囲（`PR 全体`。差分だけなら基準の HEAD も）と、段の型の「recheck の工程」の 2・3 を写す。例: `/implement tmp/plan.md` を実行し、次の手順で push する: …。implement・fix・fix-light では「この工程の前の試行がコミットを残していれば、それを確かめて、残りの作業（push を含む）だけを行う」を書く（段の型の「工程の基準の HEAD と、試行の起動時の HEAD・時刻」。工程の再試行は spec を差し替えないので、1 回目から書く）。どの工程でも「Change の skill が終わったら、続く別の skill（段の型の工程の表で次の工程が起動する skill。例: design の後の `/plan-lgtm`、plan-lgtm の後の `/implement`）は打たずに完了を報告する」を書く（次の skill は別の工程の worker が行う）。再設計の巡の design では、段の型の「再設計で design に戻す」の、design の spec の Change に書く文も写す>
 
 ## Constraints
 
@@ -36,6 +36,7 @@ coordinator が worker を起動するときに渡す指示（spec）の雛形�
 - `series.md` を書かない（書き手の口は決まっている）
 - PR にコメントしない。review thread（bot・人とも）への返信・resolve もしない（Greptile などの bot は返信でも課金される。返信は人が `/review-comments` で行う）
 - push は、Change に push の手順があるときだけ、その手順で行う
+- <fix・fix-light のときだけ書く> 差分は最小にする。`tmp/fixes.md` に無い改善・新しい仕組み（キャッシュの新設・共有の部品の変更など）は足さず、気づいたら完了報告の「残り」に書く（足した分が次の recheck の指摘の的になり、巡が増えるため）
 - <状態ファイルの `## 運用の約束` から、リポジトリ固有の制約・環境の準備・検査のコマンド（push の前に回す。「要らない」ならその旨）を写す>
 
 ### この作業単位に効くユーザーの決定
@@ -64,6 +65,7 @@ coordinator が worker を起動するときに渡す指示（spec）の雛形�
 
 - **Change** と **Observable acceptance** は、段の型（`./stage-type.md`）の工程の行から写す。言い換えない（coordinator が完了の証拠を確かめるときに、worker と同じ基準を使うため）。push がある工程（implement・fix・fix-light）では、段の型の「push の手順」を、番号の無い項目（`<branch>` の書き方・push の前の検査）も含めて Change に写す。fix-light では、段の型の「軽い fix」の 4 の Change に書く文も写す。worker は段の型を読まない
 - **作業の制約** の最後の行は、状態ファイルの `## 運用の約束` から写す。リポジトリに依存しない制約は雛形の行で足りる
+- **作業の制約** の「差分は最小」の行は、fix と fix-light の spec にだけ書く（他の工程では行ごと消す）
 - **これまでに直さないと決めた指摘** は、recheck の worker が `code-review` の指摘に `[既決 K-<n>]` を付ける照合の相手（段の型の「recheck の工程」の 3）。fix-light の worker には、その挙動を変えないための制約（変える必要があれば質問で聞く）。番号を変えずに写す
 - **この作業単位に効くユーザーの決定**・**これまでに直さないと決めた指摘**・**前の段から引き継いだ指摘** は、欄を消さない。0 件でも「なし」と書く（写し忘れと区別するため）。写したら、状態ファイルの `## ユーザーの決定` の配布済み・triage の記録の届け済みに、この作業単位と口（`spec`）を足す
 - 完了報告の 3 文は、今の adapter（Orca）の完了報告に添える要約の文の数（3 文）にそろえてある
