@@ -638,6 +638,8 @@ run_snapshot_tests() {
 # 目印（<!-- tmp-frontmatter: 書き先 … -->）の組の集合とこの表が一致することを見るので、雛形を足したら両方を直す
 WRITERS="$(cat <<'EOF'
 shared/agents/01-core-development/documenter.md|tmp/doc-sync-report.md
+shared/skills/adr/reference/adr-template.md|tmp/adr.md
+shared/skills/adr/reference/cross-check.md|tmp/adr-sources.md
 shared/skills/ask/SKILL.md|tmp/research.md
 shared/skills/blog/SKILL.md|tmp/blog-draft.md
 shared/skills/brief/reference/entry.md|tmp/context.md

@@ -2,139 +2,66 @@
 name: adr
 description: "Architecture Decision Record (ADR) を生成する。技術判断・設計決定の理由を記録したい時、過去判断の根拠を文書化したい時、プロダクトチームへの合意形成・共有を行いたい時、`/adr` 呼び出しで使用。"
 ---
-# Generate Architecture Decision Record (ADR)
+# ADR の作成
 
-You are a Principal Software Engineer and Technical Lead specializing in creating high-impact Architecture Decision Records (ADRs) that drive consensus and clarity across product teams.
+元資料（`grill`・`plan`・`research` など）や会話にある決定と根拠を、プロダクトチームが読んで合意できる日本語の ADR に書き直す。説得力は語気ではなく、元資料にある代替案・却下理由・制約で出す。元資料に無い理由・数字・固有名を書き足さない（書き足しは、読む人が事実として受け取り、後の判断の根拠に使ってしまうため）。
 
-Your task is to generate a comprehensive, highly persuasive ADR in Japanese based on the context provided by the user.
+## 出力先
 
-For detailed authoring philosophy, principles, and review criteria, refer to [reference/adr-authoring-guide.md](reference/adr-authoring-guide.md).
+- `./tmp/adr.md`: ADR の本体
+- `./tmp/adr-sources.md`: 出典表（元資料と照合したときだけ）
 
-## Template Structure
+ソースコードは変更しない。Notion への起票・更新はこの skill では行わない（ユーザーが行う）。
 
-Use the following template structure:
+## 補助ドキュメント
 
-```markdown
-# 【ADR】（タイトル）【YYYY-MM】
+**必ず読む**:
 
-公開: No
-Collaborator: 蒲生廣人
-作成日: YYYY-MM-DD
-最終更新日: YYYY-MM-DD
-Last edited by: 蒲生廣人
-採用状況: 承認済み（Accepted）
-タグ: （タグ一覧）
-
-# 要約（TL;DR）
-
-- （30秒〜1分で決定内容の本質、対象スコープ、得られる価値が伝わる箇条書き 3〜4点）
-
-# 文脈（Context）
-
-## いまの状態と課題（客観的事実・定量データ）
-- （判断当時の定量データ、システムの現状、テストや運用の課題）
-
-## 意思決定の判断基準（Decision Drivers）
-- （何を最優先にし、何をトレードオフとして許容するか）
-
-# 採用状況（Status）
-
-承認済み（Accepted）
-（※状況に応じて: 提案済み / 承認済み / 棄却 / 非推奨 / 置き換え済み）
-
-# 決定事項（Decisions）
-
-## 1. （主要決定 1）
-- （具体的な設計、アーキテクチャパターン、規約）
-
-## 2. （主要決定 2）
-...
-
-# 検討した代替案と却下理由（Rejected Alternatives & Rationale）
-
-本決定に至る過程で検討され、却下された代替案とその理由は以下の通りである。
-
-## 1. （論点 A に関する代替案）
-### 代替案 1-A: （案の名称）
-- **概要**: ...
-- **却下理由**: （なぜ現状の制約下では破綻するのか、致命的な欠点）
-
-### 代替案 1-B: （案の名称）
-- **概要**: ...
-- **却下理由**: ...
-
-## 2. （論点 B に関する代替案）
-...
-
-# 結果とトレードオフ（Consequences）
-
-## 得られる価値（Positive Consequences）
-- （アーキテクチャや組織にもたらす具体的なメリット）
-
-## 引き受ける負担・制約（Negative Consequences & Trade-offs）
-- （あえて受け入れる負債、追加される工数、割り切った制限事項）
-
-## 役割別の影響とアクション（Impact by Role）
-
-| ロール | 影響と必要なアクション |
+| 補助ドキュメント | タイミング |
 |---|---|
-| 実装エンジニア | （日々の開発・PR作成で何をすべきか） |
-| レビュアー | （PRレビューで何を確認すべきか） |
-| QA / テスト担当 | （検証環境やテスト計画への影響） |
-| インフラ / 関連チーム | （他システムや運用への影響） |
+| `reference/adr-template.md` | ADR を書く時（雛形と節ごとの書き方） |
+| `reference/adr-authoring-guide.md` | ADR を書く時（原則と歯止め・文体・表と図・自己レビュー） |
 
-# 現時点での懸念と緩和策（Concerns & Mitigations）
+**条件付きで読む**:
 
-想定される懸念と、それに対する具体的なリスクコントロール（緩和策）は以下の通りである。
-
-| 懸念事項 | 緩和策（Mitigation / トレードオフの受容理由） |
+| 補助ドキュメント | 読むタイミング |
 |---|---|
-| （例: 開発速度の低下） | （例: 要求を最小ハッピーパスに限定し、ハーネスで自動診断） |
-| （例: 運用の形骸化・抜け道） | （例: コード生成による可視化とレビュー運用による統制） |
-| （例: 検査の粗さ / 偽陰性） | （例: 最安コストで結合破壊を防ぐ意図的割り切り） |
+| `reference/cross-check.md` | 元資料が 1 つでもある時（照合の手順と出典表の雛形） |
 
-# スコープ外（Non-goals）と今後のロードマップ
+## 入力と元資料の選び方
 
-## 今回のスコープ外（Non-goals）
-- （議論の発散を防ぐため、あえて「今回はやらない」と決めたこと）
+元資料は次の規則で決める。題材が今回と一致するかを推し量って選ばない（判断が割れ、別の題材の内容が ADR に混ざるため）。
 
-## 今後のロードマップ・マイルストーン
-- （次のアクション、後続フェーズへの引き継ぎ）
+1. **ユーザーが元資料のパスを渡した** → それだけを使う。`tmp/` の他のファイルは見ない
+2. **渡していない** → `tmp/grill.md`・`tmp/plan.md`・`tmp/research.md`・`tmp/scenario.md` のうち在るものを、それぞれの frontmatter の `title` を添えて列挙し、どれを元資料にするか（「どれも使わない」を含む）を 1 問で聞く。答えを受けるまで ADR を書かない
+3. **2 で 1 つも無い、または「どれも使わない」を選んだ** → 元資料なし。会話の情報で書き、照合は行わない
 
-# 参考（References）
+選ばれなかったファイルの内容は、ADR にも出典表にも使わない。
 
-- （関連ドキュメント、先行 PR、他 ADR、参考資料の URL）
-```
+## 既存ファイルの扱い
 
-## Instructions & Core Principles
+開始時に `tmp/adr.md` か `tmp/adr-sources.md` があれば、書く前に「上書き / 追記 / キャンセル」を 1 問で確かめる。
 
-1. **Title & Date Format**:
-   - Title: `【ADR】（動詞を含めた明確な決定内容）【YYYY-MM】`
-   - Dates: `YYYY-MM-DD`
-2. **要約 (TL;DR)**:
-   - Provide 3-4 bullet points summarizing the decision, scope, and impact so busy stakeholders understand the essence in under 1 minute.
-3. **文脈 (Context)**:
-   - Ground the discussion in **objective facts and quantitative metrics** whenever possible (e.g., number of integrations, failure rates, coverage percentages) rather than subjective adjectives.
-   - Clarify the **Decision Drivers** (core priorities and trade-off criteria).
-4. **決定事項 (Decisions)**:
-   - State clearly and concretely what is decided. Use diagrams (e.g. ASCII or Mermaid) if architectural layers or workflows are involved.
-5. **検討した代替案と却下理由 (Rejected Alternatives & Rationale) [MANDATORY]**:
-   - The persuasiveness of a decision relies on the quality of rejected alternatives.
-   - Propose at least 2-3 realistic alternatives across relevant dimensions (structure, process/strictness, automation approach).
-   - Fairly explain why each alternative seemed viable and the specific reasons it was rejected under current constraints.
-6. **結果とトレードオフ (Consequences)**:
-   - Be brutally honest about negative consequences, trade-offs, and burdens.
-   - Include the **Impact by Role** table to clarify concrete next actions for developers, reviewers, QA, and infra.
-7. **現時点での懸念と緩和策 (Concerns & Mitigations) [MANDATORY]**:
-   - Anticipate team anxieties (DX degradation, risk of loopholes, test precision/false negatives, external dependencies).
-   - Present explicit mitigations or justify why the trade-off is intentionally accepted.
-8. **スコープ外 (Non-goals)**:
-   - Explicitly list non-goals to prevent scope creep and align expectations.
-9. **References**:
-   - Link related ADRs, PRs, and metrics.
+- 既存の `tmp/adr.md` を直す依頼（添削）なら、上書きを既定の候補として示す
+- `tmp/adr.md` の `notion_synced_at` の値が日時なら、いまの本文のハッシュを計算して `notion_synced_from` と比べ、結果を問いに添える。計算は `awk 'f;/^---$/{c++; if(c==2) f=1}' tmp/adr.md | shasum -a 256 | cut -c1-12`（frontmatter の閉じの `---` より後ろの本文だけを数える）
+  - 一致 → 「いまの本文は Notion に反映した版（<日時>）と同じ。直すと Notion と分かれる」
+  - 不一致 → 「反映後（<日時>）に本文を直してあり、Notion とは既に分かれている」
+- `notion_synced_at` が `未反映`、またはキーが無い（版の記録を持たない古い `tmp/adr.md`）なら、Notion には触れずに問う
+- **上書き・追記のどちらでも、既存の `notion_page`・`notion_synced_at`・`notion_synced_from` の値をそのまま引き継ぐ。** 雛形の既定値で書くと、どの版を Notion に反映したかの記録が消えるため。キーが無いものだけは雛形の既定値で書く
+- キャンセルなら何も書かずに終える
 
-## Output Requirements
+## 手順
 
-- Write entirely in Japanese using natural, authoritative, and empathetic engineering language.
-- Maintain an objective, structured, and constructive tone.
-- Ensure the document addresses concerns of both engineering leadership and hands-on developers.
+1. **元資料を決めて読む**（「入力と元資料の選び方」）
+2. **既存ファイルを確かめる**（「既存ファイルの扱い」）
+3. **書く**: `reference/adr-template.md` の雛形と節ごとの書き方、`reference/adr-authoring-guide.md` の原則と歯止めに沿って書く。代替案が論点ごとに 2〜3 個に足りなければ、書き足さずに「この論点で他に検討した案はあるか」をユーザーに聞き、答えを受けてから続ける。「無い」と答えたら、下限を割ったまま、その論点に「他に検討した案は無い」と書く
+4. **照合する**: 元資料があれば `reference/cross-check.md` の 6 つの手順を当て、`tmp/adr-sources.md` に出典表を書く。元資料が無ければ照合しない
+5. **書き出して報告する**: ガイドの自己レビューのチェックリストで見直してから `tmp/adr.md` に書き、次を報告する
+   - 照合の結果: 削った文の件数・ユーザーに確認した文の件数。照合していなければ件数は書かず、理由だけを書く（「元資料なしのため照合していない」など。照合していない 0 件は、照合して 0 件だったと読まれるため）
+   - Notion への反映の案内（1 回）: 反映したら frontmatter の `notion_page` にページの URL、`notion_synced_at` に日時、`notion_synced_from` に本文のハッシュ（計算は「既存ファイルの扱い」と同じ）を書く
+   - HTML 化の提案（1 回）
+
+## 出力の要件
+
+- 全体を日本語で書く。文体はガイドの「文体の規則」、表と図はガイドの「表と図」に従う
+- エンジニアリングの責任者と、日々の開発者の両方の懸念に答える
