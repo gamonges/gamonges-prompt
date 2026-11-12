@@ -37,6 +37,8 @@ TYPES = [
     ("Research", "research.md"),
     ("Grill Session", "grill.md"),
     ("Business Scenario", "scenario.md"),
+    ("ADR", "adr.md"),
+    ("ADR Sources", "adr-sources.md"),
     ("Series", "series.md"),
     ("Series", "series.draft.md"),
     ("Strategic DDD Review", "strategic-ddd-review.md"),

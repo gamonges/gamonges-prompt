@@ -1,75 +1,81 @@
 ---
 name: adr
-description: "Architecture Decision Record (ADR) を生成する。技術判断・設計決定の理由を記録したい時、過去判断の根拠を文書化したい時、`/adr` 呼び出しで使用。"
+description: "Architecture Decision Record (ADR) を生成する。技術判断・設計決定の理由を記録したい時、過去判断の根拠を文書化したい時、プロダクトチームへの合意形成・共有を行いたい時、`/adr` 呼び出しで使用。"
 ---
-# Generate Architecture Decision Record (ADR)
+# ADR の作成
 
-You are an expert technical writer who specializes in creating Architecture Decision Records (ADRs).
+元資料（`grill`・`plan`・`research` など）や会話にある決定と根拠を、プロダクトチームが読んで合意できる日本語の ADR に書き直す。説得力は語気ではなく、元資料にある代替案・却下理由・制約で出す。元資料に無い理由・数字・固有名を書き足さない（書き足しは、読む人が事実として受け取り、後の判断の根拠に使ってしまうため）。
 
-Your task is to generate a comprehensive ADR in Japanese based on the context provided by the user.
+## 出力先
 
-## Template Structure
+- `./tmp/adr.md`: ADR の本体
+- `./tmp/adr-sources.md`: 出典表（元資料と照合したときだけ）
 
-Use the following template structure exactly:
+ソースコードは変更しない。Notion のページの起票・更新はこの skill では行わない（ユーザーが行う）。`tmp/adr.md` の frontmatter の版の記録は skill が書く（「Notion への反映を記録する」）。
 
-```markdown
-# 【ADR】（タイトル）【YYYY-MM】
+## 補助ドキュメント
 
-公開: No
-Collaborator: 蒲生廣人
-作成日: YYYY-MM-DD
-最終更新日: YYYY-MM-DD
-Last edited by: 蒲生廣人
-最終更新から何日経ったか: 0 days
+**必ず読む**:
 
-# **文脈**
+| 補助ドキュメント | タイミング |
+|---|---|
+| `reference/adr-template.md` | ADR を書く時（雛形と節ごとの書き方） |
+| `reference/adr-authoring-guide.md` | ADR を書く時（原則と歯止め・文体・表と図・自己レビュー） |
 
-*判断当時の経緯、観点、事情など*
+**条件付きで読む**:
 
-# **採用状況**
+| 補助ドキュメント | 読むタイミング |
+|---|---|
+| `reference/cross-check.md` | 元資料が 1 つでもある時（照合の手順と出典表の雛形） |
 
-*提案済み / 承認済み / 棄却 / 非推奨 / 置き換え済み など*
+## 入力と元資料の選び方
 
-# **決定事項**
+元資料は次の規則で決める。題材が今回と一致するかを推し量って選ばない（判断が割れ、別の題材の内容が ADR に混ざるため）。
 
-*判断の結果として決定した内容など*
+1. **ユーザーが元資料のパスを渡した** → それだけを使う。`tmp/` の他のファイルは見ない。読めないパスがあれば、ADR を書かずに止めて知らせる
+2. **渡していない** → `tmp/grill.md`・`tmp/plan.md`・`tmp/research.md`・`tmp/scenario.md` のうち在るものを、それぞれの frontmatter の `title`（無ければ先頭の見出し）を添えて列挙し、どれを元資料にするか（「どれも使わない」を含む）を 1 問で聞く。複数選んでよいこと、候補に無いファイルはパスで渡せることを問いに添える。添削で `tmp/adr-sources.md` の「元資料:」行があれば、その一覧を既定の候補として示す（選ぶのはユーザー）。答えを受けるまで ADR を書かない
+3. **2 で 1 つも無い、または「どれも使わない」を選んだ** → 元資料なし。会話でユーザーが述べた決定・理由・退けた案・数字・固有名だけを使い、述べられていないものは書かない（要るならユーザーに聞く）。照合は行わない
 
-# **結果**
+選ばれなかったファイルの内容は、ADR にも出典表にも使わない（追記で残す既存の本文は対象外）。
 
-*この決定に対する評価*
+## 既存ファイルの扱い
 
-# **参考**
+`/adr 反映した <URL>` の依頼なら、この節ではなく「Notion への反映を記録する」を行う。
 
-*参考にしたWebサイトや書籍、議事録などのURL*
-```
+開始時に `tmp/adr.md` か `tmp/adr-sources.md` があれば、書く前に「上書き / 追記 / キャンセル」を確かめる。規則 2 の元資料の問いも要るときは、同じ 1 問にまとめる。
 
-## Instructions
+- **追記**は、既存の `tmp/adr.md` の本文の後ろに、新しい決定事項・代替案などの節を足すこと（frontmatter は 1 つのまま）。別の題材の ADR を足すことではない（別の題材なら上書きかキャンセル）
+- 既存の `tmp/adr.md` を直す依頼（添削）なら、上書きを既定の候補として示す
+- `tmp/adr.md` の `notion_synced_at` の値が日時なら、いまの本文のハッシュを計算して `notion_synced_from` と比べ、結果を問いに添える。計算は `awk '{sub(/[ \t\r]+$/,"")} NR==1&&$0!="---"{exit} f{b=b $0 "\n"; if($0!=""){printf "%s",b; b=""}} /^---$/{c++; if(c==2) f=1}' tmp/adr.md | shasum -a 256 | cut -c1-12`（frontmatter の閉じの `---` より後ろの本文だけを数える。行末の空白・改行コード・末尾の空行の違いは数えない）
+  - 一致 → 「いまの本文は Notion に反映した版（<日時>）と同じ。直すと Notion と分かれる」
+  - 不一致 → 「反映後（<日時>）に本文を直してあり、Notion とは既に分かれている」
+  - 結果が `e3b0c44298fc`（空の入力）なら本文を数えられていない。比べずに、Notion には触れずに問う
+- `notion_synced_at` が `未反映`、キーが無い、または frontmatter が無い（版の記録を持たない古い `tmp/adr.md`）なら、Notion には触れずに問う
+- **上書き・追記のどちらでも、既存の `notion_page`・`notion_synced_at`・`notion_synced_from` の値をそのまま引き継ぐ。** 雛形の既定値で書くと、どの版を Notion に反映したかの記録が消えるため。キーが無いものだけは雛形の既定値で書く
+- **出典表**: 上書きなら作り直す。追記なら前回の行を残し、足した節の行を足し、「元資料:」行に今回の資料を足す。今回が元資料なしで `tmp/adr-sources.md` があれば、同じ問いの中で古い出典表を消すかを確かめる（残すと照合済みと読まれるため）。元資料なしの追記なら前回の出典表は残す
+- キャンセルなら何も書かずに終える
 
-1. **Title**: Create a concise but descriptive title that captures the essence of the architectural decision
-2. **Date Format**: Use the current year and month in YYYY-MM format for the title, and YYYY-MM-DD for the metadata fields
-3. **文脈 (Context)**:
-   - Explain the background, circumstances, and perspectives at the time of the decision
-   - Include technical constraints, business requirements, or problems that led to this decision
-4. **採用状況 (Status)**:
-   - Choose an appropriate status: 提案済み (Proposed), 承認済み (Accepted), 棄却 (Rejected), 非推奨 (Deprecated), 置き換え済み (Superseded)
-5. **決定事項 (Decision)**:
-   - Clearly describe what was decided
-   - Include specific technical choices, patterns, or approaches
-   - Explain WHY this decision was made (rationale)
-6. **結果 (Consequences)**:
-   - Describe both positive and negative outcomes
-   - Include trade-offs, benefits, and potential risks
-   - Mention any technical debt or future considerations
-7. **参考 (References)**:
-   - List relevant documentation, RFCs, blog posts, or discussions
-   - Include URLs where applicable
+## Notion への反映を記録する
 
-## Output Requirements
+`/adr 反映した <URL>` で呼ばれたら、ADR を書かずにこの節だけを行う。
 
-- Write entirely in Japanese using natural, professional language
-- Be specific and concrete with examples where appropriate
-- Keep the tone objective and technical
-- Ensure the ADR is comprehensive yet concise
-- Fill in the current date automatically
+1. `tmp/adr.md` が無ければ止めて知らせる。URL が無ければ 1 問で聞く
+2. 本文のハッシュを「既存ファイルの扱い」と同じ式で計算する。結果が `e3b0c44298fc` なら書かずに止めて知らせる
+3. frontmatter の 3 キーだけを書き換える: `notion_page` に URL、`notion_synced_at` に `date '+%Y-%m-%d %H:%M'` の値、`notion_synced_from` に 2 の値。本文には触れない
+4. 書き換えた後に同じ式を回し、`notion_synced_from` と一致することを確かめて報告する
 
-Now, based on the context provided by the user, generate a complete ADR following this template.
+## 手順
+
+1. **元資料を決めて読む**（「入力と元資料の選び方」）
+2. **既存ファイルを確かめる**（「既存ファイルの扱い」。手順 1 の問いと 1 問にまとめる）
+3. **書く**: `reference/adr-template.md` の雛形と節ごとの書き方、`reference/adr-authoring-guide.md` の原則と歯止めに沿って書く。代替案が論点ごとに 2〜3 個に足りなければ、書き足さずに、足りない論点の一覧で「この論点で他に検討した案はあるか」を 1 回にまとめてユーザーに聞き、答えを受けてから続ける。「無い」と答えた論点は、下限を割ったまま「他に検討した案は無い」と書く
+4. **照合する**: 元資料があれば `reference/cross-check.md` の 6 つの手順を当て、`tmp/adr-sources.md` に出典表を書く。追記では足した節の文だけに当てる。元資料が無ければ照合しない
+5. **書き出して報告する**: ガイドの自己レビューのチェックリストで見直してから `tmp/adr.md` に書き、次を報告する
+   - 照合の結果: 削った文・ユーザーに確認した文・合格しないまま残した文の件数。合格しないまま残した文があれば、文と理由も書く。照合していなければ件数は書かず、理由だけを書く（「元資料なしのため照合していない。会話の内容だけで書き、出典は確かめていない」など。照合していない 0 件は、照合して 0 件だったと読まれるため）
+   - Notion への反映の案内（1 回）: Notion に反映したら `/adr 反映した <URL>` で知らせる。skill が版の記録を書く
+   - HTML 化の提案（1 回）
+
+## 出力の要件
+
+- 全体を日本語で書く。文体はガイドの「文体の規則」、表と図はガイドの「表と図」に従う
+- エンジニアリングの責任者と、日々の開発者の両方の懸念に答える
