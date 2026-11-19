@@ -1,0 +1,12 @@
+{
+  "name": "gamonges",
+  "owner": { "name": "gamonges" },
+  "description": "gamonges-prompt で管理する個人用の Claude Code プラグイン",
+  "plugins": [
+    {
+      "name": "tsgo-lsp",
+      "source": "./tsgo-lsp",
+      "description": "TypeScript 7（typescript-go）の内蔵 LSP を、Claude Code が受けられる push 診断に変換して使う"
+    }
+  ]
+}
