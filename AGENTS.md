@@ -19,7 +19,7 @@ Claude Code と Codex で使用する Skills、SubAgents のコレクション�
 
 **他端末への展開時の手順**: `git pull && ./setup.sh migrate && ./setup.sh install`
 
-**ディレクトリの役割**: 共通資産（skills・agents・scripts・global-rules.md）は `shared/` が正本。`claude/` に残るのは Claude Code 固有の `settings.json` だけ（旧パス `claude/{skills,agents,scripts}` の互換 symlink は移行の後に外した。旧パスを指すリンクは `./setup.sh migrate` が張り替える）。Codex 固有のもの（読み替え表 `codex-rules.md`・agents の TOML 生成器 `gen-agents.py`）は `codex/`。新しいファイルは `shared/` に置く。Neovim の設定はトップレベルの `nvim/`（Claude と Codex のどちらにも属さない）。
+**ディレクトリの役割**: 共通資産（skills・agents・scripts・global-rules.md）は `shared/` が正本。`claude/` に残るのは Claude Code 固有の `settings.json` と、Claude Code のプラグイン（`claude/plugins/`。ローカルの marketplace で、`setup.sh` の管理外。導入は `claude plugin marketplace add ~/workspaces/gamonges-prompt/claude/plugins`、手順は各プラグインの README。Codex では使えない）だけ（旧パス `claude/{skills,agents,scripts}` の互換 symlink は移行の後に外した。旧パスを指すリンクは `./setup.sh migrate` が張り替える）。Codex 固有のもの（読み替え表 `codex-rules.md`・agents の TOML 生成器 `gen-agents.py`）は `codex/`。新しいファイルは `shared/` に置く（Claude Code のプラグインは例外で `claude/plugins/`）。Neovim の設定はトップレベルの `nvim/`（Claude と Codex のどちらにも属さない）。
 
 配置方式は 2 通り（`~/.codex` が在れば、Codex にも同じ資産を展開する。3 つ目の方式ではなく、下の 2 方式の Codex 版）:
 

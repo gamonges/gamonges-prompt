@@ -22,16 +22,21 @@ function readRules() {
       .split("\n")
       .map((l) => l.replace(/#.*/, "").trim())
       .filter(Boolean);
-  } catch {
-    return [];
+  } catch (e) {
+    if (e.code === "ENOENT") return [];
+    // 読めないのに黙って空にすると、止めるはずの場所で tsc が起動する。読めないときは止める側に倒す
+    process.stderr.write(`[tsgo-lsp-proxy] ${denyFile} を読めない（${e.code ?? e.message}）。安全のため、どこでも tsc を起動しない\n`);
+    return null;
   }
 }
 
 // 一致したルールを返す（無ければ null）
 export function matchDenyRule(dir) {
+  const rules = readRules();
+  if (rules === null) return "(deny-roots を読めない)";
   const abs = path.resolve(dir);
   const segments = abs.split(path.sep);
-  for (const rule of readRules()) {
+  for (const rule of rules) {
     if (rule.startsWith("/") || rule.startsWith("~")) {
       const prefix = path.resolve(rule.replace(/^~(?=$|\/)/, os.homedir()));
       if (abs === prefix || abs.startsWith(prefix + path.sep)) return rule;
@@ -60,7 +65,10 @@ export function runInertServer(reason) {
       const m = /Content-Length:\s*(\d+)/i.exec(buf.subarray(0, h).toString("ascii"));
       const end = h + 4 + (m ? Number(m[1]) : 0);
       if (buf.length < end) return;
-      const msg = m ? JSON.parse(buf.subarray(h + 4, end).toString("utf8")) : {};
+      let msg = {};
+      try {
+        if (m) msg = JSON.parse(buf.subarray(h + 4, end).toString("utf8"));
+      } catch {} // 不正な 1 通は捨てる（落ちると Claude Code が再起動を繰り返す）
       buf = buf.subarray(end);
       if (msg.method === "exit") process.exit(0);
       if (msg.id == null || !msg.method) continue; // 通知とクライアントへの応答は捨てる

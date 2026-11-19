@@ -22,7 +22,7 @@ import { denyFile, matchDenyRule, runInertServer } from "./guard.mjs";
 // 版を確かめてから使う。
 function tscMajor(cmd) {
   try {
-    const m = /Version (\d+)\./.exec(execFileSync(cmd, ["--version"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
+    const m = /Version (\d+)\./.exec(execFileSync(cmd, ["--version"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5000 }));
     return m ? Number(m[1]) : 0;
   } catch {
     return 0;
@@ -32,13 +32,21 @@ function resolveTsc() {
   if (process.env.TSGO_LSP_COMMAND) return process.env.TSGO_LSP_COMMAND;
   const candidates = [];
   try {
-    const dir = execFileSync("mise", ["where", "npm:typescript@7"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const dir = execFileSync("mise", ["where", "npm:typescript@7"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5000 }).trim();
     candidates.push(path.join(dir, "node_modules", ".bin", "tsc"));
   } catch {}
   candidates.push("tsc");
   for (const c of candidates) if ((c === "tsc" || fs.existsSync(c)) && tscMajor(c) >= 7) return c;
   process.stderr.write(`[tsgo-lsp-proxy] TypeScript 7 の tsc が見つからない（試した候補: ${candidates.join(", ")}）。TSGO_LSP_COMMAND で指定する\n`);
   process.exit(1);
+}
+
+// 大きな repo では明示の許可が無い限り tsc を起動しない（guard.mjs の冒頭を参照）。
+// tsc を探すより先に判定する（TS 7 が無い環境でも、止める場所では落ちずに黙らせるため）
+const deniedBy = matchDenyRule(process.cwd());
+if (deniedBy && process.env.TSGO_LSP_ALLOW !== "1") {
+  runInertServer(`${process.cwd()} が ${denyFile} の「${deniedBy}」に一致（許可するなら TSGO_LSP_ALLOW=1 で Claude Code を起動）`);
+  await new Promise(() => {}); // 以降の中継を動かさない
 }
 
 const command = resolveTsc();
@@ -49,13 +57,6 @@ const pullScope = process.env.TSGO_LSP_PULL_SCOPE === "all" ? "all" : "changed";
 const debug = process.env.TSGO_LSP_DEBUG === "1";
 const log = (...a) => debug && process.stderr.write(`[tsgo-lsp-proxy] ${a.join(" ")}\n`);
 
-// 大きな repo では明示の許可が無い限り tsc を起動しない（guard.mjs の冒頭を参照）
-const deniedBy = matchDenyRule(process.cwd());
-if (deniedBy && process.env.TSGO_LSP_ALLOW !== "1") {
-  runInertServer(`${process.cwd()} が ${denyFile} の「${deniedBy}」に一致（許可するなら TSGO_LSP_ALLOW=1 で Claude Code を起動）`);
-  await new Promise(() => {}); // 以降の中継を動かさない
-}
-
 const server = spawn(command, ["--lsp", "--stdio"], { stdio: ["pipe", "pipe", "inherit"] });
 server.on("error", (e) => {
   process.stderr.write(`[tsgo-lsp-proxy] failed to start ${command}: ${e.message}\n`);
@@ -63,6 +64,13 @@ server.on("error", (e) => {
 });
 server.on("exit", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
 process.stdin.on("end", () => server.stdin.end());
+// 中継だけが殺されると、4〜6GB を使う tsc が孤児として残るので、子にも伝える
+for (const sig of ["SIGTERM", "SIGINT", "SIGHUP"]) {
+  process.on(sig, () => {
+    server.kill(sig);
+    process.exit(0);
+  });
+}
 
 // --- Content-Length フレーミング -------------------------------------------------
 function reader(stream, onMessage) {
@@ -83,7 +91,12 @@ function reader(stream, onMessage) {
       if (buf.length < end) return;
       const body = buf.subarray(start, end).toString("utf8");
       buf = buf.subarray(end);
-      onMessage(JSON.parse(body));
+      // 1 通の不正なメッセージで中継ごと落ちると、開いているファイルの状態がすべて失われるので、その 1 通だけ捨てる
+      try {
+        onMessage(JSON.parse(body));
+      } catch (e) {
+        process.stderr.write(`[tsgo-lsp-proxy] メッセージを捨てた: ${e.message}\n`);
+      }
     }
   });
 }
@@ -134,8 +147,11 @@ reader(process.stdin, (msg) => {
   switch (msg.method) {
     case "initialize": {
       // pull を使うことを tsgo に伝える（Claude Code 自身は pull を名乗らない）
-      const td = ((msg.params.capabilities ??= {}).textDocument ??= {});
-      td.diagnostic ??= { dynamicRegistration: false, relatedDocumentSupport: false };
+      const caps = ((msg.params ??= {}).capabilities ??= {});
+      (caps.textDocument ??= {}).diagnostic ??= { dynamicRegistration: false, relatedDocumentSupport: false };
+      // refresh を名乗らないと tsgo は workspace/diagnostic/refresh を送らず、import 先の変更が
+      // 他の開いているファイルの診断に届かない（refresh は下の tsgo → Claude Code の側で中継が引き受ける）
+      ((caps.workspace ??= {}).diagnostics ??= {}).refreshSupport = true;
       break;
     }
     case "initialized":
