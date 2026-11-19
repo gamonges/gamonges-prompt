@@ -32,7 +32,9 @@ shared/                  # 共通資産（正本）。Claude Code と Codex の�
 └── global-rules.md      # 全プロジェクト共通の規約（~/.claude/CLAUDE.md と ~/.codex/AGENTS.md にマーカーブロックで配置）
 
 claude/                  # Claude Code 固有
-└── settings.json        # hook 定義・deny リスト等（~/.claude/settings.json へ symlink）
+├── settings.json        # hook 定義・deny リスト等（~/.claude/settings.json へ symlink）
+└── plugins/             # Claude Code のプラグイン（ローカルの marketplace。setup.sh の管理外で、claude plugin marketplace add で導入する）
+    └── tsgo-lsp/        # TypeScript 7 の内蔵 LSP を使う code intelligence（手順は claude/plugins/tsgo-lsp/README.md）
 
 nvim/                    # Neovim の設定（~/.config/nvim へ symlink。Claude と Codex の共通の段で扱う）
 
