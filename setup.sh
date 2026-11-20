@@ -55,6 +55,10 @@ CODEX_DIR="${HOME}/.codex"
 CODEX_SKILLS_DIR="${HOME}/.agents/skills"
 CODEX_AGENTS_DIR="${CODEX_DIR}/agents"
 CODEX_AGENTS_MD="${CODEX_DIR}/AGENTS.md"
+
+# 毎晩のディスク掃除（shared/scripts/disk-cleanup.sh）を起動する LaunchAgent
+DISK_CLEANUP_LABEL="local.gamonges-prompt.disk-cleanup"
+DISK_CLEANUP_PLIST="${HOME}/Library/LaunchAgents/${DISK_CLEANUP_LABEL}.plist"
 CODEX_HOOKS_JSON="${CODEX_DIR}/hooks.json"
 REPO_CODEX_RULES="${SCRIPT_DIR}/codex/codex-rules.md"
 REPO_GEN_AGENTS="${SCRIPT_DIR}/codex/gen-agents.py"
@@ -216,6 +220,90 @@ nvim_link_is_ours() {  # $1=リンク, $2=自分の nvim/
     resolved="$(cd -P "$1" 2>/dev/null && pwd -P)" || return 1
     ours="$(cd -P "$2" 2>/dev/null && pwd -P)" || return 1
     [[ "$resolved" == "$ours" ]]
+}
+
+# launchctl で登録・解除してよいのは、HOME が本物のホームのときだけ。setup のテストは HOME を
+# 一時ディレクトリに差し替えて install を流すので、登録まですると偽の HOME を指すジョブが本物の
+# launchd に残る。本物のホームは $HOME ではなくディレクトリサービスから引く
+is_real_home() {
+    local real
+    real="$(eval echo "~$(id -un)")"
+    [[ "$(cd "$HOME" 2>/dev/null && pwd -P)" == "$(cd "$real" 2>/dev/null && pwd -P)" ]]
+}
+
+# 毎晩のディスク掃除の LaunchAgent。1〜7 時の毎時 0 分に起動し、1 日 1 回にするのはスクリプト側の役目
+# （スリープで逃した起動は起床時に 1 回だけ発火するので、時間帯の判定もスクリプトが持つ）。
+# スクリプトは repo ではなく ~/.claude/scripts/ のコピーを指す（hook と同じく、ブランチ切替中に消えないため）
+install_launchd() {
+    log_info "毎晩のディスク掃除（LaunchAgent）をインストールしています..."
+    if [[ "$(uname)" != Darwin ]]; then
+        log_info "  - macOS ではないので省略します"
+        return 0
+    fi
+    local script="${CLAUDE_DIR}/scripts/disk-cleanup.sh" tmp h hours=""
+    for h in 1 2 3 4 5 6 7; do
+        hours+="        <dict><key>Hour</key><integer>${h}</integer><key>Minute</key><integer>0</integer></dict>"$'\n'
+    done
+    mkdir -p "$(dirname "$DISK_CLEANUP_PLIST")"
+    tmp="$(mktemp)"
+    cat > "$tmp" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>${DISK_CLEANUP_LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>${script}</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <array>
+${hours}    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:${HOME}/.local/bin:${HOME}/.local/share/mise/shims:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+    <key>LowPriorityIO</key>
+    <true/>
+    <key>Nice</key>
+    <integer>10</integer>
+    <key>StandardOutPath</key>
+    <string>${HOME}/Library/Logs/disk-cleanup.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>${HOME}/Library/Logs/disk-cleanup.stdout.log</string>
+</dict>
+</plist>
+EOF
+    if cmp -s "$tmp" "$DISK_CLEANUP_PLIST" 2>/dev/null; then
+        rm -f "$tmp"
+        log_info "  - 変更なし: ${DISK_CLEANUP_PLIST}"
+    else
+        mv "$tmp" "$DISK_CLEANUP_PLIST"
+        log_success "  ✓ ${DISK_CLEANUP_PLIST}"
+    fi
+    if ! is_real_home; then
+        log_info "  - HOME が本物のホームではないので launchctl への登録は省略します"
+        return 0
+    fi
+    # 登録し直すと plist の変更が反映される。未登録なら bootout は失敗するので無視する
+    launchctl bootout "gui/$(id -u)/${DISK_CLEANUP_LABEL}" 2>/dev/null || true
+    if launchctl bootstrap "gui/$(id -u)" "$DISK_CLEANUP_PLIST"; then
+        log_success "  ✓ launchd に登録しました（1:00〜7:59 に 1 日 1 回。ログ: ~/Library/Logs/disk-cleanup.log）"
+    else
+        log_error "  ✗ launchctl bootstrap に失敗しました"
+        return 1
+    fi
+}
+
+uninstall_launchd() {
+    [[ -f "$DISK_CLEANUP_PLIST" ]] || return 0
+    if is_real_home; then
+        launchctl bootout "gui/$(id -u)/${DISK_CLEANUP_LABEL}" 2>/dev/null || true
+    fi
+    rm -f "$DISK_CLEANUP_PLIST" && log_success "  ✓ 削除: ${DISK_CLEANUP_PLIST}"
 }
 
 # Neovim の設定のインストール（~/.config/nvim を repo 内 nvim/ への symlink にする）。
@@ -1329,6 +1417,8 @@ uninstall() {
     # Codex 側（自分が置いたものだけ）
     uninstall_codex
 
+    uninstall_launchd
+
     log_info "削除完了 - Scripts: ${scripts_count} 件, Skills: ${skills_count} 件, Commands: ${commands_count} 件, Agents: ${agents_count} 件, Settings: ${settings_count} 件, Neovim: ${nvim_count} 件"
 }
 
@@ -1553,6 +1643,8 @@ main() {
             install_settings
             echo ""
             run_stage "Neovim" install_nvim
+            echo ""
+            run_stage "毎晩のディスク掃除" install_launchd
             echo ""
             # CLAUDE.md の段で止まると install_codex に到達しないので、段として走らせる
             run_stage "Claude の共通規約" install_global_rules

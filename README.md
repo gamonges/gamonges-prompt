@@ -174,6 +174,23 @@ git pull
 - **この変更のきっかけの「`env/stg.ts` の編集が止められた」は、`.claude/worktrees/<名前>/env/…`（worktree の下）での出来事だった。** 当時の deny（`**/*.env*`）はこの名前に一致しないので、Claude Code の `.claude/` の下の保護で止まった可能性が高い（未確定。確かめていない）。本 hook はこの名前を通すが、`.claude/` の保護は別の仕組みで、本 hook では変わらない
 - **入れたら**: Codex では PreToolUse の自前グループが 1 つ増えるので、`./setup.sh install` の後に `/hooks` で PreToolUse の全件を信頼し直す
 
+### 毎晩のディスク掃除（macOS）
+
+`./setup.sh install` は LaunchAgent（`~/Library/LaunchAgents/local.gamonges-prompt.disk-cleanup.plist`）を置いて launchd に登録する。中身は `shared/scripts/disk-cleanup.sh`（`~/.claude/scripts/` のコピー）で、**1:00〜7:59 の間に 1 日 1 回**動く。
+
+| 区分 | 対象 |
+|---|---|
+| 自動で消す | `uv cache prune`・`pnpm store prune`・`brew cleanup -s`・Docker の未使用イメージとビルドキャッシュ（作成から 7 日以上）・アプリ自動更新の残骸（`~/Library/Caches/*/org.sparkle-project.Sparkle`・`*-updater`） |
+| 通知だけ | 空き 50GB 未満・マージ済み PR の worktree の本数（消すのは `/worktree-cleanup`） |
+| 触らない | Docker のボリューム・`uv cache clean`・worktree |
+
+- **消すのは取り直せるものだけ**。取り返せないものを自動で消すと、毎晩同じ事故を起こしうる
+- **Docker の「7 日」は近似**: Docker はイメージの最終使用日時を持たないので、「どのコンテナ（停止中を含む）からも参照されず、作成から 7 日以上」を消す。`--rm` で使い捨てただけの古いイメージは消えうる（pull し直せば戻る）。Docker が起動していなければ飛ばす
+- **時間帯はスクリプトが判定する**: launchd はスリープで逃した起動を起床時に 1 回だけ発火するので、起動時刻ではなく「今が 1〜7 時台か」で決める。夜通し寝ていた日は飛ばす
+- **ログ**: `~/Library/Logs/disk-cleanup.log`（前後の空き容量・各段の終了コード）
+- **手動で流す**: `DISK_CLEANUP_FORCE=1 ~/.claude/scripts/disk-cleanup.sh`（時間帯と「今日は実行済み」を無視する）
+- **launchctl への登録は HOME が本物のホームのときだけ**。setup のテストは HOME を差し替えて install を流すので、登録まですると偽の HOME を指すジョブが残る
+
 ## 📚 Skills 一覧
 
 開発ワークフロー系（旧 commands から移行）と、ユーティリティ系（既存）に分類:
