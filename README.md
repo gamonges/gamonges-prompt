@@ -69,6 +69,7 @@ cd gamonges-prompt
 | settings.json | `~/.claude/settings.json`（symlink） | — |
 | Neovim の設定 | `~/.config/nvim`（`nvim/` への symlink。既存の実ディレクトリ・実ファイル・他所へのリンクは `nvim.pre-install.*` に退避） | （共通。Codex の段では張らない。Codex の外部エディタも nvim） |
 | Scripts | `~/.claude/scripts/`（**実体コピー**。編集・pull したら `./setup.sh install` を再実行する） | （共通。Codex の hook も同じスクリプトを実行する） |
+| 毎晩のディスク掃除 | `~/Library/LaunchAgents/local.gamonges-prompt.disk-cleanup.plist`（macOS だけ。HOME が本物のホームのときだけ launchd に登録する。中身と止め方は「毎晩のディスク掃除（macOS）」） | （共通） |
 
 install が失敗したとき・並行して実行したとき:
 
@@ -102,6 +103,7 @@ bash shared/scripts/tests/test-codex-run.sh      # codex-run.sh の挙動（偽�
 bash shared/scripts/tests/test-knowledge.sh      # knowledge.py の規則・目録・snapshot と、skill の雛形の frontmatter（python3 と /usr/bin/python3）。knowledge.py か tmp/ に md を書く skill の雛形を編集したら
 bash shared/scripts/tests/test-series-inbox.sh   # series-run の横断の受信箱の挙動（SERIES_RUN_STATE_DIR。python3 と /usr/bin/python3）。series_inbox.py を編集したら
 bash shared/scripts/tests/test-review-to-atlas-notes.sh  # review-to-atlas-notes.py の挙動（偽の gh・偽の atlas-notes。python3 と /usr/bin/python3）。スクリプトを編集したら
+bash shared/scripts/tests/test-disk-cleanup.sh   # disk-cleanup.sh の挙動（偽のコマンド。/bin/bash 3.2 でも）。disk-cleanup.sh を編集したら
 ```
 
 ### アンインストール
@@ -109,6 +111,8 @@ bash shared/scripts/tests/test-review-to-atlas-notes.sh  # review-to-atlas-notes
 ```bash
 ./setup.sh uninstall
 ```
+
+毎晩のディスク掃除の LaunchAgent も、launchd の登録を外して plist を消す（plist を手で消していても、登録が残っていれば外す）。状態（`~/.local/state/disk-cleanup/`）とログは残す。
 
 ### 旧形式からの移行（他端末で旧バージョンを install していた場合）
 
@@ -180,16 +184,20 @@ git pull
 
 | 区分 | 対象 |
 |---|---|
-| 自動で消す | `uv cache prune`・`pnpm store prune`・`brew cleanup -s`・Docker の未使用イメージとビルドキャッシュ（作成から 7 日以上）・アプリ自動更新の残骸（`~/Library/Caches/*/org.sparkle-project.Sparkle`・`*-updater`） |
-| 通知だけ | 空き 50GB 未満・マージ済み PR の worktree の本数（消すのは `/worktree-cleanup`） |
-| 触らない | Docker のボリューム・`uv cache clean`・worktree |
+| 自動で消す | `uv cache prune`・`pnpm store prune`・`brew cleanup -s`（ダウンロードのキャッシュと旧バージョンの keg。旧版には戻せない）・Docker のレジストリ由来の未使用イメージとビルドキャッシュ（作成から 7 日以上）・アプリ自動更新の残骸（`~/Library/Caches/*/org.sparkle-project.Sparkle`・`~/Library/Caches/*-updater`。名前の一致だけで決まる） |
+| 通知だけ | 空き 50GB 未満・失敗やタイムアウトした段・マージ済み PR の worktree の本数と repo ごとの内訳（消すのは `/worktree-cleanup`）・gh で確かめられなかった repo の数・何日も走っていないこと |
+| 触らない | Docker のボリューム・レジストリに無いイメージ（ローカルでビルドしたもの・commit したもの）・`uv cache clean`・worktree |
 
-- **消すのは取り直せるものだけ**。取り返せないものを自動で消すと、毎晩同じ事故を起こしうる
-- **Docker の「7 日」は近似**: Docker はイメージの最終使用日時を持たないので、「どのコンテナ（停止中を含む）からも参照されず、作成から 7 日以上」を消す。`--rm` で使い捨てただけの古いイメージは消えうる（pull し直せば戻る）。Docker が起動していなければ飛ばす
-- **時間帯はスクリプトが判定する**: launchd はスリープで逃した起動を起床時に 1 回だけ発火するので、起動時刻ではなく「今が 1〜7 時台か」で決める。夜通し寝ていた日は飛ばす
-- **ログ**: `~/Library/Logs/disk-cleanup.log`（前後の空き容量・各段の終了コード）
-- **手動で流す**: `DISK_CLEANUP_FORCE=1 ~/.claude/scripts/disk-cleanup.sh`（時間帯と「今日は実行済み」を無視する）
-- **launchctl への登録は HOME が本物のホームのときだけ**。setup のテストは HOME を差し替えて install を流すので、登録まですると偽の HOME を指すジョブが残る
+- **消すのは、取り直せるものと、戻す必要がまず無いもの（brew の旧バージョン）だけ**。取り返せないものを自動で消すと、毎晩同じ事故を起こしうる
+- **Docker のイメージ**: 消すのは、レジストリ由来（RepoDigests あり）で、どのコンテナ（停止中を含む）からも参照されず、作成から 7 日以上のイメージ（タグの有無は問わない）。ローカルでビルドしたもの・commit したもの（digest 無し）は、タグが無くても消さないので、ローカルビルドの旧版は残り続ける（ビルドの層の多くは、ビルドキャッシュの `builder prune` の側で片付く）。作成時刻は upstream のビルド時刻なので、pull したばかりでも消えうる（pull し直せば戻る）。Docker が起動していなければ飛ばす（失敗には数えない）
+- **アプリ更新の残骸**: 配下も含めて 24 時間以内に更新されたものは残す（インストールの途中で消すと更新が壊れうる）
+- **時間帯はスクリプトが判定する**: launchd はスリープで逃した起動を起床時に 1 回だけ発火するので、起動時刻ではなく「今が 1〜7 時台か」で決める。時間帯外の起動では prune しない。ただし最後に走った日（一度も走っていなければ最初に起動した日）から 3 日以上たっていれば、「N 日走っていません」を 1 日 1 回通知する（毎晩 Mac を閉じて寝かせる使い方だと、時間帯内の起動が来ないため）
+- **タイムアウト**: 各段は 30 分（`DISK_CLEANUP_STEP_TIMEOUT`）、`docker info` は 30 秒、gh は 1 回 60 秒で打ち切る。gh が失敗した repo は、残りの worktree を問い合わせない
+- **マージ済み worktree の数え方**: `DISK_CLEANUP_WORKTREE_ROOT`（既定は `~/orca/workspaces`）の `<repo>/<worktree>` だけを、worktree の中で `gh pr list --head <ブランチ> --state merged` で確かめる。ブランチ名で突き合わせる点・author で絞らない点は `/worktree-cleanup` と同じ。ただし `/worktree-cleanup` は最新 50 件のマージ済み PR しか見ないので、それより古い PR の worktree は、通知に出ても skill の候補に出ないことがある。skill は repo ごとに流す
+- **ログ**: `~/Library/Logs/disk-cleanup.log` に、前後の空き容量・各段の結果（`done <段> (exit N)`・`timeout <段>`・`skip <段>`）・消したもの（`removed …`・Docker の件数）・通知の結果（`notify sent` / `notify failed`）を書く。1MB を超えたら `disk-cleanup.log.1` へ 1 世代だけずらす。`~/Library/Logs/disk-cleanup.launchd.log` には、スクリプトが自分で書けなかった出力（起動の失敗など）と、タイムアウトで止めたジョブについて bash が出す `Terminated` の行だけが残る
+- **手動で流す**: `DISK_CLEANUP_FORCE=1 ~/.claude/scripts/disk-cleanup.sh`（時間帯と「今日は実行済み」を無視する。止めるファイルは無視しない）。入れた直後に 1 回流し、通知が出ることを確かめる（通知は「スクリプトエディタ」の名義で出るので、その通知がオフだと出ない。結果はログの `notify` の行で分かる）
+- **止める・再開する**: `mkdir -p ~/.local/state/disk-cleanup && touch ~/.local/state/disk-cleanup/disabled` で止まる（install し直しても止まったまま）。ファイルを消せば再開する。登録ごと外すなら `./setup.sh uninstall`
+- **launchctl への登録は HOME が本物のホーム（`dscl` で引く）のときだけ**。setup のテストは HOME を差し替えて install を流すので、登録まですると偽の HOME を指すジョブが残る。plist が変わらず登録済みなら登録し直さない（走っているジョブを打ち切らないため）
 
 ## 📚 Skills 一覧
 

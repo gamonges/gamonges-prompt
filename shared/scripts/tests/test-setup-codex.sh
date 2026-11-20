@@ -2233,6 +2233,120 @@ assert_eq "T-N11 共通規約ブロックの撤去まで進む" "0" "$(grep -cF 
 assert_contains "T-N11 削除の件数の行まで進む" "$(last_out)" "削除完了"
 assert_contains "T-N11 消せなかった nvim は件数に入れない" "$(last_out)" "Neovim: 0 件"
 
+# --- T-L: 毎晩のディスク掃除の LaunchAgent --------------------------------------
+# 偽の dscl（sandbox HOME を本物のホームとして返す）と偽の launchctl を PATH の先頭に置き、launchd の段に届かせる。
+# 偽の launchctl は、bootout の後もしばらく print が「登録済み」を返し、その間の bootstrap を I/O error（5）で
+# 落とす（bootout の直後の bootstrap が失敗する事例の再現）。uname は差し替えない（ほかの段の分岐まで変わるため）
+L_FAIL_BEFORE=$fail_count
+LBIN="$WORK/launchd-bin"
+mkdir -p "$LBIN"
+cat >"$LBIN/dscl" <<'EOF'
+#!/bin/bash
+[ -n "${FAKE_DSCL_HOME:-}" ] && echo "NFSHomeDirectory: $FAKE_DSCL_HOME"
+exit 0
+EOF
+cat >"$LBIN/launchctl" <<'EOF'
+#!/bin/bash
+echo "$*" >>"$FAKE_LAUNCHCTL_LOG"
+st="$FAKE_LAUNCHCTL_STATE"
+case "$1" in
+    print)
+        [ -e "$st" ] || exit 113
+        n="$(cat "$st")"
+        [ "$n" = loaded ] && exit 0
+        if [ "$n" -gt 0 ]; then echo $((n - 1)) >"$st"; exit 0; fi
+        rm -f "$st"; exit 113 ;;
+    bootout)
+        [ -e "$st" ] || exit 3
+        # 外せない状態（FAKE_LAUNCHCTL_BOOTOUT_FAIL=1）: 登録は残ったまま、bootout は失敗で返る
+        [ "${FAKE_LAUNCHCTL_BOOTOUT_FAIL:-0}" = 1 ] && exit 5
+        echo 2 >"$st"; exit 0 ;;
+    bootstrap) [ -e "$st" ] && exit 5; echo loaded >"$st"; exit 0 ;;
+esac
+exit 0
+EOF
+chmod +x "$LBIN/dscl" "$LBIN/launchctl"
+
+# 偽物に解決されなければ、本物の launchctl に偽の HOME の plist を登録してしまう。節ごと止める
+if [[ "$(PATH="$LBIN:$PATH" command -v launchctl)" != "$LBIN/launchctl" || "$(PATH="$LBIN:$PATH" command -v dscl)" != "$LBIN/dscl" ]]; then
+    fail "T-L 前提: launchctl・dscl が偽物に解決される（本物を呼ばないよう、この節を飛ばす）"
+elif [[ "$(uname)" != Darwin ]]; then
+    pass "T-L macOS ではないので launchd の節は飛ばす"
+else
+    run_launchd_setup() {  # $1=HOME, $2=dscl が返すホーム（空なら引けない）, $3...=setup.sh の引数
+        local h="$1" dh="$2"
+        shift 2
+        (
+            export PATH="$LBIN:$PATH" FAKE_DSCL_HOME="$dh" \
+                FAKE_LAUNCHCTL_LOG="$WORK/launchctl-$(basename "$h").log" \
+                FAKE_LAUNCHCTL_STATE="$WORK/launchctl-$(basename "$h").state"
+            run_setup "$h" "$@"
+        )
+    }
+    lc_log() { cat "$WORK/launchctl-$(basename "$1").log" 2>/dev/null; }
+    HL="$(new_home launchd)"
+    PL="$HL/Library/LaunchAgents/local.gamonges-prompt.disk-cleanup.plist"
+
+    run_launchd_setup "$HL" "$HL" install
+    assert_eq "前提: T-L1 の install は成功する" "0" "$(last_rc)"
+    assert_eq "T-L1 初回は bootstrap を 1 回呼ぶ" "1" "$(lc_log "$HL" | grep -c '^bootstrap ')"
+    if command -v plutil >/dev/null 2>&1; then
+        assert_eq "T-L1 plist は plutil -lint を通る" "0" "$(plutil -lint "$PL" >/dev/null 2>&1; echo $?)"
+    fi
+    assert_contains "T-L1 launchd の出力は disk-cleanup.launchd.log に出す" "$(cat "$PL" 2>/dev/null)" "disk-cleanup.launchd.log"
+
+    before_lines="$(lc_log "$HL" | wc -l | tr -d ' ')"
+    run_launchd_setup "$HL" "$HL" install
+    assert_eq "T-L2 plist が変わらず登録済みなら、登録し直さない" "" \
+        "$(lc_log "$HL" | tail -n +"$((before_lines + 1))" | grep -E '^(bootout|bootstrap) ')"
+
+    echo "<!-- changed -->" >>"$PL"
+    : >"$WORK/launchctl-$(basename "$HL").log"
+    run_launchd_setup "$HL" "$HL" install
+    assert_eq "T-L3 plist が変わったら登録し直して成功する（bootout の後、外れるのを待つ）" "0" "$(last_rc)"
+    # 偽の launchctl は、bootout の後 2 回まで print が「登録済み」を返す
+    assert_eq "T-L3 呼ぶ順は bootout → print（外れるまで）→ bootstrap" "bootout print print print bootstrap" \
+        "$(lc_log "$HL" | awk '{ print $1 }' | paste -sd ' ' -)"
+
+    rm -f "$PL"
+    : >"$WORK/launchctl-$(basename "$HL").log"
+    run_launchd_setup "$HL" "$HL" uninstall
+    assert_eq "T-L4 plist を手で消していても、登録が残っていれば uninstall で外す" "1" "$(lc_log "$HL" | grep -c '^bootout ')"
+
+    # plist は変わらないが登録が外れている（再起動・手で bootout した後）なら、登録し直す。
+    # T-L4 で plist を消したので、先に install して plist をそろえてから、登録だけを外す
+    run_launchd_setup "$HL" "$HL" install
+    assert_eq "前提: T-L6 の plist がある" "yes" "$([[ -e "$PL" ]] && echo yes || echo no)"
+    rm -f "$WORK/launchctl-$(basename "$HL").state"
+    : >"$WORK/launchctl-$(basename "$HL").log"
+    run_launchd_setup "$HL" "$HL" install
+    assert_eq "前提: T-L6 の install は成功する" "0" "$(last_rc)"
+    assert_eq "T-L6 plist が変わらなくても、未登録なら登録し直す" "1" "$(lc_log "$HL" | grep -c '^bootstrap ')"
+
+    # 前の登録が外れない（bootout が失敗し続ける）なら、bootstrap せずに段を失敗させる
+    echo "<!-- changed again -->" >>"$PL"
+    : >"$WORK/launchctl-$(basename "$HL").log"
+    (export FAKE_LAUNCHCTL_BOOTOUT_FAIL=1; run_launchd_setup "$HL" "$HL" install)
+    assert_eq "T-L7 前の登録が外れなければ bootstrap しない" "0" "$(lc_log "$HL" | grep -c '^bootstrap ')"
+    assert_contains "T-L7 外れないことを出す" "$(last_out)" "前の登録が外れません"
+    assert_eq "T-L7 install は失敗で終わる" "1" "$(last_rc)"
+    assert_contains "T-L7 失敗した段として最後に一覧する" "$(last_out)" "  - 毎晩のディスク掃除"
+
+    # uninstall で bootout が失敗しても、握りつぶさずに知らせ、plist は消す
+    (export FAKE_LAUNCHCTL_BOOTOUT_FAIL=1; run_launchd_setup "$HL" "$HL" uninstall)
+    assert_contains "T-L8 uninstall で外せなければ warn を出す" "$(last_out)" "launchd から外せません"
+    assert_eq "T-L8 外せなくても plist は消す" "no" "$([[ -e "$PL" ]] && echo yes || echo no)"
+
+    HL5="$(new_home launchd-nodscl)"
+    # cwd を HOME にして流す。ホームが空のまま `cd ""` すると今のディレクトリのまま進むので、cwd が HOME だと
+    # 「HOME と同じ」と判定してしまう（空を弾く検査が要る経路）
+    (cd "$HL5" && run_launchd_setup "$HL5" "" install)
+    assert_eq "前提: T-L5 の install は成功する" "0" "$(last_rc)"
+    assert_eq "T-L5 本物のホームを引けなければ launchctl を 1 回も呼ばない" "" "$(lc_log "$HL5")"
+    assert_contains "T-L5 登録を省いたことを出す" "$(last_out)" "launchctl への登録は省略します"
+fi
+echo "T-L（毎晩のディスク掃除の LaunchAgent）の失敗: $((fail_count - L_FAIL_BEFORE)) 件"
+
 echo ""
 echo "$pass_count passed / $fail_count failed"
 [[ "$fail_count" -eq 0 ]]

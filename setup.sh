@@ -55,13 +55,13 @@ CODEX_DIR="${HOME}/.codex"
 CODEX_SKILLS_DIR="${HOME}/.agents/skills"
 CODEX_AGENTS_DIR="${CODEX_DIR}/agents"
 CODEX_AGENTS_MD="${CODEX_DIR}/AGENTS.md"
+CODEX_HOOKS_JSON="${CODEX_DIR}/hooks.json"
+REPO_CODEX_RULES="${SCRIPT_DIR}/codex/codex-rules.md"
+REPO_GEN_AGENTS="${SCRIPT_DIR}/codex/gen-agents.py"
 
 # 毎晩のディスク掃除（shared/scripts/disk-cleanup.sh）を起動する LaunchAgent
 DISK_CLEANUP_LABEL="local.gamonges-prompt.disk-cleanup"
 DISK_CLEANUP_PLIST="${HOME}/Library/LaunchAgents/${DISK_CLEANUP_LABEL}.plist"
-CODEX_HOOKS_JSON="${CODEX_DIR}/hooks.json"
-REPO_CODEX_RULES="${SCRIPT_DIR}/codex/codex-rules.md"
-REPO_GEN_AGENTS="${SCRIPT_DIR}/codex/gen-agents.py"
 # gen-agents.py が出力する TOML の 1 行目の先頭。「自分が置いたもの」の目印（uninstall・orphan 判定）
 GEN_HEADER_PREFIX="# generated-by: gamonges-prompt setup.sh"
 # install の段のうち失敗したものの名前（run_stage が積む）
@@ -224,11 +224,29 @@ nvim_link_is_ours() {  # $1=リンク, $2=自分の nvim/
 
 # launchctl で登録・解除してよいのは、HOME が本物のホームのときだけ。setup のテストは HOME を
 # 一時ディレクトリに差し替えて install を流すので、登録まですると偽の HOME を指すジョブが本物の
-# launchd に残る。本物のホームは $HOME ではなくディレクトリサービスから引く
+# launchd に残る。本物のホームは $HOME ではなくディレクトリサービス（dscl）から引く。
+# 引けない・解決できないときは偽にする（登録してしまう向きに倒さない）
 is_real_home() {
-    local real
-    real="$(eval echo "~$(id -un)")"
-    [[ "$(cd "$HOME" 2>/dev/null && pwd -P)" == "$(cd "$real" 2>/dev/null && pwd -P)" ]]
+    local real here there
+    real="$(dscl . -read "/Users/$(id -un)" NFSHomeDirectory 2>/dev/null | awk '{ print $2 }')"
+    [[ -n "$real" ]] || return 1
+    here="$(cd "$HOME" 2>/dev/null && pwd -P)" || return 1
+    there="$(cd "$real" 2>/dev/null && pwd -P)" || return 1
+    [[ -n "$here" && "$here" == "$there" ]]
+}
+
+disk_cleanup_target() { echo "gui/$(id -u)/${DISK_CLEANUP_LABEL}"; }
+disk_cleanup_loaded() { launchctl print "$(disk_cleanup_target)" >/dev/null 2>&1; }
+
+# bootout の直後の bootstrap が I/O error（5）で失敗する事例があるため、アンロードを待つ（最大 5 秒）
+disk_cleanup_bootout_and_wait() {
+    local i
+    launchctl bootout "$(disk_cleanup_target)" 2>/dev/null || true
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        disk_cleanup_loaded || return 0
+        sleep 0.5
+    done
+    return 1
 }
 
 # 毎晩のディスク掃除の LaunchAgent。1〜7 時の毎時 0 分に起動し、1 日 1 回にするのはスクリプト側の役目
@@ -271,25 +289,34 @@ ${hours}    </array>
     <key>Nice</key>
     <integer>10</integer>
     <key>StandardOutPath</key>
-    <string>${HOME}/Library/Logs/disk-cleanup.stdout.log</string>
+    <string>${HOME}/Library/Logs/disk-cleanup.launchd.log</string>
     <key>StandardErrorPath</key>
-    <string>${HOME}/Library/Logs/disk-cleanup.stdout.log</string>
+    <string>${HOME}/Library/Logs/disk-cleanup.launchd.log</string>
 </dict>
 </plist>
 EOF
+    local changed=false
     if cmp -s "$tmp" "$DISK_CLEANUP_PLIST" 2>/dev/null; then
         rm -f "$tmp"
         log_info "  - 変更なし: ${DISK_CLEANUP_PLIST}"
     else
         mv "$tmp" "$DISK_CLEANUP_PLIST"
+        changed=true
         log_success "  ✓ ${DISK_CLEANUP_PLIST}"
     fi
     if ! is_real_home; then
         log_info "  - HOME が本物のホームではないので launchctl への登録は省略します"
         return 0
     fi
-    # 登録し直すと plist の変更が反映される。未登録なら bootout は失敗するので無視する
-    launchctl bootout "gui/$(id -u)/${DISK_CLEANUP_LABEL}" 2>/dev/null || true
+    # plist が変わらず登録済みなら登録し直さない（登録し直すと、走っているジョブを打ち切る）
+    if [[ "$changed" == false ]] && disk_cleanup_loaded; then
+        log_info "  - 変更なし（登録済み）: $(disk_cleanup_target)"
+        return 0
+    fi
+    if ! disk_cleanup_bootout_and_wait; then
+        log_error "  ✗ 前の登録が外れません: $(disk_cleanup_target)"
+        return 1
+    fi
     if launchctl bootstrap "gui/$(id -u)" "$DISK_CLEANUP_PLIST"; then
         log_success "  ✓ launchd に登録しました（1:00〜7:59 に 1 日 1 回。ログ: ~/Library/Logs/disk-cleanup.log）"
     else
@@ -298,11 +325,16 @@ EOF
     fi
 }
 
+# plist の有無に関わらず、登録が残っていれば外す（plist を手で消しても、登録は launchd に残る）
 uninstall_launchd() {
-    [[ -f "$DISK_CLEANUP_PLIST" ]] || return 0
-    if is_real_home; then
-        launchctl bootout "gui/$(id -u)/${DISK_CLEANUP_LABEL}" 2>/dev/null || true
+    if is_real_home && disk_cleanup_loaded; then
+        if launchctl bootout "$(disk_cleanup_target)" 2>/dev/null; then
+            log_success "  ✓ launchd から外しました: $(disk_cleanup_target)"
+        else
+            log_warning "  ⚠ launchd から外せません: $(disk_cleanup_target)（launchctl bootout を手で流す）"
+        fi
     fi
+    [[ -f "$DISK_CLEANUP_PLIST" ]] || return 0
     rm -f "$DISK_CLEANUP_PLIST" && log_success "  ✓ 削除: ${DISK_CLEANUP_PLIST}"
 }
 
