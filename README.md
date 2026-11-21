@@ -179,6 +179,22 @@ git pull
 - **この変更のきっかけの「`env/stg.ts` の編集が止められた」は、`.claude/worktrees/<名前>/env/…`（worktree の下）での出来事だった。** 当時の deny（`**/*.env*`）はこの名前に一致しないので、Claude Code の `.claude/` の下の保護で止まった可能性が高い（未確定。確かめていない）。本 hook はこの名前を通すが、`.claude/` の保護は別の仕組みで、本 hook では変わらない
 - **入れたら**: Codex では PreToolUse の自前グループが 1 つ増えるので、`./setup.sh install` の後に `/hooks` で PreToolUse の全件を信頼し直す
 
+### 説明の書き方と聞き返しの検知
+
+AI が付けた記号（案 B・P-2・X-7 など）の意味を忘れ、長い報告の後に「で、何すればいい？」となるのを減らす 3 段の仕組み:
+
+1. **常に効くルール**: `shared/global-rules.md` の「説明の書き方」。install で `~/.claude/CLAUDE.md` と `~/.codex/AGENTS.md` の共通規約ブロックに入る
+2. **迷ったときの skill**: `/where`。そのセッションの会話から、要するに・現在地・記号の凡例・決めることを出す（コンソールのみ。ファイルは書かない）
+3. **自動の保険**: `hook-detect-clarification.sh`（UserPromptSubmit）。聞き返しの語があれば、意味と現在地を添えて答え直す指示を additionalContext で足す
+
+判断記録:
+
+- **ブロックしない。** UserPromptSubmit の exit 2 は発言の取り消しになるので、不正な入力も exit 1（non-blocking）にする。訂正検知の hook（不正な入力で exit 2）とはここが違う
+- **短い語だけでは判定しない。** 「何」「つまり」単体ではなく、「って何？」「なんだっけ」「どういう意味」「噛み砕」「つまり？」「よくわからない」「わかりにくい」「何すればいい」のような連語か疑問符つきで拾う。「ってなんで」（理由の質問）は拾わない
+- **オーナーの聞き返しでない部分を外してから照合する**: 閉じたコードブロック・インラインコード・行頭が `>` の引用行・1 行の中の「」（語そのものを話題にしている）・通知（task-notification）・他セッションのメッセージ（agent-message）・貼り付け（pasted_content）。閉じていないブロックは外さない（後ろを全部消して見落とすより、誤発火の方が軽い）
+- **誤発火は指示の中で吸収する。** 直前の説明と関係の無い質問（「このエラーはどうすればいい？」）にも出るが、指示は「関係が無ければ無視する」と言うので、余計な 1 段落が出るだけで止まらない
+- **Codex**: 規約（1）は `~/.codex/AGENTS.md` へ install が配る。hook（3）も hooks.json の UserPromptSubmit の先頭の自前グループに 1 本増えるので、`./setup.sh install` の後に Codex の `/hooks` で新しい hook を信頼する（グループの数は変わらないので、他の hook の位置は動かない）。Codex の指示は `~/.codex/AGENTS.md` と repo 直下の AGENTS.md の合計が 32 KiB を既に超えていて（2026-11-21 時点で約 2 KB 超。本変更で約 1.2 KB 増える）、超えた分（本 repo で Codex を使うときの repo 直下の AGENTS.md の末尾）は読まれない
+
 ### 毎晩のディスク掃除（macOS）
 
 `./setup.sh install` は LaunchAgent（`~/Library/LaunchAgents/local.gamonges-prompt.disk-cleanup.plist`）を置いて launchd に登録する。中身は `shared/scripts/disk-cleanup.sh`（`~/.claude/scripts/` のコピー）で、**1:00〜7:59 の間に 1 日 1 回**動く。
@@ -228,6 +244,7 @@ git pull
 | `/review-comments` | PR レビューコメントの妥当性評価 + 返信 + resolve |
 | `/retrospective` | 日次 PR 振り返り |
 | `/adr` / `/state-machine` / `/status` | ADR 生成 / 状態遷移図追加 / ワークフロー進捗表示 |
+| `/where` | セッションの要約・現在地・記号の凡例・決めることを 1 画面にまとめ直す（コンソールのみ。「説明の書き方と聞き返しの検知」） |
 | `/memory` / `/recall` | 記憶の保存・読み込み（実装は `agent-memory` skill に委譲） |
 | `/coupling-audit` / `/coupling-plan-diff` / `/coupling-precheck` / `/coupling-gate` | 結合(Coupling)モデルによる分析4種（既存コード棚卸し / Before-After差分分析 / 設計前整理 / plan.mdゲート） |
 

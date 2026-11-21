@@ -379,6 +379,10 @@
           {
             "command": "/Users/gamouhiroto/.claude/scripts/hook-detect-correction.sh",
             "type": "command"
+          },
+          {
+            "command": "/Users/gamouhiroto/.claude/scripts/hook-detect-clarification.sh",
+            "type": "command"
           }
         ]
       },
