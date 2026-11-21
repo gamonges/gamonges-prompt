@@ -536,13 +536,14 @@ fi
 # 対象を絞るのは、repo 全体では 31 箇所あり全件を warn にするとノイズになるため。
 # 対象の hook は matches() ヘルパーへ移行済みで該当 0 件なので、増えたときだけ警告が出る。
 # 残る hook は matches() 化してから対象に加える。訂正検知（detect-correction）は fail-open 型の
-# ガードではないが、grep -q に戻すと長い入力で訂正を見落とすので、同じく対象にする。
+# ガードではないが、grep -q に戻すと長い入力で訂正を見落とすので、同じく対象にする（聞き返し検知
+# （detect-clarification）も同じ理由で対象にする）。
 #
 # コメント行は除く。matches() の由来を説明するコメントに「printf | grep -q では塞がらない」
 # という記述が入るため、除かないと原理を説明した行そのものが warn になる。
 echo -e "${BLUE}== check 7(2): ガードレール hook の grep -q パイプ ==${NC}"
 grep_q_guarded=0
-for hook_name in hook-block-local-contract-link.sh hook-block-tmp-commit.sh hook-confirm-destructive-git.sh hook-detect-correction.sh; do
+for hook_name in hook-block-local-contract-link.sh hook-block-tmp-commit.sh hook-confirm-destructive-git.sh hook-detect-correction.sh hook-detect-clarification.sh; do
     hook_path="${REPO_SHARED}/scripts/${hook_name}"
     [ -f "$hook_path" ] || continue
     hits=$(grep -v '^[[:space:]]*#' "$hook_path" | grep -cE '\|[[:space:]]*grep -[a-zA-Z]*q' || true)

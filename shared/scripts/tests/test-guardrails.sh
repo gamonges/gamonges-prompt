@@ -30,6 +30,7 @@ CONFIRM_HOOK="$REPO_ROOT/shared/scripts/hook-confirm-destructive-git.sh"
 CURL_HOOK="$REPO_ROOT/shared/scripts/hook-confirm-external-curl.sh"
 ENV_HOOK="$REPO_ROOT/shared/scripts/hook-guard-env-files.sh"
 CORRECTION_HOOK="$REPO_ROOT/shared/scripts/hook-detect-correction.sh"
+CLARIFY_HOOK="$REPO_ROOT/shared/scripts/hook-detect-clarification.sh"
 LINT="$REPO_ROOT/shared/skills/verify-scenario/scripts/verification-lint.mjs"
 ORPHAN="$REPO_ROOT/shared/skills/worktree-cleanup/scripts/find-orphan-collections.mjs"
 
@@ -43,7 +44,7 @@ fail_count=0
 pass() { echo -e "${GREEN}[PASS]${NC} $1"; pass_count=$((pass_count + 1)); }
 fail() { echo -e "${RED}[FAIL]${NC} $1"; fail_count=$((fail_count + 1)); }
 
-for required in "$HOOK" "$TMP_HOOK" "$CORRECTION_HOOK" "$LINT" "$ORPHAN"; do
+for required in "$HOOK" "$TMP_HOOK" "$CORRECTION_HOOK" "$CLARIFY_HOOK" "$LINT" "$ORPHAN"; do
     if [[ ! -f "$required" ]]; then
         echo "test-guardrails.sh: 検査対象が見つからない: $required" >&2
         exit 2
@@ -2721,6 +2722,57 @@ dc "DC-8f perl が失敗したら他セッションのメッセージの中だ�
 # 行が並ぶ長い後続にする。grep は行単位で照合するので、改行が無いと入力を最後まで読み、SIGPIPE が起きない
 DC_LONG_TAIL="$(printf 'a%.0s\n' $(seq 1 80000))"
 dc "DC-9 先頭の行の訂正 + 約 160KB の後続 → 出す（照合が入力を読み切らずに終わっても見落とさない）" hit "$DC_FIX"$'\n'"$DC_LONG_TAIL"
+
+# --- CQ: 聞き返し検知 hook は、オーナーの聞き返しにだけ「意味と現在地を添えて答え直す」指示を足す ---
+# fail-open 型ではない（見落としても指示が 1 回出ないだけ）が、誤爆は毎回の余計な指示になるので、
+# 出ないことも検出と同じく固定する。例文は過去のセッションの実際の聞き返しから取っている。
+# ブロックしないことが契約なので、どの入力でも exit 2（UserPromptSubmit では発言の取り消し）にしない
+cq() {  # $1=ラベル, $2=期待（hit|none）, $3=prompt, $4=hook の起動に足す PATH の先頭（任意）
+    local out rc got
+    out="$(jq -nc --arg p "$3" '{prompt:$p}' | env -u CLAUDE_CODE_HOOK_TRACE PATH="${4:+$4:}$PATH" bash "$CLARIFY_HOOK" 2>/dev/null)"
+    rc=$?
+    if [[ -z "$out" ]]; then
+        got=none
+    elif printf '%s' "$out" | jq -e '.hookSpecificOutput.hookEventName == "UserPromptSubmit" and (.hookSpecificOutput.additionalContext | contains("現在地"))' >/dev/null 2>&1; then
+        got=hit
+    else
+        got="unexpected: $out"
+    fi
+    assert_equal "$1" "$2 rc=0" "$got rc=$rc"
+}
+cq "CQ-1 記号の問い直し（って何？）→ 出す" hit 'K-21って何？'
+cq "CQ-2 なんだっけ → 出す" hit 'Cってなんだっけ'
+cq "CQ-3 噛み砕いて → 出す" hit 'Q-63,64について噛み砕いて説明して'
+cq "CQ-4 つまり？ → 出す" hit 'つまり？'
+cq "CQ-5 どういう意味 → 出す" hit 'これはどういう意味？'
+cq "CQ-6 よくわからない → 出す" hit '正直よくわからない'
+cq "CQ-7 何をすればいい → 出す" hit 'こちらのworktreeでの作業に戻ろう。次に何をすればいいかな？'
+cq "CQ-8 項目ごとに反応が分かれる発言 → 出す" hit $'Q-44: 推奨通り\nQ-46: 噛み砕いて説明して'
+cq "CQ-9 「」で囲んだ用語の後の聞き返し → 出す（用語だけを外す）" hit '「印」って何？'
+cq "CQ-10 わかりにくい → 出す" hit '文章だとわかりにくいので図にして'
+cq "CQ-11 ってなに（ひらがな）→ 出す" hit '7bってなに?'
+# 短い語だけでは出さない
+cq "CQ-20 疑問符の無いつまり → 出さない" none 'つまりRepositoryの層が求めているから切り替える、で進めて'
+cq "CQ-21 何か（聞き返しではない）→ 出さない" none '何か問題があれば教えて'
+cq "CQ-22 ってなんで（理由の質問）→ 出さない" none 'infraの変更が必要なのってなんで？'
+cq "CQ-23 ふつうの指示 → 出さない" none 'PR を作って'
+# 発言の中の、オーナーの聞き返しではない部分は外す
+CQ_FENCE=$'次の出力を確認して\n```\nerror: K-21って何？ が未定義\n```'
+cq "CQ-30 コードブロックの中だけ → 出さない" none "$CQ_FENCE"
+cq "CQ-31 コードブロックの外の聞き返し → 出す" hit "$CQ_FENCE"$'\nで、K-21って何？'
+cq "CQ-32 インラインコードの中だけ → 出さない" none '`grep "って何？"` の結果を見て'
+cq "CQ-33 「」の中だけ（語を話題にしている）→ 出さない" none '拾う語は「なんだっけ」「って何」「噛み砕いて」にする'
+cq "CQ-34 引用行の中だけ → 出さない" none $'> K-21って何？\nと聞かれたらどう答える設計にする'
+cq "CQ-35 通知ブロックの中だけ → 出さない" none $'<task-notification>\n<result>Q-3って何？と聞かれた</result>\n</task-notification>'
+cq "CQ-36 他セッションのメッセージの中だけ → 出さない" none $'<agent-message from="a1">\n次に何をすればいい？\n</agent-message>'
+cq "CQ-36b 貼り付けブロックの中だけ → 出さない" none $'これに従って作業して\n<pasted_content id="x1">\n拾う語の例: なんだっけ、何すればいい？\n</pasted_content id="x1">'
+cq "CQ-37 閉じていないコードブロックは外さない → 出す" hit $'```\nK-21って何？'
+cq "CQ-38 perl が失敗したら元の文字列で照合 → 出す" hit "$CQ_FENCE" "$DC_FAKE_PERL"
+cq "CQ-39 先頭の行の聞き返し + 約 160KB の後続 → 出す（照合が入力を読み切らずに終わっても見落とさない）" hit 'K-21って何？'$'\n'"$DC_LONG_TAIL"
+# 不正な入力でもブロックしない（exit 2 は発言の取り消しになる）。exit 1 で失敗を見えるようにする
+out="$(printf 'not json' | bash "$CLARIFY_HOOK" 2>/dev/null)"
+rc=$?
+assert_equal "CQ-40 不正な JSON は exit 1（ブロックしない）・出力なし" "rc=1 out=" "rc=$rc out=$out"
 
 echo
 echo "${pass_count} passed / ${fail_count} failed"
