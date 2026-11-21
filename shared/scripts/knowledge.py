@@ -60,6 +60,10 @@ TYPES = [
     ("Meaning Card", "meaning-card.md"),
     ("Checks", "checks.md"),
     ("Code Review", "code-review.md"),
+    ("PR Explanation", "pr-explain/*/explain.md"),
+    ("PR Explanation", "pr-explain/*/quick.md"),
+    ("PR Explanation Verify", "pr-explain/*/verify.md"),
+    ("PR Comment Draft", "pr-explain/*/comments-draft.md"),
 ]
 
 # tmp/ の直下の、生ログと画像の置き場。中の md は文書として扱わない

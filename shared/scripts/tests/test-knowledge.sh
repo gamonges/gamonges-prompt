@@ -662,6 +662,10 @@ shared/skills/implement/reference/agent-selection.md|tmp/step-{n}-{agent-name}-r
 shared/skills/integration-test-run/reference/report-template.md|tmp/integration-test-results.md
 shared/skills/integration-test-scenario/reference/scenario-template.md|tmp/integration-test-scenario.md
 shared/skills/outline/SKILL.md|tmp/outline.md
+shared/skills/pr-explain/SKILL.md|tmp/pr-explain/{repo}-{n}/quick.md
+shared/skills/pr-explain/reference/comments-draft.md|tmp/pr-explain/{repo}-{n}/comments-draft.md
+shared/skills/pr-explain/reference/format-v3.md|tmp/pr-explain/{repo}-{n}/explain.md
+shared/skills/pr-explain/reference/verify.md|tmp/pr-explain/{repo}-{n}/verify.md
 shared/skills/review-plan/reference/report-template.md|tmp/plan-review.md
 shared/skills/review-strategic-ddd/reference/review-checklist.md|tmp/strategic-ddd-review.md
 shared/skills/review/SKILL.md|tmp/review/_ci-failures.md
