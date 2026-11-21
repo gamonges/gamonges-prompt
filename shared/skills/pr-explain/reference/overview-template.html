@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR の全体像</title>
+<!--
+  pr-explain の図解の雛形。この雛形は直接編集しない。データの JSON を書き、
+  python3 ~/.claude/skills/pr-explain/scripts/render_overview.py --data <data.json> --out <overview.html>
+  で流し込む（スクリプトがデータを検証し、HTML の中で script 要素を閉じる文字をエスケープして埋め込む）。
+  文字列の中の `…` は code の表示になる。HTML は書けない（描画時にすべてエスケープされる）。
+  色は Orca のチャットの CSS 変数（chart-1 等）を使い、無ければ下の pe- の変数の既定値になる（OS のダークモードにも追従する）。
+-->
+<style>
+  :root{color-scheme:light dark;
+    --pe-bg:var(--background,#fff);--pe-fg:var(--foreground,#171717);--pe-muted:var(--muted-foreground,#737373);
+    --pe-border:var(--border,#e5e5e5);--pe-code:var(--muted,#f4f4f5);--pe-card:var(--card,#fafafa);
+    --pe-new:var(--chart-1,#2563eb);--pe-mod:var(--chart-4,#b45309);--pe-gen:var(--chart-5,#7c3aed);
+    --pe-pin:var(--destructive,#dc2626);--pe-pinfg:var(--destructive-foreground,#fff)}
+  @media (prefers-color-scheme:dark){:root{
+    --pe-bg:var(--background,#0a0a0a);--pe-fg:var(--foreground,#ededed);--pe-muted:var(--muted-foreground,#a3a3a3);
+    --pe-border:var(--border,#303030);--pe-code:var(--muted,#262626);--pe-card:var(--card,#171717);
+    --pe-new:var(--chart-1,#60a5fa);--pe-mod:var(--chart-4,#fbbf24);--pe-gen:var(--chart-5,#c4b5fd);
+    --pe-pin:var(--destructive,#f87171);--pe-pinfg:var(--destructive-foreground,#0a0a0a)}}
+  body{margin:0;padding:16px;background:var(--pe-bg);color:var(--pe-fg);font-family:var(--font-sans,system-ui,sans-serif);font-size:14px;line-height:1.6}
+  h1{font-size:18px;margin:0 0 4px}
+  h2{font-size:15px;margin:28px 0 10px;padding-bottom:4px;border-bottom:1px solid var(--pe-border)}
+  .sub{color:var(--pe-muted);font-size:12px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px}
+  .card{background:var(--pe-card);color:var(--card-foreground,var(--pe-fg));border:1px solid var(--pe-border);border-radius:var(--radius,8px);padding:10px 12px}
+  .card b{display:block;margin-bottom:4px}
+  .tag{display:inline-block;font-size:11px;padding:0 6px;border-radius:4px;margin-right:4px;border:1px solid var(--pe-border);color:var(--pe-muted)}
+  .tag.new{border-color:var(--pe-new);color:var(--pe-new)}
+  .tag.mod{border-color:var(--pe-mod);color:var(--pe-mod)}
+  .tag.gen{border-color:var(--pe-gen);color:var(--pe-gen);border-style:dashed}
+  .tag.ext{border-style:dashed}
+  .pin{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;border-radius:9px;background:var(--pe-pin);color:var(--pe-pinfg);font-size:11px;font-weight:700;margin-right:6px;flex:none}
+  ol.flow{margin:0;padding-left:20px}
+  ol.flow li{margin:4px 0}
+  code{font-family:var(--font-mono,ui-monospace,monospace);font-size:12px;background:var(--pe-code);padding:0 4px;border-radius:4px;overflow-wrap:anywhere}
+  .svgwrap{overflow-x:auto;border:1px solid var(--pe-border);border-radius:var(--radius,8px);background:var(--pe-bg)}
+  .svgwrap:focus-visible{outline:2px solid var(--pe-new);outline-offset:2px}
+  svg{display:block;width:100%}
+  table{border-collapse:collapse;width:100%;font-size:13px}
+  td,th{border-bottom:1px solid var(--pe-border);padding:6px 8px;text-align:left;vertical-align:top}
+  th{color:var(--pe-muted);font-weight:600}
+  .bar{height:8px;border-radius:4px;opacity:.8;background:var(--pe-muted)}
+  .bar.new{background:var(--pe-new)}
+  .bar.mod{background:var(--pe-mod)}
+  .bar.gen{background:var(--pe-gen)}
+  .row{display:flex;gap:8px;align-items:flex-start;margin:6px 0}
+  .legend span{margin-right:12px}
+  .error{border:1px solid var(--pe-pin);color:var(--pe-pin);border-radius:var(--radius,8px);padding:8px 12px;margin-bottom:12px}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<h1 id="title"></h1>
+<div class="sub" id="meta"></div>
+<noscript><p>この図解は JavaScript で描画する。表示されないときは、同じディレクトリの explain.md を読む。</p></noscript>
+
+<section id="sec-purpose"><h2>課題と目的</h2>
+<div class="grid" id="purpose"></div></section>
+
+<section id="sec-method"><h2>解決の方法</h2>
+<div class="grid" id="method"></div></section>
+
+<section id="sec-flow"><h2>処理の流れ</h2>
+<ol class="flow" id="flow"></ol></section>
+
+<section id="sec-dep"><h2 id="dep-h">モジュールのつながり</h2>
+<div class="legend sub"><span><span class="tag new">新規</span></span><span><span class="tag mod">変更</span></span><span><span class="tag ext">差分の外</span></span><span id="legend-pin"><span class="pin">1</span>人間が読むべき箇所</span></div>
+<div class="svgwrap" id="depwrap" tabindex="0" role="region" aria-labelledby="dep-h"><svg id="dep" role="img" aria-labelledby="dep-title dep-desc"></svg></div></section>
+
+<section id="sec-pins"><h2>人間が読むべき箇所</h2>
+<div id="pins"></div></section>
+
+<section id="sec-files"><h2>どこをどう変えたか</h2>
+<table id="files">
+  <thead><tr><th>まとまり</th><th>何をしたか</th><th style="width:30%">追加行数</th></tr></thead>
+  <tbody></tbody>
+</table></section>
+
+<!-- データ。kind は new（新規）/ mod（変更）/ ext（差分の外）/ gen（生成物。files のみ）。render_overview.py が差し替える -->
+<script type="application/json" id="data">
+{
+  "title": "PR #0000 {タイトル}",
+  "meta": "{owner}/{repo} · 作者 {author} · +{additions} / −{deletions} · {changedFiles} ファイル · head {sha7}",
+  "purpose": [
+    {"title": "解決したい課題", "body": "{誰が何をできずに困っているか}"},
+    {"title": "この PR の目的", "body": "{この PR でどこまでやるか。後続に回すもの}"},
+    {"title": "前提", "body": "{先行 PR・契約・FeatureFlag など}"}
+  ],
+  "method": [
+    {"kind": "new", "title": "{まとまりの名前}", "body": "{何をしたか。`識別子` は code になる}"},
+    {"kind": "mod", "title": "{既存を変えたまとまり}", "body": "{何を変えたか}"},
+    {"kind": "ext", "title": "{差分の外の相手}", "body": "{何に依存するか}"}
+  ],
+  "flow": [
+    "{入口}",
+    "{次の処理}",
+    "{結果}"
+  ],
+  "graph": {
+    "columns": ["入口", "ルート", "部品", "データ取得", "差分の外"],
+    "nodes": [
+      {"id": "a", "col": 0, "label": "{ファイル名}", "note": "{役割}", "kind": "mod"},
+      {"id": "b", "col": 1, "label": "{ファイル名}", "note": "{役割}", "kind": "new", "pin": 1},
+      {"id": "c", "col": 4, "label": "{外部の相手}", "note": "{確かめること}", "kind": "ext"}
+    ],
+    "edges": [["a", "b", "押す"], ["b", "c"]]
+  },
+  "pins": [
+    {"n": 1, "where": "{path}:L{n}", "question": "{人間が判断すべき問い}"}
+  ],
+  "files": [
+    {"kind": "new", "name": "{まとまり}", "what": "{パスの範囲 — 何をしたか}", "added": 0},
+    {"kind": "gen", "name": "生成物", "what": "{生成ファイル}", "added": 0}
+  ]
+}
+</script>
+
+<script>
+(function(){
+  function esc(t){return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+  function rich(t){return esc(t).replace(/`([^`]+)`/g,'<code>$1</code>')}
+  var TAG={new:'新規',mod:'変更',ext:'差分の外',gen:'生成物'};
+  // 不明な kind は灰色と kind の文字列のまま出す（新規の色に化けさせない）
+  function kindOf(k){return TAG.hasOwnProperty(k)?k:'ext'}
+  function tag(k){return '<span class="tag '+esc(kindOf(k))+'">'+esc(TAG[k]||String(k))+'</span>'}
+  function pinsOf(n){return n.pin==null?[]:[].concat(n.pin)}
+  function show(id,on){document.getElementById(id).hidden=!on}
+
+  try{
+    var D=JSON.parse(document.getElementById('data').textContent);
+    document.title=D.title+' の全体像';
+    document.getElementById('title').textContent=D.title;
+    document.getElementById('meta').textContent=D.meta;
+    document.getElementById('purpose').innerHTML=D.purpose.map(function(c){return '<div class="card"><b>'+rich(c.title)+'</b>'+rich(c.body)+'</div>'}).join('');
+    document.getElementById('method').innerHTML=D.method.map(function(c){return '<div class="card">'+tag(c.kind)+'<b>'+rich(c.title)+'</b>'+rich(c.body)+'</div>'}).join('');
+    document.getElementById('flow').innerHTML=D.flow.map(function(s){return '<li>'+rich(s)+'</li>'}).join('');
+    document.getElementById('pins').innerHTML=D.pins.map(function(p){return '<div class="row"><span class="pin">'+esc(p.n)+'</span><div><code>'+esc(p.where)+'</code>：'+rich(p.question)+'</div></div>'}).join('');
+    // 空の節は見出しごと隠す（見出しだけが残ると「見たが無かった」のか「書き忘れた」のかが分からない）
+    show('sec-purpose',D.purpose.length);show('sec-method',D.method.length);show('sec-flow',D.flow.length);
+    show('sec-pins',D.pins.length);show('sec-files',D.files.length);
+
+    drawGraph(D.graph);
+    show('legend-pin',D.graph.nodes.some(function(n){return pinsOf(n).length}));
+
+    var max=Math.max.apply(null,D.files.map(function(f){return Number(f.added)||0}).concat([1])),tb=document.querySelector('#files tbody');
+    D.files.forEach(function(f){var tr=document.createElement('tr'),a=Number(f.added)||0;
+      tr.innerHTML='<td>'+tag(f.kind)+esc(f.name)+'</td><td>'+rich(f.what)+'</td><td><div class="bar '+esc(kindOf(f.kind))+'" style="width:'+Math.max(2,a/max*100)+'%"></div><span class="sub">+'+esc(a)+'</span></td>';
+      tb.appendChild(tr)});
+  }catch(e){
+    var box=document.createElement('div');box.className='error';box.setAttribute('role','alert');
+    box.textContent='図解のデータを描画できません: '+(e&&e.message||e)+'（render_overview.py でデータを検証して作り直す）';
+    document.body.insertBefore(box,document.body.firstChild);
+    if(window.console)console.error(e);
+  }
+
+  function drawGraph(G){
+    var W=184,H=46,GAP=72,ROW=70,TOP=64,ns='http://www.w3.org/2000/svg',s=document.getElementById('dep');
+    var colX=G.columns.map(function(_,i){return 16+i*(W+GAP)});
+    var rowOf={},count=G.columns.map(function(){return 0}),N={};
+    G.nodes.forEach(function(n){rowOf[n.id]=count[n.col]++;N[n.id]={x:colX[n.col],y:TOP+rowOf[n.id]*ROW,n:n}});
+    var width=colX[colX.length-1]+W+16,height=TOP+Math.max.apply(null,count.concat([1]))*ROW+10;
+    s.setAttribute('viewBox','0 0 '+width+' '+height);
+    // 列が少ないと 100% 幅で文字が大きくなりすぎるので、元の大きさを上限にする
+    s.style.minWidth=width+'px';s.style.maxWidth=width+'px';
+    function el(t,a,txt,parent){var e=document.createElementNS(ns,t);for(var k in a)e.setAttribute(k,a[k]);if(txt!=null)e.textContent=txt;(parent||s).appendChild(e);return e}
+    // 色は style の var() で持つ（属性に固定値を書くと、描画の後のテーマの切り替えに追従しない）
+    var CV={new:'var(--pe-new)',mod:'var(--pe-mod)',ext:'var(--pe-muted)',gen:'var(--pe-gen)'};
+    function col(k){return CV[kindOf(k)]}
+    // 箱に収まらない文字は横に縮める。0.6 倍を下回るなら末尾を省略し、全文は title に持たせる
+    function fit(t,max){
+      var len=t.getComputedTextLength();
+      if(!len||len<=max)return t; // 非表示の間は長さが 0 になるので何もしない
+      if(len*0.6<=max){t.setAttribute('textLength',max);t.setAttribute('lengthAdjust','spacingAndGlyphs');return t}
+      var full=t.textContent,lo=0,hi=full.length;
+      while(lo<hi){var mid=(lo+hi+1)>>1;t.textContent=full.slice(0,mid)+'…';if(t.getComputedTextLength()*0.6<=max)lo=mid;else hi=mid-1}
+      t.textContent=full.slice(0,lo)+'…';t.setAttribute('textLength',max);t.setAttribute('lengthAdjust','spacingAndGlyphs');
+      el('title',{},full,t);return t}
+
+    // 支援技術向けの説明（role=img は子の text を読み上げないため、ノードとエッジを文で持たせる）
+    el('title',{id:'dep-title'},'モジュールの依存図（'+G.nodes.length+' 個のモジュール）');
+    var byId={};G.nodes.forEach(function(n){byId[n.id]=n});
+    el('desc',{id:'dep-desc'},G.nodes.map(function(n){return (TAG[n.kind]||n.kind)+': '+n.label+(n.note?'（'+n.note+'）':'')+(pinsOf(n).length?' ピン '+pinsOf(n).join('・'):'')}).join('。')+'。'+
+      G.edges.map(function(e){return byId[e[0]].label+' → '+byId[e[1]].label+(e[2]?'（'+e[2]+'）':'')}).join('。'));
+
+    var defs=el('defs',{}),m=el('marker',{id:'ar',viewBox:'0 0 10 10',refX:9,refY:5,markerWidth:7,markerHeight:7,orient:'auto-start-reverse'},null,defs);
+    el('path',{d:'M0,0L10,5L0,10z',style:'fill:var(--pe-muted)'},null,m);
+    G.columns.forEach(function(t,i){el('text',{x:colX[i]+W/2,y:40,'text-anchor':'middle','font-size':12,'font-weight':700,style:'fill:var(--pe-muted)'},t)});
+
+    var gEdge=el('g',{}),gNode=el('g',{}),gLabel=el('g',{}),labels=[];
+    G.edges.forEach(function(e){var a=N[e[0]],b=N[e[1]];if(!a||!b)return;var x1,y1,x2,y2,d;
+      if(a.x===b.x){x1=a.x+W/2;y1=a.y+(b.y>a.y?H:0);x2=b.x+W/2;y2=b.y+(b.y>a.y?0:H);
+        // 同じ列で離れた行どうしは、間の箱を貫かないよう右に膨らませる
+        if(Math.abs(b.y-a.y)>ROW){x1=x2=a.x+W;y1=a.y+H/2;y2=b.y+H/2;d='M'+x1+','+y1+'C'+(x1+GAP/2)+','+y1+' '+(x2+GAP/2)+','+y2+' '+x2+','+y2}
+        else d='M'+x1+','+y1+'L'+x2+','+y2}
+      else{var fwd=b.x>a.x;x1=fwd?a.x+W:a.x;y1=a.y+H/2;x2=fwd?b.x:b.x+W;y2=b.y+H/2;var mx=(x1+x2)/2;d='M'+x1+','+y1+'C'+mx+','+y1+' '+mx+','+y2+' '+x2+','+y2}
+      el('path',{d:d,fill:'none','stroke-width':1.3,'marker-end':'url(#ar)',opacity:.75,style:'stroke:var(--pe-muted)'},null,gEdge);
+      // ラベルは箱の後に描く（列を飛ぶエッジのラベルが中間の箱の下に隠れないように）。置き場所は始点の近く
+      if(e[2])labels.push({t:e[2],x:a.x===b.x?x1:x1+(x2>x1?GAP/2:-GAP/2),y:(a.x===b.x?(y1+y2)/2:y1)-6,max:a.x===b.x?W:GAP-8});
+    });
+    Object.keys(N).forEach(function(k){var p=N[k],n=p.n,c=col(n.kind);
+      el('rect',{x:p.x,y:p.y,width:W,height:H,rx:6,'stroke-width':n.kind==='mod'?2.4:1.6,'stroke-dasharray':kindOf(n.kind)==='ext'?'5 4':'',style:'fill:var(--pe-bg);stroke:'+c},null,gNode);
+      fit(el('text',{x:p.x+8,y:p.y+19,'font-size':12,'font-weight':600,style:'fill:var(--pe-fg)'},n.label,gNode),W-24);
+      // 色だけで区別しないよう、kind の語も箱の中に出す
+      var kw=el('text',{x:p.x+W-8,y:p.y+38,'text-anchor':'end','font-size':9.5,style:'fill:'+c},TAG[n.kind]||String(n.kind),gNode);
+      if(n.note)fit(el('text',{x:p.x+8,y:p.y+36,'font-size':10.5,style:'fill:var(--pe-muted)'},n.note,gNode),W-16-kw.getComputedTextLength()-8);
+      var ps=pinsOf(n);
+      ps.forEach(function(pn,i){var cx=p.x+W-4-(ps.length-1-i)*20; // 右上から左へ詰め、番号は左から昇順に読める
+        el('circle',{cx:cx,cy:p.y+4,r:9,style:'fill:var(--pe-pin)'},null,gNode);
+        el('text',{x:cx,y:p.y+8,'text-anchor':'middle','font-size':11,'font-weight':700,style:'fill:var(--pe-pinfg)'},String(pn),gNode)});
+    });
+    labels.forEach(function(l){fit(el('text',{x:l.x,y:l.y,'text-anchor':'middle','font-size':10,'stroke-width':3,'paint-order':'stroke',style:'fill:var(--pe-muted);stroke:var(--pe-bg)'},l.t,gLabel),l.max)});
+  }
+})();
+</script>
+</body>
+</html>
