@@ -168,12 +168,20 @@ if (sub === "adversarial-review") {
 }
 
 if (sub === "task") {
-    const ok = argv.length === 8 && argv[1] === "--json" && argv[2] === "--model" && argv[3] === MODEL
-        && argv[4] === "--prompt-file" && argv[5] && argv[6] === "-C" && argv[7] === process.env.FAKE_CWD;
+    // prompt モードだけが --effort high を挟む。plan モードに混ざったら bad() で落とす
+    const isPrompt = mode.startsWith("prompt_");
+    const eff = isPrompt ? 2 : 0;
+    const ok = argv.length === 8 + eff && argv[1] === "--json" && argv[2] === "--model" && argv[3] === MODEL
+        && (!isPrompt || (argv[4] === "--effort" && argv[5] === "high"))
+        && argv[4 + eff] === "--prompt-file" && argv[5 + eff] && argv[6 + eff] === "-C" && argv[7 + eff] === process.env.FAKE_CWD;
     if (!ok) bad();
-    fs.copyFileSync(argv[5], dir + "/prompt.txt");
+    fs.copyFileSync(argv[5 + eff], dir + "/prompt.txt");
     const base = { threadId: "th", touchedFiles: [], reasoningSummary: null };
+    const md = "---\ntype: Retrospective\n---\n# 振り返り\n\n```json\n" + JSON.stringify(result) + "\n```\n";
     switch (mode) {
+        case "prompt_ok": print({ ...base, status: 0, rawOutput: md }); process.exit(0);
+        case "prompt_empty": print({ ...base, status: 0, rawOutput: " \n\t\n" }); process.exit(0);
+        case "prompt_fail": print({ ...base, status: 1, rawOutput: "" }); process.exit(1);
         case "plan_ok": print({ ...base, status: 0, rawOutput: "```json\n" + JSON.stringify(result) + "\n```" }); process.exit(0);
         case "plan_prefixed": print({ ...base, status: 0, rawOutput: "```text\nメモ\n```\n\n```json\n" + JSON.stringify(result) + "\n```" }); process.exit(0);
         case "plan_order": {
@@ -326,6 +334,60 @@ FAKE_MODE=plan_fail cr plan --plan tmp/plan.md --out "$OUT"
 assert_rc "T12 turn の失敗（stderr 空）は rc=3" 3 "$RC"
 reason="$(jget "$OUT" o.reason)"
 assert_true "T12 reason が空でない" "reason=$reason" test -n "$reason" -a "$reason" != null -a "$reason" != __NO_FILE__
+
+# ============================================================ prompt モード
+
+echo "--- prompt モード"
+
+PROMPT_FILE="$TARGET/tmp/prompt.md"
+printf '# 依頼\n\n振り返ってください。\n' >"$PROMPT_FILE"
+PROMPT_MD="$(printf -- '---\ntype: Retrospective\n---\n# 振り返り\n\n```json\n')"
+
+new_case T40
+FAKE_MODE=prompt_ok CODEX_RUN_LOG="$CASE/runs.jsonl" cr prompt --prompt tmp/prompt.md --out "$OUT"
+assert_rc "T40 prompt 成功: rc=0" 0 "$RC"
+assert_eq "T40 status:ok" ok "$(jget "$OUT" o.status)"
+assert_eq "T40 mode" prompt "$(jget "$OUT" o.mode)"
+assert_eq "T40 model" "$MODEL" "$(jget "$OUT" o.model)"
+assert_has "T40 argv（--effort high を挟む）" "$(calls)" "task --json --model $MODEL --effort high --prompt-file $PROMPT_FILE -C $TARGET"
+assert_not_has "T40 --write を付けない" "$(calls)" "--write"
+assert_eq "T40 依頼文をそのまま渡す" "$(cat "$PROMPT_FILE")" "$(cat "$CASE/prompt.txt" 2>/dev/null)"
+# json の囲みを含んでも JSON として解釈せず、本文の全文を入れる（plan の抽出が混ざっていない）
+assert_has "T40 result.text は rawOutput の全文" "$(jget "$OUT" o.result.text)" "$PROMPT_MD"
+assert_eq "T40 result.text の末尾まで入る" "verdict" "$(jget "$OUT" 'o.result.text.includes("\"next_steps\"") ? "verdict" : "missing"')"
+assert_eq "T40 result に verdict を持たない" undefined "$(jget "$OUT" 'typeof o.result.verdict')"
+assert_eq "T40 dropped は 0" 0 "$(jget "$OUT" o.dropped)"
+cat "$CASE/runs.jsonl" >"$CASE/line.json" 2>/dev/null
+assert_eq "T40 運用ログの findings は null（件数を数えない実行）" null "$(jget "$CASE/line.json" o.findings)"
+assert_eq "T40 運用ログの dropped は 0" 0 "$(jget "$CASE/line.json" o.dropped)"
+assert_eq "T40 運用ログの mode" prompt "$(jget "$CASE/line.json" o.mode)"
+
+new_case T41
+FAKE_MODE=prompt_empty cr prompt --prompt tmp/prompt.md --out "$OUT"
+assert_rc "T41 本文が空白だけなら rc=3" 3 "$RC"
+assert_eq "T41 status:unavailable" unavailable "$(jget "$OUT" o.status)"
+assert_has "T41 reason に空の旨" "$(jget "$OUT" o.reason)" "空"
+
+new_case T42
+FAKE_MODE=prompt_fail cr prompt --prompt tmp/prompt.md --out "$OUT"
+assert_rc "T42 turn の失敗は rc=3" 3 "$RC"
+assert_eq "T42 status:unavailable" unavailable "$(jget "$OUT" o.status)"
+
+new_case T43a
+FAKE_MODE=prompt_ok cr prompt --out "$OUT"
+assert_rc "T43a --prompt 無しは rc=2" 2 "$RC"
+assert_has "T43a status:usage・reason に --prompt" "$(jget "$OUT" o.status) $(jget "$OUT" o.reason)" "usage prompt には --prompt が要る"
+assert_eq "T43a companion を呼ばない" "" "$(calls)"
+
+new_case T43b
+FAKE_MODE=prompt_ok cr prompt --prompt tmp/none.md --out "$OUT"
+assert_rc "T43b 依頼文のファイルが無ければ rc=2" 2 "$RC"
+assert_has "T43b reason に無いファイル" "$(jget "$OUT" o.reason)" "依頼文のファイルが無い"
+
+new_case T43c
+# plan モードに --effort が混ざっていない（偽の companion が 8 個の形だけを通す）
+FAKE_MODE=plan_ok cr plan --plan tmp/plan.md --out "$OUT"
+assert_not_has "T43c plan は --effort を付けない" "$(calls)" "--effort"
 
 # ============================================================ 引数不正
 
