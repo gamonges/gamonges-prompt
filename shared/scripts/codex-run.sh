@@ -1,21 +1,24 @@
 #!/usr/bin/env bash
-# /review・/review-plan から Codex plugin の companion を呼ぶラッパー。
+# /review・/review-plan・/series-retro から Codex plugin の companion を呼ぶラッパー。
 #
 #   codex-run.sh new    --out <基底のパス>               # 実行ごとの --out を 1 行出す（ファイルは作らない）
 #   codex-run.sh review --base <ref> --out <file>      # 差分のレビュー（skill はバックグラウンドで起動）
 #   codex-run.sh plan   --plan <file> --out <file>     # 計画のレビュー（同上）
+#   codex-run.sh prompt --prompt <file> --out <file>   # 自由形式の依頼文を read-only で渡す（同上）
 #   codex-run.sh wait   --out <file> [--timeout-sec N] # --out が現れるまで待つ（skill は前景で呼ぶ）
 #
-# 実行（review・plan）の終了コード: 0 成功 / 3 未実施 / 4 省略（実行者が Codex）/ 2 引数不正。
+# 実行（review・plan・prompt）の終了コード: 0 成功 / 3 未実施 / 4 省略（実行者が Codex）/ 2 引数不正。
 # new は 0 / 2、wait は 0（--out が在る）/ 3（時間切れ）/ 2（引数不正）。
 # オプションの値に -- で始まるものは取らない（空の値が展開で消えた形とみなし、引数不正にする）。
-# review・plan・wait の --out には、実行ごとに new で作ったパスを使う。時間切れが無いので前回の遅い
+# review・plan・prompt・wait の --out には、実行ごとに new で作ったパスを使う。時間切れが無いので前回の遅い
 # 実行が今回の実行の後で終わりうるが、別のパスにしか書かないので今回の結果を上書きしない。
 # --out の形: {"status","mode","model","elapsed_sec","reason","dropped","result"}。status は ok / skipped /
 # unavailable / usage。result と dropped（形の不正で除いた findings の件数）は ok のときだけ値を持ち、
 # 他は null。companion が成功で終わったのに出力が JSON でない・形が不正なとき、および除いた指摘が
 # あるときは、生の出力を <--out>.raw.txt に残す。
-# review・plan の --out は、--out を読み取れればどの終了でも（引数不正を含む）、終わる時に 1 回だけ
+# prompt の ok では result が {"text": <本文の全文>}、dropped が 0（指摘を数えないので、運用ログの findings は
+# null）。本文は JSON として解釈しない。本文が空（空白だけ）なら unavailable。
+# review・plan・prompt の --out は、--out を読み取れればどの終了でも（引数不正を含む）、終わる時に 1 回だけ
 # mv で置く。new・wait は --out を書かない。skill は「--out が在る＝実行が終わった」を
 # 前提に wait で待ち、分岐は exit code ではなく --out の status で行う（バックグラウンドの exit code は
 # 待ち合わせの時点で手元にあるとは限らないため）。
@@ -24,12 +27,12 @@
 # （plugin 1.0.6 の lib/app-server.mjs・lib/broker-lifecycle.mjs）、ラッパーを止めても turn は
 # 止まらないため。待ちの上限は wait の側（skill）だけが持つ。
 #
-# 呼び出し元: shared/skills/review/reference/codex-reviewer.md
+# 呼び出し元: shared/skills/review/reference/codex-reviewer.md・shared/skills/series-retro/SKILL.md
 # テスト: bash shared/scripts/tests/test-codex-run.sh
 
 set -euo pipefail
 
-MODEL="gpt-6.1-sol"
+MODEL="gpt-6.2-sol"
 # 前景の Bash の上限（600 秒）より前に戻る値
 DEFAULT_WAIT_SEC=570
 
@@ -38,6 +41,7 @@ SUB=""
 OUT=""
 BASE_REF=""
 PLAN=""
+PROMPT_IN=""
 WAIT_SEC="$DEFAULT_WAIT_SEC"
 STATUS=""
 REASON=""
@@ -120,7 +124,7 @@ SUB="${1:-}"
 bad=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --out | --base | --plan | --timeout-sec)
+        --out | --base | --plan | --prompt | --timeout-sec)
             # 空の値が展開で消えると、次のオプション名が値の位置に来る。値として取ると後ろの --out を
             # 読めず、--out が書かれないまま wait が時間切れになる
             if [[ $# -lt 2 || "$2" == --* ]]; then
@@ -132,6 +136,7 @@ while [[ $# -gt 0 ]]; do
                 --out) OUT="$2" ;;
                 --base) BASE_REF="$2" ;;
                 --plan) PLAN="$2" ;;
+                --prompt) PROMPT_IN="$2" ;;
                 --timeout-sec) WAIT_SEC="$2" ;;
             esac
             shift 2
@@ -154,6 +159,13 @@ case "$SUB" in
             bad="${bad:-計画ファイルが無い: ${PLAN}}"
         fi
         ;;
+    prompt)
+        if [[ -z "$PROMPT_IN" ]]; then
+            bad="${bad:-prompt には --prompt が要る}"
+        elif [[ ! -f "$PROMPT_IN" ]]; then
+            bad="${bad:-依頼文のファイルが無い: ${PROMPT_IN}}"
+        fi
+        ;;
     wait) [[ "$WAIT_SEC" =~ ^[0-9]+$ ]] || bad="${bad:---timeout-sec は整数}" ;;
     *) bad="${bad:-未知のモード: ${SUB:-（なし）}}" ;;
 esac
@@ -161,7 +173,7 @@ esac
 
 if [[ -n "$bad" ]]; then
     echo "codex-run.sh: ${bad}" >&2
-    echo "usage: codex-run.sh new --out <file> | review --base <ref> --out <file> | plan --plan <file> --out <file> | wait --out <file> [--timeout-sec N]" >&2
+    echo "usage: codex-run.sh new --out <file> | review --base <ref> --out <file> | plan --plan <file> --out <file> | prompt --prompt <file> --out <file> | wait --out <file> [--timeout-sec N]" >&2
     # new の --out は基底のパスで、wait の --out は実行の結果。どちらにも usage を書かない
     if [[ -n "$OUT" && "$SUB" != "wait" && "$SUB" != "new" ]]; then
         trap finish EXIT
@@ -299,6 +311,13 @@ EOF
         "$NODE" "$COMPANION" task --json --model "$MODEL" --prompt-file "$PROMPT" -C "$PWD" \
             >"$WORKDIR/run.out" 2>"$WORKDIR/run.err" </dev/null || rc=$?
         ;;
+    prompt)
+        # read-only（--write を付けない）。effort はこのモードだけに付ける（review・plan の argv を変えない）
+        PROMPT_ABS="$(cd "$(dirname "$PROMPT_IN")" && pwd)/$(basename "$PROMPT_IN")"
+        rc=0
+        "$NODE" "$COMPANION" task --json --model "$MODEL" --effort high --prompt-file "$PROMPT_ABS" -C "$PWD" \
+            >"$WORKDIR/run.out" 2>"$WORKDIR/run.err" </dev/null || rc=$?
+        ;;
 esac
 
 # 判定と正規化。companion の exit code は turn の状態だけで決まり、parseError があっても
@@ -348,6 +367,16 @@ verdict="$("$NODE" -e '
         }
         result = o.result;
         rawText = stdout;
+    } else if (mode === "prompt") {
+        let o = null;
+        try { o = JSON.parse(stdout); } catch (e) {}
+        if (rc !== 0 || !o || o.status !== 0) fail(stderr || "turn が失敗（詳細はジョブログ）");
+        const raw = String(o.rawOutput == null ? "" : o.rawOutput);
+        if (raw.trim() === "") fail("本文が空（turn は成功したが出力が無い）");
+        fs.writeFileSync(resF, JSON.stringify({ text: raw }));
+        // 指摘を数えない実行なので、件数は null（運用ログで指摘 0 件の実行と区別する）
+        process.stdout.write("null 0");
+        process.exit(0);
     } else {
         // task --json はエラー文を持たず、turn 中の失敗の文言はジョブログにだけ残る
         let o = null;

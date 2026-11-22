@@ -243,6 +243,7 @@ AI が付けた記号（案 B・P-2・X-7 など）の意味を忘れ、長い�
 | `/spec-check` / `/spec-propose` / `/spec-archive` / `/document-spec` | OpenSpec 仕様管理 |
 | `/review-comments` | PR レビューコメントの妥当性評価 + 返信 + resolve |
 | `/retrospective` | 日次 PR 振り返り |
+| `/series-retro` | シリーズの完了後のハーネスの振り返り。独立レビュー（Codex か subagent）と自分の整理を突き合わせ、改善候補を取り込み先ごとの下書きにする（`/` 呼び出しのみ） |
 | `/adr` / `/state-machine` / `/status` | ADR 生成 / 状態遷移図追加 / ワークフロー進捗表示 |
 | `/where` | セッションの要約・現在地・記号の凡例・決めることを 1 画面にまとめ直す（コンソールのみ。「説明の書き方と聞き返しの検知」） |
 | `/memory` / `/recall` | 記憶の保存・読み込み（実装は `agent-memory` skill に委譲） |
