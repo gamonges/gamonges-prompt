@@ -64,6 +64,9 @@ TYPES = [
     ("PR Explanation", "pr-explain/*/quick.md"),
     ("PR Explanation Verify", "pr-explain/*/verify.md"),
     ("PR Comment Draft", "pr-explain/*/comments-draft.md"),
+    # prompt.md を先に置く（guess_type は先に当たった種類を採る）
+    ("Retro Prompt", "series-retro/prompt.md"),
+    ("Retrospective", "series-retro/*.md"),
 ]
 
 # tmp/ の直下の、生ログと画像の置き場。中の md は文書として扱わない

@@ -674,6 +674,10 @@ shared/skills/review/SKILL.md|tmp/review/_static-scan.md
 shared/skills/review/SKILL.md|tmp/review/{agent-name}-review.md
 shared/skills/review/reference/edge-case-reverification.md|tmp/review/_edge-{category}-review.md
 shared/skills/review/reference/unified-report-template.md|tmp/review/unified.md
+shared/skills/series-retro/reference/output-format.md|tmp/series-retro/retro.md
+shared/skills/series-retro/reference/output-format.md|tmp/series-retro/self.md
+shared/skills/series-retro/reference/review-prompt.md|tmp/series-retro/prompt.md
+shared/skills/series-retro/reference/review-prompt.md|tmp/series-retro/review.md
 shared/skills/series-run/reference/meaning-card.md|tmp/meaning-card.md
 shared/skills/series-run/reference/stage-type.md|tmp/checks.md
 shared/skills/series-run/reference/stage-type.md|tmp/code-review.md
