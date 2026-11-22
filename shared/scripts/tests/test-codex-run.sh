@@ -19,7 +19,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 CR="$REPO_ROOT/shared/scripts/codex-run.sh"
-MODEL="gpt-6.1-sol"
+MODEL="gpt-6.2-sol"
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -120,7 +120,7 @@ import fs from "node:fs";
 
 const argv = process.argv.slice(2);
 if (process.env.FAKE_LOG) fs.appendFileSync(process.env.FAKE_LOG, argv.join(" ") + "\n");
-const MODEL = "gpt-6.1-sol";
+const MODEL = "gpt-6.2-sol";
 const mode = process.env.FAKE_MODE || "ok";
 const dir = process.env.FAKE_DIR;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

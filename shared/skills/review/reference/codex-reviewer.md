@@ -72,13 +72,13 @@ Codex 上で動いているときも同じように起動する。ラッパー�
 | `low` | ℹ️ Info（`I-n`） | ℹ️ Note（`N-n`） |
 
 - 出所の書き方（`<model>` は `<out>` の `model` から取る）:
-  - `/review`: **エージェント**欄に `codex(<model>)`（例: `codex(gpt-6.1-sol)`）。カテゴリは本文から既存のタグを 1 つ選ぶ（迷えば `correctness`）。Info の書式にはエージェント欄が無いので、Codex の指摘を Info に写すときは Minor と同じ `**エージェント**: codex(<model>) | **確信度**: … | **カテゴリ**: …` の行を `**ファイル**:` の前に足す
+  - `/review`: **エージェント**欄に `codex(<model>)`（例: `codex(gpt-6.2-sol)`）。カテゴリは本文から既存のタグを 1 つ選ぶ（迷えば `correctness`）。Info の書式にはエージェント欄が無いので、Codex の指摘を Info に写すときは Minor と同じ `**エージェント**: codex(<model>) | **確信度**: … | **カテゴリ**: …` の行を `**ファイル**:` の前に足す
   - `/review-plan`: 指摘ごとに `**出所**: Codex（<model>）` の行を足す
 - 確信度（`/review` だけ。`/review-plan` のレポートには確信度の欄が無いので書かない）: `confidence` が 0.8 以上なら High、0.5 以上なら Medium、それ未満なら Low。**区分は上の表より先に確信度で決める**: Low なら `severity` によらず Info の下部に `(Low confidence)` を付けて置く（`/review` の既存の規則。Phase 5 の Critical にも数えない）
 - 番号は Claude の指摘と通しで振る（`/fix` が `C-n`・`M-n` で出典を書くため）。各 skill の並べ替えを済ませてから、区分ごとに上から振る
 - 重複: Codex の指摘と Claude の指摘が、同じファイルで行範囲が重なり、同じ問題を述べていれば 1 件にまとめる（Codex の指摘にはカテゴリが無いので、カテゴリタグでは照合しない）。Claude 側が節名で参照しているとき（`plan.md (ステップ 3)`）は、Codex の行がその節に入っていれば重なるとみなす
   - 区分は重い方、確信度は高い方、カテゴリは Claude 側のタグにする。見出し・参照・本文・修正案は Claude 側を使う
-  - `/review` ではエージェント欄の末尾に既存の書式（`[code-quality・codex(gpt-6.1-sol)]`）で並べ、`/review-plan` では出所を `Claude と Codex の両方` にする
+  - `/review` ではエージェント欄の末尾に既存の書式（`[code-quality・codex(gpt-6.2-sol)]`）で並べ、`/review-plan` では出所を `Claude と Codex の両方` にする
 - 参照: `file` と `line_start`〜`line_end` を `file_path:L{number}` 形式に直す
   - `file` が対象の計画ファイルを指していれば（ラッパーは計画ファイルを絶対パスにして渡すので、絶対パスで返る）、計画ファイルの basename にする（`plan.md:L42`・`fix-plan.md:L42`）
   - repo 内の他のファイルは repo ルートからの相対パスにする

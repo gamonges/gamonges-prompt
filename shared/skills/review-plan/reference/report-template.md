@@ -17,7 +17,7 @@ status: stable
 **対象**: {計画ファイルパス}
 **レビュー日**: {date}
 **総合判定**: {LGTM / 要修正 / 要再設計}
-**Codex レビュー**: {実施（gpt-6.1-sol、52 秒、指摘 1 件） / 未実施（理由） / 省略（実行者が Codex） / 省略（--no-codex）}
+**Codex レビュー**: {実施（gpt-6.2-sol、52 秒、指摘 1 件） / 未実施（理由） / 省略（実行者が Codex） / 省略（--no-codex）}
 
 ---
 
@@ -31,7 +31,7 @@ status: stable
 
 ### C-1. {問題タイトル}
 **参照**: `plan.md:L{number}`
-**出所**: {Codex（gpt-6.1-sol） / Claude と Codex の両方}（Claude だけの指摘では行ごと省く）
+**出所**: {Codex（gpt-6.2-sol） / Claude と Codex の両方}（Claude だけの指摘では行ごと省く）
 
 {詳細説明: 何が問題で、なぜ修正が必要か}
 
@@ -44,7 +44,7 @@ status: stable
 
 ### W-1. {問題タイトル}
 **参照**: `plan.md:L{number}`
-**出所**: {Codex（gpt-6.1-sol） / Claude と Codex の両方}（Claude だけの指摘では行ごと省く）
+**出所**: {Codex（gpt-6.2-sol） / Claude と Codex の両方}（Claude だけの指摘では行ごと省く）
 
 {詳細説明}
 
@@ -57,7 +57,7 @@ status: stable
 
 ### N-1. {タイトル}
 **参照**: `plan.md:L{number}`
-**出所**: {Codex（gpt-6.1-sol） / Claude と Codex の両方}（Claude だけの指摘では行ごと省く）
+**出所**: {Codex（gpt-6.2-sol） / Claude と Codex の両方}（Claude だけの指摘では行ごと省く）
 
 {詳細説明}
 

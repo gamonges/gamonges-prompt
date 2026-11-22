@@ -29,7 +29,7 @@
 
 set -euo pipefail
 
-MODEL="gpt-6.1-sol"
+MODEL="gpt-6.2-sol"
 # 前景の Bash の上限（600 秒）より前に戻る値
 DEFAULT_WAIT_SEC=570
 
