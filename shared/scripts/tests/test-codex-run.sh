@@ -182,6 +182,11 @@ if (sub === "task") {
         case "prompt_ok": print({ ...base, status: 0, rawOutput: md }); process.exit(0);
         case "prompt_empty": print({ ...base, status: 0, rawOutput: " \n\t\n" }); process.exit(0);
         case "prompt_fail": print({ ...base, status: 1, rawOutput: "" }); process.exit(1);
+        // 判定の 3 条件（rc・JSON・status）と rawOutput の null を 1 つずつ崩す
+        case "prompt_rc": print({ ...base, status: 0, rawOutput: md }); process.exit(1);
+        case "prompt_status": print({ ...base, status: 1, rawOutput: md }); process.exit(0);
+        case "prompt_nojson": process.stdout.write(md); process.exit(0);
+        case "prompt_null": print({ ...base, status: 0, rawOutput: null }); process.exit(0);
         case "plan_ok": print({ ...base, status: 0, rawOutput: "```json\n" + JSON.stringify(result) + "\n```" }); process.exit(0);
         case "plan_prefixed": print({ ...base, status: 0, rawOutput: "```text\nメモ\n```\n\n```json\n" + JSON.stringify(result) + "\n```" }); process.exit(0);
         case "plan_order": {
@@ -357,6 +362,7 @@ assert_has "T40 result.text は rawOutput の全文" "$(jget "$OUT" o.result.tex
 assert_eq "T40 result.text の末尾まで入る" "verdict" "$(jget "$OUT" 'o.result.text.includes("\"next_steps\"") ? "verdict" : "missing"')"
 assert_eq "T40 result に verdict を持たない" undefined "$(jget "$OUT" 'typeof o.result.verdict')"
 assert_eq "T40 dropped は 0" 0 "$(jget "$OUT" o.dropped)"
+assert_true "T40 ok でも .raw.txt を残さない" "残っている" test ! -e "$OUT.raw.txt"
 cat "$CASE/runs.jsonl" >"$CASE/line.json" 2>/dev/null
 assert_eq "T40 運用ログの findings は null（件数を数えない実行）" null "$(jget "$CASE/line.json" o.findings)"
 assert_eq "T40 運用ログの dropped は 0" 0 "$(jget "$CASE/line.json" o.dropped)"
@@ -372,12 +378,30 @@ new_case T42
 FAKE_MODE=prompt_fail cr prompt --prompt tmp/prompt.md --out "$OUT"
 assert_rc "T42 turn の失敗は rc=3" 3 "$RC"
 assert_eq "T42 status:unavailable" unavailable "$(jget "$OUT" o.status)"
+reason="$(jget "$OUT" o.reason)"
+assert_true "T42 reason が空でない" "reason=$reason" test -n "$reason" -a "$reason" != null -a "$reason" != __NO_FILE__
+
+# 判定の条件を 1 つずつ崩す。どれか 1 つの条件を実装から消すと、そのケースだけが ok に化けるか、
+# 判定の外の例外（「想定外の失敗」）に落ちる。後者も status は同じなので、reason の中身で区別する
+for c in "T44 rc≠0（status は 0）:prompt_rc:turn が失敗" "T45 status≠0（rc は 0）:prompt_status:turn が失敗" \
+    "T46 stdout が JSON でない:prompt_nojson:turn が失敗" "T47 rawOutput が null:prompt_null:本文が空"; do
+    name="${c%%:*}" rest="${c#*:}"
+    mode="${rest%%:*}" want="${rest#*:}"
+    new_case "${name%% *}"
+    FAKE_MODE="$mode" cr prompt --prompt tmp/prompt.md --out "$OUT"
+    assert_rc "$name は rc=3" 3 "$RC"
+    assert_eq "$name は status:unavailable" unavailable "$(jget "$OUT" o.status)"
+    reason="$(jget "$OUT" o.reason)"
+    assert_has "$name の reason は判定の文言（${want}）" "$reason" "$want"
+    assert_true "$name は .raw.txt を残さない" "残っている" test ! -e "$OUT.raw.txt"
+done
 
 new_case T43a
 FAKE_MODE=prompt_ok cr prompt --out "$OUT"
 assert_rc "T43a --prompt 無しは rc=2" 2 "$RC"
 assert_has "T43a status:usage・reason に --prompt" "$(jget "$OUT" o.status) $(jget "$OUT" o.reason)" "usage prompt には --prompt が要る"
 assert_eq "T43a companion を呼ばない" "" "$(calls)"
+assert_has "T43a usage 行に prompt モードが出る" "$(cat "$CASE/stderr")" "prompt --prompt <file> --out <file>"
 
 new_case T43b
 FAKE_MODE=prompt_ok cr prompt --prompt tmp/none.md --out "$OUT"

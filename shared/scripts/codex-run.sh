@@ -173,7 +173,7 @@ esac
 
 if [[ -n "$bad" ]]; then
     echo "codex-run.sh: ${bad}" >&2
-    echo "usage: codex-run.sh new --out <file> | review --base <ref> --out <file> | plan --plan <file> --out <file> | wait --out <file> [--timeout-sec N]" >&2
+    echo "usage: codex-run.sh new --out <file> | review --base <ref> --out <file> | plan --plan <file> --out <file> | prompt --prompt <file> --out <file> | wait --out <file> [--timeout-sec N]" >&2
     # new の --out は基底のパスで、wait の --out は実行の結果。どちらにも usage を書かない
     if [[ -n "$OUT" && "$SUB" != "wait" && "$SUB" != "new" ]]; then
         trap finish EXIT

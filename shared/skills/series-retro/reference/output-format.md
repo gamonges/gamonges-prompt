@@ -110,7 +110,7 @@ status: draft
 |---|---|---|---|
 
 ## 独立レビューの実施状況
-<Codex（モデル・所要）／subagent（Codex を使えなかった理由）／未実施（理由）。subagent に self の後で切り替えた回は「self の後に起動」と書く>
+<Codex（モデル・所要）／subagent（Codex を使えなかった理由）／未実施（理由）。`run.json` の `after_self` が true なら「self の後に起動」、`self_after_review` が true なら「self は独立レビューの完了後に書いた（独立性は『読まない』の指示に頼る）」と書く。後者では段の分布の (a) を参考値とし、要するにでも断定しない>
 
 ## 欠陥の流出の表
 <review の表を写す。未実施なら「未実施（独立レビューが無いため）」の 1 行>
