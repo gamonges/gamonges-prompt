@@ -648,7 +648,8 @@ PY
   BAK="$(bak_of)"
   if [ "$rc" -eq 0 ] && [ -n "$BAK" ] && [ -d "$BAK" ] && listing "$BAK" | cmp -s "$W/before" -; then pass "rebuild --carry: exit 0・退避先に元の全ファイルが残る"; else fail "rebuild --carry: rc=${rc} 退避先=${BAK} err=$(head -c 200 "$W/err")"; fi
   if [ "$(listing "$D" | tr '\n' ' ')" = ". ./data-changes.md " ] && cmp -s "$W/dc.keep" "$D/data-changes.md" && [ -z "$(ls -d "$D".new-* 2>/dev/null)" ]; then pass "rebuild --carry: 新しい作業ディレクトリには同じ中身の控えだけ・作業用が残らない"; else fail "rebuild --carry: D=$(listing "$D" | tr '\n' ' ')"; fi
-  [ -n "$BAK" ] && cp -R "$BAK/." "$D/"
+  # 退避先から控え以外を置き直す（引き継いだ控えを上書きしない）
+  [ -n "$BAK" ] && (cd "$BAK" && find . -mindepth 1 -maxdepth 1 ! -name data-changes.md -exec cp -R {} "$D/" \;)
   sc scenes.py status --dir "$D"
   if [ -n "$BAK" ] && stage_line record | grep -q restore && [ "$(last_line "$W/out")" = "next: record" ]; then pass "rebuild --carry: 台本と素材を置き直すと、引き継いだ控えで record が restore・next: record"; else fail "rebuild --carry: 置き直した後 record=$(stage_line record) last=$(last_line "$W/out")"; fi
   # 戻していない行が無ければ、控えごと退避して空の作業ディレクトリにする
@@ -714,7 +715,9 @@ PY
   sc scenes.py mark --dir "$D" --stage record --id 4
   if [ "$rc" -eq 3 ] && [ ! -e "$D/clips/manifest.json" ]; then pass "mark: ffprobe が N/A を返したら exit 3 で記録しない（seconds へ落とさない）"; else fail "mark: N/A rc=${rc} $(cat "$D/clips/manifest.json" 2>/dev/null)"; fi
   : > "$FAKE_DIR/durations"
-  sc scenes.py begin --dir "$D" --stage cards --id 1; H png "$D/cards/1.png" 1920 1080 png-1
+  sc scenes.py begin --dir "$D" --stage cards --id 1
+  if [ "$rc" -eq 0 ] && [ ! -e "$D/cards/1.png" ] && [ -f "$D/cards/1.meta" ]; then pass "begin(cards): 古い png を消し、meta を書く"; else fail "begin(cards): rc=${rc} $(ls "$D/cards" | tr '\n' ' ') err=$(head -c 200 "$W/err")"; fi
+  H png "$D/cards/1.png" 1920 1080 png-1
   sc scenes.py mark --dir "$D" --stage cards --id 1
   assert_rc "mark: カードは exit 0" 0 "$rc" "$(head -n 1 "$W/err")"
   [ "$(H get "$D/cards/manifest.json" '"duration" in d["1"]')" = "False" ] && pass "mark: カードは duration を持たない" || fail "mark: カードの manifest $(cat "$D/cards/manifest.json")"
@@ -995,6 +998,9 @@ SH
       if [ "$rc" -eq 1 ] && ! grep -q AFTER "$W/z.out"; then pass "骨格の関数: playwright-cli が exit 1 なら止まる"; else fail "骨格の関数: exit 1 rc=${rc} $(tr '\n' ' ' < "$W/z.out")"; fi
       zrun ok
       if [ "$rc" -eq 0 ] && grep -q AFTER "$W/z.out"; then pass "骨格の関数: 見出しでない Error（結果やページの文字）では止まらない"; else fail "骨格の関数: 正常 rc=${rc} $(tr '\n' ' ' < "$W/z.out")"; fi
+      # ev は ck を通る（eval の失敗でも止まる）
+      env FAKE_PC=errline PATH="$PCB:$PATH" zsh -f -c "S=$(printf '%q' "$S"); SESSION=s; source $(printf '%q' "$W/defs.zsh"); ev 'window.x()'; print -r -- AFTER" > "$W/z.out" 2>&1; rc=$?
+      if [ "$rc" -eq 1 ] && ! grep -q AFTER "$W/z.out"; then pass "骨格の関数: ev も ck を通り、eval の例外で止まる"; else fail "骨格の関数: ev rc=${rc} $(tr '\n' ' ' < "$W/z.out")"; fi
     fi
   fi
 }
