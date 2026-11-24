@@ -1082,6 +1082,18 @@ PY
   # 書き込みの定義（迷うものは書き込み）と、取り消せない操作の扱い（実行の了承の記録で閉じる）
   sect_has "recording.md: 書き込みの規律の節に、画面の外に変化を残す操作の定義・迷うものは書き込み・取り消せない操作の閉じ方" "$RECMD" "書き込みの規律" 画面の外に変化を残す操作 迷うものは書き込み 実行せずに見せる "取り消せない操作（利用者が了承）"
   sect_has "SKILL.md: してはいけないことに、画面の外に変化を残す操作は書き込み" "$REF/../SKILL.md" "してはいけないこと" 画面の外に変化を残す
+  # 声の規約の確認は利用者の申告の記録で許す（Claude が代わりに true にしない）。規約の文面はそのまま見せる
+  sect_has "SKILL.md: してはいけないことに、利用者の答え無しに confirmed_by_user を true にしない" "$REF/../SKILL.md" "してはいけないこと" confirmed_by_user
+  "$HPY" - "$REF/voice.md" > "$W/voice.out" 2>&1 <<'PY'
+import sys
+# 読みの整形の行にも「そのまま」があるので、voice.py policy の行に絞る
+lines = open(sys.argv[1], encoding="utf-8").read().split("\n")
+policy = [l for l in lines if "voice.py policy" in l]
+ok = bool(policy) and all("そのまま" in l for l in policy) and any("既定の声を持たず" in l for l in lines[:5])
+print(policy)
+sys.exit(0 if ok else 1)
+PY
+  if [ "$?" -eq 0 ]; then pass "voice.md: 規約の文面（voice.py policy の出力）をそのまま見せ、既定の声を持たない"; else fail "voice.md: $(head -c 300 "$W/voice.out")"; fi
 }
 
 # ================================================================ voice.py
