@@ -715,6 +715,7 @@ PY
   sc scenes.py mark --dir "$D" --stage record --id 4
   if [ "$rc" -eq 3 ] && [ ! -e "$D/clips/manifest.json" ]; then pass "mark: ffprobe が N/A を返したら exit 3 で記録しない（seconds へ落とさない）"; else fail "mark: N/A rc=${rc} $(cat "$D/clips/manifest.json" 2>/dev/null)"; fi
   : > "$FAKE_DIR/durations"
+  [ -f "$D/cards/1.png" ] || fail "begin(cards): 前提の古い png が無い（mk_done_base が置く）"
   sc scenes.py begin --dir "$D" --stage cards --id 1
   if [ "$rc" -eq 0 ] && [ ! -e "$D/cards/1.png" ] && [ -f "$D/cards/1.meta" ]; then pass "begin(cards): 古い png を消し、meta を書く"; else fail "begin(cards): rc=${rc} $(ls "$D/cards" | tr '\n' ' ') err=$(head -c 200 "$W/err")"; fi
   H png "$D/cards/1.png" 1920 1080 png-1
@@ -981,6 +982,7 @@ PY
       cat > "$PCB/playwright-cli" <<'SH'
 #!/usr/bin/env bash
 # 実物（0.1.17）の形: JS の例外は rc 0 で「### Error」の見出し、session の誤りなどは rc 1
+[ -n "${FAKE_PC_ARGS:-}" ] && printf '%s\n' "$@" > "$FAKE_PC_ARGS"
 case "${FAKE_PC:-ok}" in
   errline) echo "### Error"; echo "TypeError: window.x is not a function" ;;
   rc1) echo "The browser 's' is not open, please run open first"; exit 1 ;;
@@ -999,8 +1001,8 @@ SH
       zrun ok
       if [ "$rc" -eq 0 ] && grep -q AFTER "$W/z.out"; then pass "骨格の関数: 見出しでない Error（結果やページの文字）では止まらない"; else fail "骨格の関数: 正常 rc=${rc} $(tr '\n' ' ' < "$W/z.out")"; fi
       # ev は ck を通る（eval の失敗でも止まる）
-      env FAKE_PC=errline PATH="$PCB:$PATH" zsh -f -c "S=$(printf '%q' "$S"); SESSION=s; source $(printf '%q' "$W/defs.zsh"); ev 'window.x()'; print -r -- AFTER" > "$W/z.out" 2>&1; rc=$?
-      if [ "$rc" -eq 1 ] && ! grep -q AFTER "$W/z.out"; then pass "骨格の関数: ev も ck を通り、eval の例外で止まる"; else fail "骨格の関数: ev rc=${rc} $(tr '\n' ' ' < "$W/z.out")"; fi
+      env FAKE_PC=errline FAKE_PC_ARGS="$W/pc-args" PATH="$PCB:$PATH" zsh -f -c "S=$(printf '%q' "$S"); SESSION=s; source $(printf '%q' "$W/defs.zsh"); ev 'window.x()'; print -r -- AFTER" > "$W/z.out" 2>&1; rc=$?
+      if [ "$rc" -eq 1 ] && ! grep -q AFTER "$W/z.out" && [ "$(tr '\n' '|' < "$W/pc-args")" = "-s=s|eval|window.x()|" ]; then pass "骨格の関数: ev は ck を通って eval と式を渡し、eval の例外で止まる"; else fail "骨格の関数: ev rc=${rc} args=$(tr '\n' '|' < "$W/pc-args" 2>/dev/null) $(tr '\n' ' ' < "$W/z.out")"; fi
     fi
   fi
 }
