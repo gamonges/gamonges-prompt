@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-# release-video のカード（cards/<id>.html）と重ね表示（overlay.js）を作る。
+# release-video のカード（cards/<id>.html）と重ね表示（overlay.js）を作り、rec.sh に埋める JSON 文字列を出す（jstr）。
 # 編集したら: bash shared/scripts/tests/test-release-video.sh
 # exit: 0=成功 / 1=入力やデータの誤り / 2=引数の誤り / 3=外部コマンドの失敗
 import argparse
+import json
 import os
 import re
 import shutil
@@ -64,15 +65,34 @@ def cmd_overlay(args):
     return 0
 
 
+def cmd_jstr(args):
+    # 値を JS・JSON の文字列として安全に埋めるための出力。rec.sh はこれを変数へ代入してから使う。
+    # ensure_ascii は U+2028・U+2029 を JS の行区切りにしないため
+    if (args.value is None) == (args.telop is None):
+        rv.die(rv.RvError("値か --telop <id> のどちらか 1 つを渡す", rv.EXIT_ARG))
+    value = args.value
+    if args.telop is not None:
+        ctx = rv.load_ctx(args.dir, args.profile)
+        sc = next((s for s in ctx.scenes if s["id"] == args.telop), None)
+        if sc is None:
+            raise rv.RvError("id '%s' が scenes.json に無い" % args.telop)
+        value = sc["telop"]
+    print(json.dumps(value, ensure_ascii=True))
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="render.py", description="release-video のカードと重ね表示")
     sub = ap.add_subparsers(dest="cmd")
     sub.required = True
-    for name, fn in (("card", cmd_card), ("overlay", cmd_overlay)):
+    for name, fn in (("card", cmd_card), ("overlay", cmd_overlay), ("jstr", cmd_jstr)):
         p = sub.add_parser(name)
         p.add_argument("--dir", default=None)
         p.add_argument("--profile", default=None)
         p.set_defaults(fn=fn)
+        if name == "jstr":
+            p.add_argument("value", nargs="?", default=None, help="JSON 文字列にする値")
+            p.add_argument("--telop", default=None, help="scenes.json のこの id の telop を値にする")
     args = ap.parse_args(argv)
     try:
         return args.fn(args)

@@ -64,7 +64,7 @@ disable-model-invocation: true
 1. `python3 $S/render.py card --dir <dir>` で `cards/<id>.html` を作る。各カードの撮影の前に `python3 $S/scenes.py begin --dir <dir> --stage cards --id <id>` を通す（古い png を消し、作る直前の入力を控える）。begin の後に `render.py card` を流し直したら、その id は begin からやり直す（mark が html の違いで止まる）
 2. `python3 -m http.server --bind 127.0.0.1 --directory <cards の絶対パス> <空いた port>` をバックグラウンドで起動する（`file:` では白紙になる）
 3. `playwright-cli -s=<cards 用の session> open`（headless でよい。未起動の session への操作は拒否されるので先に開く）
-4. `run-code` で `page.setViewportSize({width:1920,height:1080})`・`goto`・`screenshot({path: "<cards の絶対パス>/<id>.png"})` を行う（パスは二重引用符の JSON 文字列で書く。`'` を含むパスで壊れないため）
+4. `run-code` で `page.setViewportSize({width:1920,height:1080})`・`goto`・`screenshot({path: <png の絶対パスの JSON 文字列>})` を行う（パスは `p="$(python3 $S/render.py jstr "<cards の絶対パス>/<id>.png")" || 止める` で作ってから埋める。`'`・`"` を含むパスで壊れないため）。出力に `### Error` の見出しがあれば失敗として扱う（JS の例外は exit 0 で返る。`reference/recording.md` 節 2）
 5. 撮った png を Read で確かめる（白紙でない・文字が切れていない）
 6. 問題が無いカードだけ `python3 $S/scenes.py mark --dir <dir> --stage cards --id <id>` で記録する（begin を通した 1920×1080 の PNG だけを受け付ける。成功すると begin の控えを消す）
 7. 成功でも失敗でも、`-s=<cards 用> close` とサーバの停止を行う

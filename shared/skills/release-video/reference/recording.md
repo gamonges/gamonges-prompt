@@ -21,6 +21,7 @@
 - `addInitScript({path})` は**呼んだ時点で**ファイルを読み、その中身を送る（playwright-cli 0.1.17 に同梱の playwright-core 1.62.0-alpha の `lib/coreBundle.js` の `evaluationScript`）。登録の後に overlay.js を書き換えても、ブラウザの overlay は変わらない
 - overlay は読み込んだ時点の設定を取り込み、2 回目に読み込まれても初期化し直さない（`overlay-template.js` の `if (window.__ov) return;`）。同じ session に登録し直すと、**先に登録した古い overlay が勝つ**。overlay を作り直したら session を開き直す（節 4）
 - 未起動の session への操作は拒否される。先に `open` する
+- 失敗の出力の形（ローカルのダミーのページで確かめた）: 未起動の session への操作などは **exit 1**。ページの中の JS の例外（無い関数の `eval` など）は **exit 0** で、出力に `### Error` の見出しの行が入る。正常な `goto` の出力にも `- Console: 1 errors` のような行が入るので、`Error` の語の有無ではなく見出しで判定する（節 8 の `ck`）
 
 ## 3. 専用 ffmpeg が無いとき
 
@@ -33,11 +34,19 @@
 
 overlay は、ログインの前に、撮影に使う session へ 1 回だけ登録する（ログインは同じ session で行うので、後から開き直すとログインし直しになる）。
 
-1. `python3 $S/render.py overlay --dir <dir>` で `overlay.js` を作る（`blur_patterns` の検証が通らなければ止める）
-2. `ov="$(python3 $S/scenes.py session --dir <dir>)"`。`overlay.js` が今の設定と同じかを確かめ、`clips/session.json` に印を書き、`overlay.js` の絶対パスの JSON 文字列を 1 行で出す。exit 1 なら止める
-3. `playwright-cli -s=<session> close`（残っている session を閉じる。未起動なら拒否されるだけで、失敗してよい）
-4. `playwright-cli -s=<session> open --headed` → `playwright-cli -s=<session> resize 1920 1080`
-5. `playwright-cli -s=<session> run-code "async page => { await page.context().addInitScript({path: $ov}); }"`。失敗したら止める
+1. `render.py overlay` で `overlay.js` を作る（`blur_patterns` の検証が通らなければ止める）
+2. `scenes.py session` が、`overlay.js` が今の設定と同じかを確かめ、`clips/session.json` に印を書き、`overlay.js` の絶対パスの JSON 文字列を 1 行で出す（そのまま `addInitScript` に埋める）
+3. 残っている session を閉じる（未起動なら拒否されるだけで、失敗してよい）→ `open --headed` → `resize 1920 1080` → overlay の登録
+
+```zsh
+# 節 8 の骨格の冒頭（DIR・S・SESSION と jstr・ck・ev の 1 行の定義）を先に置く
+python3 "$S/render.py" overlay --dir "$DIR" || exit 1
+ov="$(python3 "$S/scenes.py" session --dir "$DIR")" || exit 1
+playwright-cli "-s=$SESSION" close >/dev/null 2>&1
+ck open --headed >/dev/null
+ck resize 1920 1080 >/dev/null
+ck run-code "async page => { await page.context().addInitScript({path: $ov}); }" >/dev/null
+```
 
 `scenes.py begin`（record）は、`clips/session.json` の印が今の期待値と違えば止まる（「撮影用の session を開き直す」）。session を開いた後に設定を変えて overlay を作り直したとき、ブラウザの古い overlay のまま録画しないため。overlay を作り直したら（`badpattern` の修正など）、この節からやり直し、利用者にログインし直してもらう。
 
@@ -80,29 +89,32 @@ status: draft
 
 1. 撮影用の session（節 4）を開いてログインしてから、`scenes.json` の `kind: record` から `tmp/release-video/rec.sh` を生成する。冒頭で作業ディレクトリを絶対パスに解決して（`DIR="$(cd <dir> && pwd)"`）`cd "$DIR"` し、playwright-cli に渡すファイル名はすべて `"$DIR/…"` の絶対パスにする（snapshot などの自動の出力 `.playwright-cli/` も作業ディレクトリの中にできる）
 2. rec.sh は場面だけを撮る（`open`・overlay の登録・`close` をしない）。冒頭で全場面の `scenes.py begin --stage record` を通す（古い clip と `.events` を消し、作る直前の入力を控える。撮影用の session の印も照合する）。1 つでも止まったら撮らない
-3. ヘルパー（`-s=<session>` 付きの呼び出し・`eval`・snapshot から ref を引く）は、zsh の未クォート展開の癖を避けるため配列で渡す
-4. 各場面の骨格: 移動 → 読み込み待ち → `video-start "$DIR/clips/<id>.webm" --size=1920x1080` → `telop`・`hl`（操作のたびに、録画の開始からの秒を `clips/<id>.events` に 1 行書く）→ 音声の長さ（audio の manifest の `duration`。`narr` が空なら `seconds`）だけ待つ → `video-stop`
-5. **`scenes.py mark` はここでは打たない**（次の節の確認の後）
+3. ブラウザの操作はすべて `ck`（`-s=<session>` 付きの呼び出し。exit 0 以外か `### Error` の見出しで止まる）と `ev`（`ck eval`）で呼ぶ。zsh の未クォート展開の癖を避けるため、引数は配列か `"$@"` で渡す
+4. 値を JS の文字列に直接埋めない。`render.py jstr` で JSON 文字列にし、**先に変数へ代入して** `|| exit 1` で確かめてから埋める（コマンド置換の失敗はブラウザの操作の引数の中では消える）。テロップは `jstr --dir "$DIR" --telop <id>` で scenes.json から読む（rec.sh に書き写さない）。セレクタか文字列は `jstr -- <値>` に、shell の語として単一引用符で包んで書く（中の `'` は `'\''`。python の `shlex.quote` の形）。展開された JSON の中の `$`・バッククォートは、二重引用符の中で再び展開されない
+5. 録画の後の `window.__ov.log` は `ev` ではなく `playwright-cli eval` の出力で読む（log の中の文字で `ck` が止まらないため。節 9）
+6. 各場面の骨格: 移動 → 読み込み待ち → `video-start "$DIR/clips/<id>.webm" --size=1920x1080` → `telop`・`hl`（操作のたびに、録画の開始からの秒を `clips/<id>.events` に 1 行書く）→ 音声の長さ（audio の manifest の `duration`。`narr` が空なら `seconds`）だけ待つ → `video-stop`
+7. **`scenes.py mark` はここでは打たない**（次の節の確認の後）
 
 ```bash
 #!/bin/zsh
 set -u
 DIR="$(cd "<作業ディレクトリ>" && pwd)"; cd "$DIR"
-SESSION="<session 名>"
-pc() { playwright-cli "-s=$SESSION" "$@" 2>&1 }
-ev() { playwright-cli "-s=$SESSION" eval "$1" 2>&1 }
 S="<補助スクリプトの絶対パス>"
+SESSION="<session 名>"
+jstr() { python3 "$S/render.py" jstr "$@"; }
+ck() { local out rc; out="$(playwright-cli "-s=$SESSION" "$@" 2>&1)"; rc=$?; print -r -- "$out"; if (( rc != 0 )) || [[ $'\n'"$out" == *$'\n### Error'* ]]; then print -u2 -r -- "playwright-cli が失敗した: $1"; exit 1; fi; }
+ev() { ck eval "$1"; }
 mkdir -p "$DIR/clips"
 for id in <record の id …>; do python3 "$S/scenes.py" begin --dir "$DIR" --stage record --id "$id" || exit 1; done
 
 scene_<id>() {
-  pc resize 1920 1080 >/dev/null
-  pc goto "<url>" >/dev/null; sleep 4
-  pc video-start "$DIR/clips/<id>.webm" --size=1920x1080; T0=$SECONDS
-  ev "window.__ov.telop('<テロップ>')"; echo "$((SECONDS - T0)) telop" >> "$DIR/clips/<id>.events"
-  ev "window.__ov.hl('<セレクタか文字列>')"; echo "$((SECONDS - T0)) hl" >> "$DIR/clips/<id>.events"
+  ck resize 1920 1080 >/dev/null
+  ck goto "<url>" >/dev/null; sleep 4
+  ck video-start "$DIR/clips/<id>.webm" --size=1920x1080 >/dev/null; T0=$SECONDS
+  t="$(jstr --dir "$DIR" --telop <id>)" || exit 1; ev "window.__ov.telop($t)" >/dev/null; echo "$((SECONDS - T0)) telop" >> "$DIR/clips/<id>.events"
+  h="$(jstr -- '<セレクタか文字列>')" || exit 1; ev "window.__ov.hl($h)" >/dev/null; echo "$((SECONDS - T0)) hl" >> "$DIR/clips/<id>.events"
   sleep <音声の長さ>
-  pc video-stop
+  ck video-stop >/dev/null
 }
 ```
 

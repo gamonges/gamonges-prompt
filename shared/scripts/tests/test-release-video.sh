@@ -916,6 +916,131 @@ PY
   grep -q "badpattern" "$REF/overlay-template.js" && pass "overlay-template: 通らない式を badpattern として log に積む" || fail "overlay-template: badpattern が無い"
   grep -q "notfound" "$REF/overlay-template.js" && pass "overlay-template: recording.md が読む log のキー notfound を保つ" || fail "overlay-template: notfound"
 
+  # --- jstr（regression: rec.sh がテロップ・セレクタを単一引用符の JS 文字列に直接埋め、' や改行で壊れ、任意の JS が走りえた）
+  # 1 つの表を json.loads の往復と node の評価の両方に使う
+  "$HPY" - "$W/jstr-cases.bin" <<'PY'
+import sys
+vals = ["it's", "back\\slash", 'dq"q', "line1\nline2", "$(echo x)", "`echo y`",
+        "a" + chr(0x2028) + "b" + chr(0x2029) + "c", "</script><b>x</b>"]
+open(sys.argv[1], "wb").write(b"\0".join(v.encode("utf-8") for v in vals) + b"\0")
+PY
+  JVALS=()
+  while IFS= read -r -d '' v; do JVALS+=("$v"); done < "$W/jstr-cases.bin"
+  HAVE_NODE=0; command -v node >/dev/null 2>&1 && node -e '' >/dev/null 2>&1 && HAVE_NODE=1
+  for v in "${JVALS[@]}"; do
+    printf '%s' "$v" > "$W/jstr-in"
+    sc render.py jstr "$v"
+    if [ "$rc" -eq 0 ] && [ "$(wc -l < "$W/out" | tr -d ' ')" = "1" ] && "$HPY" - "$W/jstr-in" "$W/out" <<'PY'
+import json, sys
+want = open(sys.argv[1], encoding="utf-8").read()
+raw = open(sys.argv[2], encoding="utf-8").read()
+line = raw.rstrip("\n")
+ok = json.loads(line) == want and "\n" not in line and chr(0x2028) not in raw and chr(0x2029) not in raw
+sys.exit(0 if ok else 1)
+PY
+    then pass "jstr: $(printf '%s' "$v" | tr '\n' ' ' | cut -c1-20) → 1 行の JSON 文字列で、json.loads で元の値に戻る"; else fail "jstr: 値 $(printf '%q' "$v") → rc=${rc} out=$(head -c 200 "$W/out")"; fi
+    if [ "$HAVE_NODE" = 1 ]; then
+      node -e 'const window = {__ov: {telop: (v) => { process.stdout.write(JSON.stringify(v)); }}}; eval("window.__ov.telop(" + process.argv[1] + ")");' "$(cat "$W/out")" > "$W/node-out" 2>&1
+      if "$HPY" -c 'import json, sys; sys.exit(0 if json.loads(open(sys.argv[2], encoding="utf-8").read()) == open(sys.argv[1], encoding="utf-8").read() else 1)' "$W/jstr-in" "$W/node-out" 2>/dev/null; then pass "jstr(node): window.__ov.telop(<出力>) に元の値が渡る"; else fail "jstr(node): 値 $(printf '%q' "$v") → $(head -c 200 "$W/node-out")"; fi
+    fi
+  done
+  [ "$HAVE_NODE" = 1 ] || skip "jstr(node): node が無いので JS での評価を確かめていない"
+  new_dir; cp "$FIX_SCENES" "$D/scenes.json"
+  sc render.py jstr --dir "$D" --telop 2-1
+  if [ "$rc" -eq 0 ] && [ "$(H get "$W/out" 'd')" = "操作 | 説明" ]; then pass "jstr --telop: scenes.json の telop を JSON 文字列で出す"; else fail "jstr --telop: rc=${rc} out=$(head -c 200 "$W/out") err=$(head -c 200 "$W/err")"; fi
+  sc render.py jstr --dir "$D" --telop nosuch
+  # traceback でも exit 1 になるので、1 行の誤りで id を名指しすることまで見る
+  if [ "$rc" -eq 1 ] && [ "$(grep -c . "$W/err")" = "1" ] && grep -q "nosuch" "$W/err" && [ ! -s "$W/out" ]; then pass "jstr --telop: 無い id は exit 1（1 行の誤りで id を名指しし、何も出さない）"; else fail "jstr --telop: 無い id rc=${rc} err=$(head -c 200 "$W/err")"; fi
+  # 骨格は jstr -- <値> の形で呼ぶ（- で始まるセレクタをオプションと読まない）
+  sc render.py jstr -- "-x .a"
+  if [ "$rc" -eq 0 ] && [ "$(H get "$W/out" 'd')" = "-x .a" ]; then pass "jstr: -- の後の - で始まる値も値として読む"; else fail "jstr --: rc=${rc} out=$(head -c 200 "$W/out") err=$(head -c 200 "$W/err")"; fi
+  sc render.py jstr --dir "$D" --telop 2-1 "値"
+  assert_rc "jstr: 値と --telop の両方は exit 2" 2 "$rc"
+  sc render.py jstr
+  assert_rc "jstr: 値も --telop も無ければ exit 2" 2 "$rc"
+
+  # --- recording.md の骨格の関数（ck・ev・jstr）を、文書から取り出して zsh と偽の playwright-cli で回す
+  if ! command -v zsh >/dev/null 2>&1; then
+    skip "骨格の関数: zsh が無いので確かめていない"
+  else
+    "$HPY" - "$REF/recording.md" "$W/defs.zsh" <<'PY'
+import re, sys
+want = ("ck() {", "ev() {", "jstr() {")
+lines = [l.strip() for l in open(sys.argv[1], encoding="utf-8")]
+got = [l for l in lines if l.startswith(want)]
+open(sys.argv[2], "w", encoding="utf-8").write("\n".join(got) + "\n")
+sys.exit(0 if len(got) == 3 else 1)
+PY
+    if [ "$?" -ne 0 ]; then
+      fail "骨格の関数: recording.md に ck()・ev()・jstr() の 1 行の定義が揃っていない（$(tr '\n' ' ' < "$W/defs.zsh")）"
+    else
+      PCB="$W/pc-bin"; mkdir -p "$PCB"
+      cat > "$PCB/playwright-cli" <<'SH'
+#!/usr/bin/env bash
+# 実物（0.1.17）の形: JS の例外は rc 0 で「### Error」の見出し、session の誤りなどは rc 1
+case "${FAKE_PC:-ok}" in
+  errline) echo "### Error"; echo "TypeError: window.x is not a function" ;;
+  rc1) echo "The browser 's' is not open, please run open first"; exit 1 ;;
+  *) echo "### Page"; echo "- Console: 1 errors, 0 warnings"; echo "### Result"; echo "Error page text" ;;
+esac
+SH
+      chmod +x "$PCB/playwright-cli"
+      zrun() { # FAKE_PC の値 → $W/z.out・rc
+        env FAKE_PC="$1" PATH="$PCB:$PATH" zsh -f -c "S=$(printf '%q' "$S"); SESSION=s; source $(printf '%q' "$W/defs.zsh"); ck goto x; print -r -- AFTER" > "$W/z.out" 2>&1
+        rc=$?
+      }
+      zrun errline
+      if [ "$rc" -eq 1 ] && ! grep -q AFTER "$W/z.out"; then pass "骨格の関数: playwright-cli の出力に「### Error」の見出しがあれば止まる（JS の例外は rc 0）"; else fail "骨格の関数: ### Error rc=${rc} $(tr '\n' ' ' < "$W/z.out")"; fi
+      zrun rc1
+      if [ "$rc" -eq 1 ] && ! grep -q AFTER "$W/z.out"; then pass "骨格の関数: playwright-cli が exit 1 なら止まる"; else fail "骨格の関数: exit 1 rc=${rc} $(tr '\n' ' ' < "$W/z.out")"; fi
+      zrun ok
+      if [ "$rc" -eq 0 ] && grep -q AFTER "$W/z.out"; then pass "骨格の関数: 見出しでない Error（結果やページの文字）では止まらない"; else fail "骨格の関数: 正常 rc=${rc} $(tr '\n' ' ' < "$W/z.out")"; fi
+    fi
+  fi
+}
+
+# ================================================================ 手順の文書（python に依存しないので 1 回だけ回す）
+suite_docs() {
+  LABEL="[docs] "
+  local RECMD="$REF/recording.md"
+  # 値を JS の文字列に直接埋めない（regression: テロップ・セレクタを '<…>' に、パスを \"…\" に埋めていた）
+  "$HPY" - "$RECMD" > "$W/docs.out" 2>&1 <<'PY'
+import re, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+lines = text.split("\n")
+bad = []
+calls = ('$(jstr', '$(python3 "$S/scenes.py" session')
+for no, l in enumerate(lines, 1):
+    if "('<" in l:
+        bad.append("%d: 単一引用符の JS 文字列への埋め込み" % no)
+    if '\\"$DIR/overlay.js\\"' in l:
+        bad.append("%d: 二重引用符のパスの直接の埋め込み" % no)
+    n = sum(l.count(c) for c in calls)
+    if n:
+        assigned = sum(l.count('="' + c) for c in calls)
+        if assigned != n or l.count(')" || exit 1') < n:
+            bad.append("%d: JSON の生成が変数への代入と || exit 1 になっていない" % no)
+# コードブロック（```bash / ```zsh）の中で、ブラウザを操作する呼び出しは ck か ev を通す
+blocks = re.findall(r"```(?:bash|zsh)\n(.*?)```", text, re.S)
+for b in blocks:
+    for l in b.split("\n"):
+        s = l.strip()
+        if s.startswith(("ck() {", "ev() {", "jstr() {")):
+            continue
+        for op in ("run-code", "video-start", "video-stop", "eval"):
+            if re.search(r"(^|[;&|]\s*|\s)(pc|playwright-cli\s+\S+)\s+" + op + r"\b", s):
+                bad.append("コードブロックの %s を ck を通さずに呼んでいる: %s" % (op, s[:60]))
+# rec.sh の骨格（#!/bin/zsh で始まるブロック）は場面だけ。open と overlay の登録をしない
+rec = [b for b in blocks if b.startswith("#!/bin/zsh")]
+if len(rec) != 1:
+    bad.append("rec.sh の骨格のブロックが 1 つでない（%d）" % len(rec))
+else:
+    if re.search(r"\bopen\b", rec[0]) or "addInitScript" in rec[0]:
+        bad.append("rec.sh の骨格に open か addInitScript がある")
+print("\n".join(bad))
+sys.exit(1 if bad else 0)
+PY
+  if [ "$?" -eq 0 ]; then pass "recording.md: 値を JS の文字列に直接埋めず、JSON は代入と || exit 1・ブラウザの操作は ck・rec.sh は場面だけ"; else fail "recording.md: $(tr '\n' ' ' < "$W/docs.out" | cut -c1-400)"; fi
 }
 
 # ================================================================ voice.py
@@ -1427,6 +1552,7 @@ run_suite "$PY1"
 if [ -x /usr/bin/python3 ] && [ "$(readlink -f "$PY1" 2>/dev/null || echo "$PY1")" != "$(readlink -f /usr/bin/python3 2>/dev/null || echo /usr/bin/python3)" ]; then
   run_suite /usr/bin/python3
 fi
+suite_docs
 
 echo
 echo "pass: $pass_count / fail: $fail_count / skip: $skip_count"
