@@ -357,6 +357,7 @@ suite_scenes() {
   assert_rc "写し: 以後は --profile 無しでも B の値（段の一覧）で検証が通る（環境変数は A のまま）" 0 "$rc" "$(head -n 1 "$W/err")"
   sc scenes.py status --dir "$D"
   assert_rc "写し: status も写しを使う" 0 "$rc" "$(head -n 1 "$W/err")"
+  if ! grep -q 'section' "$W/out"; then pass "写し: status が B の段の一覧で台本を読む（A の一覧なら section の不一致になる）"; else fail "写し: status が A で読んだ $(head -n 2 "$W/out")"; fi
   ENVP=()
   # 設定なしで始めた後に環境変数を設定しても、写しが優先される
   new_dir; cp "$FIX_SCENES" "$D/scenes.json"
@@ -715,7 +716,7 @@ PY
   fi
   # テンプレートの JS が不正な式を飛ばさず log に積む
   grep -q "badpattern" "$REF/overlay-template.js" && pass "overlay-template: 通らない式を badpattern として log に積む" || fail "overlay-template: badpattern が無い"
-  grep -q "notfound" "$REF/overlay-template.js" && grep -q "MutationObserver" "$REF/overlay-template.js" && pass "overlay-template: notfound の記録と MutationObserver がある" || fail "overlay-template: notfound・MutationObserver"
+  grep -q "notfound" "$REF/overlay-template.js" && pass "overlay-template: recording.md が読む log のキー notfound を保つ" || fail "overlay-template: notfound"
 }
 
 # ================================================================ voice.py
@@ -893,6 +894,12 @@ PY
   refuse "credit_required なのに credit が空" 1 --engine-url "$URL"
   mk_voice_dir; H mut "$D/voice.json" 'del d["terms"]'
   refuse "terms が無い" 1 --engine-url "$URL"
+  mk_voice_dir; H mut "$D/voice.json" 'd["terms"]["summary"] = ""'
+  refuse "terms.summary が空（確認の記録の中身が無い）" 1 --engine-url "$URL"
+  mk_voice_dir; H mut "$D/voice.json" 'd["speed"] = 0'
+  refuse "speed が 0" 1 --engine-url "$URL"
+  mk_voice_dir; H mut "$D/voice.json" 'd["colour"] = 1'
+  refuse "voice.json の未知のキー" 1 --engine-url "$URL"
   mk_voice_dir; H mut "$D/voice.json" 'del d["engine"]'
   refuse "engine が無い（既定の声を持たない）" 1 --engine-url "$URL"
   mk_voice_dir; H mut "$D/voice.json" 'del d["voice"]'
@@ -936,6 +943,7 @@ PY
   mk_voice_dir
   sc voice.py synth --dir "$D" --engine-url "http://127.0.0.1:$CPORT"
   if [ "$rc" -eq 3 ] && [ "$(grep -c . "$W/err")" -eq 1 ] && grep -qF "エンジンに接続できない（http://127.0.0.1:${CPORT}）" "$W/err" && [ ! -e "$D/audio" ]; then pass "synth: エンジンが落ちていれば exit 3・「エンジンに接続できない（URL）」の 1 行・audio/ なし"; else fail "synth: エンジン停止 rc=${rc} $(head -c 200 "$W/err")"; fi
+  if ls -A "$D" | grep -q '^\.audio-tmp-'; then fail "synth: エンジン停止の後に一時ディレクトリが残った"; else pass "synth: エンジン停止の後に一時ディレクトリを残さない"; fi
   # 設定の写し（AC-16）: 環境変数 A・最初に --profile B → synth は B の置き換え表で読む
   mk_voice_dir; : > "$W/vv.log"
   ENVP=(RELEASE_VIDEO_PROFILE="$PROFILE_A")
@@ -1060,6 +1068,11 @@ suite_compose() {
   new_dir; rm -f "$FAKE_DIR/ffmpeg.log"
   sc compose.py --dir "$D"
   if [ "$rc" -eq 1 ] && [ ! -s "$FAKE_DIR/ffmpeg.log" ]; then pass "compose: 空のディレクトリは exit 1・ffmpeg を呼ばない"; else fail "compose: 空 rc=${rc}"; fi
+
+  # --- ffmpeg が PATH に無い → exit 3（前の段は揃っている）
+  mk_prereq
+  env FAKE_DIR="$FAKE_DIR" PATH="$BASE/emptybin" "$PY" "$S/compose.py" --dir "$D" > "$W/out" 2> "$W/err"; rc=$?
+  if [ "$rc" -eq 3 ] && grep -q 'ffmpeg' "$W/err" && [ ! -e "$D/release-video.mp4" ]; then pass "compose: ffmpeg が PATH に無ければ exit 3・出力を作らない"; else fail "compose: ffmpeg 無し rc=${rc} $(head -c 200 "$W/err")"; fi
 
   # --- 合成の形（偽の ffmpeg の argv）
   mk_prereq "$PROFILE_B"; rm -f "$FAKE_DIR/ffmpeg.log"
