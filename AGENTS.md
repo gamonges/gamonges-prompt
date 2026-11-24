@@ -137,7 +137,7 @@ Skills は開発ワークフローの各ステップを担う。**下図の矢�
 - 成果物を人が読む形にする場合、完了報告に続けて **HTML 化を提案する（既定）**。`html-view` で `tmp/<basename>.html` を生成してブラウザで開く。提案は**完了報告時に 1 回だけ**行い、同一実行内で再提案しない。Artifact（claude.ai 上の共有ページ）は、**ユーザーが共有を求めたときだけ**使う。その場合は `artifact-design` skill に従い、`html-view` の reference は参照しない（設計指針を二重管理しないため）。HTML はローカルのファイルで、Claude Code と Codex のどちらでも同じ手段で作れる
   - **例外: `grill`** — 進行中の全体感を共有することが目的のため、**Phase 0 の完了時に 1 回提案し、以後は決定が入るたびに `tmp/grill.html` を更新する**（提案は 1 回で、更新は提案ではない）。Phase 0 完了時点の表示対象は `tmp/scenario.md` の業務シナリオで、`tmp/grill.md` の 4 ブロックは以後の手順で埋まる
 - **`tmp/` の成果物を黙って上書きしない**: skill の開始時点で既に存在し、かつ skill 本文にその扱い（追記・resume・作り直し・上書き/追記/キャンセルの確認）が書かれていなければ、書き出す前に上書き / 追記 / キャンセルを確認する。判定は「開始時に存在するか」だけで行い、どのセッションが作ったかは判断しない（Claude Code と Codex を同じ worktree で行き来すると互いの成果物が残り、作成者の判断はモデルごとに割れるため）
-  - **上書きが契約の skill は対象外**: `revise`（対象計画を上書きし、旧版を archive に残す）、`review-plan`（`tmp/plan-review.md` を毎回作り直す。`plan-lgtm` がそのファイルの mtime で完了を判定する）、`review`（`tmp/review/` を作り直す）。これらは本文で扱いを決めている
+  - **上書きが契約の skill は対象外**: `revise`（対象計画を上書きし、旧版を archive に残す）、`review-plan`（`tmp/plan-review.md` を毎回作り直す。`plan-lgtm` がそのファイルの mtime で完了を判定する）、`review`（`tmp/review/` を作り直す）、`review-adr`（`tmp/adr-review/` を作り直す）。これらは本文で扱いを決めている
 
 > skill / subagent を書くときのプロンプト規約（Claude 5 向けの変換ルール T1–T8、維持リスト K、起動制御フィールドの選び方、追加手順）は `shared/skills/skill-authoring/SKILL.md` に集約している。
 

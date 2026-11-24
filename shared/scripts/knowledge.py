@@ -39,6 +39,13 @@ TYPES = [
     ("Business Scenario", "scenario.md"),
     ("ADR", "adr.md"),
     ("ADR Sources", "adr-sources.md"),
+    # adr-*.md の glob にしない（tmp/adr-b.md など既存の名前を ADR Review と推定してしまう）
+    ("ADR Review", "adr-review/*.md"),
+    ("ADR Review", "adr-decision-quality.md"),
+    ("ADR Review", "adr-premortem.md"),
+    ("ADR Review", "adr-lineage.md"),
+    ("Fact Check", "fact-check.md"),
+    ("Rollout Check", "rollout-check.md"),
     ("Series", "series.md"),
     ("Series", "series.draft.md"),
     ("Strategic DDD Review", "strategic-ddd-review.md"),

@@ -1,7 +1,9 @@
 #!/bin/bash
 # sync-claude-to-worktree.sh
-# worktree内で .claude/ が存在しない場合、メインのworktreeからコピーする
-# UserPromptSubmit hook から呼ばれる（初回プロンプト時に1度だけ実効）
+# linked worktree に、メインの worktree の .claude/ にしか無い未追跡の設定（ローカルの CLAUDE.md 等）を運ぶ。
+# 追跡ファイルは worktree のブランチが正なので触らない。運ぶのはメインにしか無い未追跡の設定だけで、
+# worktree に既にあるものも上書きしない
+# UserPromptSubmit hook から毎プロンプト呼ばれる（同期済みなら早く抜ける）
 
 set -euo pipefail
 
@@ -26,7 +28,7 @@ if [ "$CURRENT_DIR" != "$(git rev-parse --show-toplevel 2>/dev/null)" ]; then
   exit 0
 fi
 
-# CLAUDE.md が既にあれば同期済みとみなす
+# worktree に CLAUDE.md があれば同期済みとみなす（2 回目以降のプロンプトを速く抜ける）
 if [ -f ".claude/CLAUDE.md" ]; then
   exit 0
 fi
@@ -36,19 +38,35 @@ if [ ! -d "$MAIN_WORKTREE/.claude" ]; then
   exit 0
 fi
 
-# .claude/ をコピー（worktrees/ と settings.local.json は除外）
-rsync -a \
-  --exclude='worktrees/' \
-  --exclude='settings.local.json' \
-  "$MAIN_WORKTREE/.claude/" ".claude/"
+# メインの .claude/ の未追跡ファイルを列挙する。gitignore の対象（ローカルの CLAUDE.md 等）も運ぶので
+# --exclude-standard は付けない。core.quotePath=false は非 ASCII のパスを "\343..." と引用させないため
+# （引用されたパスは --files-from で存在しないパスになり、黙って写らない）
+LIST=$(mktemp)
+trap 'rm -f "$LIST"' EXIT
+git -c core.quotePath=false -C "$MAIN_WORKTREE" ls-files --others -- .claude |
+  while IFS= read -r path; do
+    case "$path" in
+    # 改行・タブ・" ・\ を含むパスは false でも引用が残る。対象外として知らせる
+    '"'*)
+      echo "sync-claude-to-worktree: 引用が残るパスは対象外のため飛ばします: $path" >&2
+      continue
+      ;;
+    .claude/worktrees/* | */settings.local.json) continue ;;
+    esac
+    printf '%s\n' "$path"
+  done >"$LIST"
 
-echo "Synced .claude/ from main worktree: $MAIN_WORKTREE" >&2
+if [ -s "$LIST" ]; then
+  # --ignore-existing: メインでは未追跡でも、worktree のブランチで追跡しているもの（ブランチで足したもの）を守る
+  rsync -a --ignore-existing --files-from="$LIST" "$MAIN_WORKTREE/" ./
+  echo "Synced untracked .claude/ files from main worktree: $MAIN_WORKTREE" >&2
+fi
 
-# .cursor/skills → .claude/skills のシンボリックリンクを再作成
-# (rsync でコピーされたリンクは元のworktreeの .cursor/ を指しておりデッドリンクになる)
+# worktree の .cursor/skills/ から .claude/skills/ へのリンクを作る（冪等）。
+# リンクが要るかは worktree の .cursor/skills/ で決まり、写したかどうかとは関係が無いので、写す物が無くても呼ぶ
 SYNC_SCRIPT="$HOME/.claude/scripts/sync-cursor-skills.sh"
 # scripts は実体コピー方式なので symlink は作られない。-L を許容すると dangling symlink を
-# 実行しようとして exit 127 になり、本 PR が除去した失敗モードを残すことになる
-if [ -x "$SYNC_SCRIPT" ]; then
+# 実行しようとして exit 127 になる
+if [ -d ".cursor/skills" ] && [ -x "$SYNC_SCRIPT" ]; then
   bash "$SYNC_SCRIPT"
 fi

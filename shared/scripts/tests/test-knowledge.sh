@@ -653,6 +653,7 @@ shared/skills/coupling-gate/SKILL.md|tmp/coupling-gate.md
 shared/skills/coupling-plan-diff/SKILL.md|tmp/coupling-plan-diff.md
 shared/skills/coupling-precheck/SKILL.md|tmp/coupling-precheck.md
 shared/skills/design/reference/plan-template.md|tmp/plan.md
+shared/skills/fact-check/SKILL.md|tmp/fact-check.md
 shared/skills/fix/reference/category-examples.md|tmp/fixes.md
 shared/skills/fix/reference/fix-plan-template.md|tmp/fix-plan.md
 shared/skills/grill/SKILL.md|tmp/grill.md
@@ -668,6 +669,16 @@ shared/skills/pr-explain/reference/format-v3.md|tmp/pr-explain/{repo}-{n}/explai
 shared/skills/pr-explain/reference/verify.md|tmp/pr-explain/{repo}-{n}/verify.md
 shared/skills/release-video/reference/recording.md|tmp/release-video/data-changes.md
 shared/skills/release-video/reference/script-format.md|tmp/release-video/script.md
+shared/skills/review-adr/reference/finding-format.md|tmp/adr-decision-quality.md
+shared/skills/review-adr/reference/finding-format.md|tmp/adr-lineage.md
+shared/skills/review-adr/reference/finding-format.md|tmp/adr-premortem.md
+shared/skills/review-adr/reference/finding-format.md|tmp/adr-review/{lens}.md
+shared/skills/review-adr/reference/codex.md|tmp/adr-review/_codex-prompt.md
+shared/skills/review-adr/reference/sources.md|tmp/adr-review/_comments.md
+shared/skills/review-adr/reference/sources.md|tmp/adr-review/_lineage-{n}.md
+shared/skills/review-adr/reference/sources.md|tmp/adr-review/_lineage-index.md
+shared/skills/review-adr/reference/sources.md|tmp/adr-review/_target.md
+shared/skills/review-adr/reference/unified-template.md|tmp/adr-review/unified.md
 shared/skills/review-plan/reference/report-template.md|tmp/plan-review.md
 shared/skills/review-strategic-ddd/reference/review-checklist.md|tmp/strategic-ddd-review.md
 shared/skills/review/SKILL.md|tmp/review/_ci-failures.md
@@ -676,6 +687,7 @@ shared/skills/review/SKILL.md|tmp/review/_static-scan.md
 shared/skills/review/SKILL.md|tmp/review/{agent-name}-review.md
 shared/skills/review/reference/edge-case-reverification.md|tmp/review/_edge-{category}-review.md
 shared/skills/review/reference/unified-report-template.md|tmp/review/unified.md
+shared/skills/rollout-check/SKILL.md|tmp/rollout-check.md
 shared/skills/series-retro/reference/output-format.md|tmp/series-retro/retro.md
 shared/skills/series-retro/reference/output-format.md|tmp/series-retro/self.md
 shared/skills/series-retro/reference/review-prompt.md|tmp/series-retro/prompt.md
