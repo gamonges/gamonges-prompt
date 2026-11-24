@@ -118,6 +118,13 @@ elif cmd == "cfg":
     pre = "window.__ovConfig = "
     assert first.startswith(pre) and first.endswith(";"), first[:60]
     print(json.dumps(json.loads(first[len(pre):-1]), ensure_ascii=False))
+elif cmd == "png":
+    # png <path> <w> <h> <tag>: PNG の署名と IHDR（幅・高さ）だけを持つ偽の png。tag で中身を変える
+    import struct, zlib
+    w, h = int(sys.argv[3]), int(sys.argv[4])
+    ihdr = struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)
+    chunk = struct.pack(">I", len(ihdr)) + b"IHDR" + ihdr + struct.pack(">I", zlib.crc32(b"IHDR" + ihdr) & 0xFFFFFFFF)
+    open(sys.argv[2], "wb").write(b"\x89PNG\r\n\x1a\n" + chunk + sys.argv[5].encode("utf-8"))
 PY
 
 # ---------------------------------------------------------------- 台本の fixture（Claude が実際に書く形）
@@ -183,12 +190,14 @@ cat > "$PROFILE_B" <<'JSON'
 JSON
 PROFILE_A="$BASE/profile-a.json"
 printf '{"talk": {"sections": [{"id": "only-a", "label": "A だけ"}]}}' > "$PROFILE_A"
+# PROFILE_C は PROFILE_B のロゴだけを変えた設定（カードにだけ効く設定の変更）
 PROFILE_C="$BASE/profile-c.json"
 cat > "$PROFILE_C" <<'JSON'
 {"talk": {"sections": [{"id": "intro", "label": "前置き"}, {"id": "demo", "label": "デモ"},
                        {"id": "omit", "label": "省略"}, {"id": "caveat", "label": "注意"},
                        {"id": "future", "label": "今後"}]},
- "brand": {"logo_text": "LOGO-C", "colors": {"accent": "#445566"}}}
+ "brand": {"logo_text": "LOGO-C", "colors": {"accent": "#112233"}},
+ "reading": {"replacements": [{"from": "ABC", "to": "エービーシー"}]}}
 JSON
 
 H() { "$HPY" "$HELPER" "$@"; }
@@ -254,9 +263,18 @@ mk_done_base() { # [profile]
   [ "$rc" -eq 0 ] || echo "mk_done: approve 失敗 $(cat "$W/err")" >&2
   sc voice.py synth --dir "$D"
   [ "$rc" -eq 0 ] || echo "mk_done: synth 失敗 $(cat "$W/err")" >&2
+  # 録画: overlay → 撮影用の session（印）→ begin → 素材（偽の webm）。カード: html → begin → 素材（偽の png）
+  sc render.py overlay --dir "$D"
+  sc scenes.py session --dir "$D"
+  [ "$rc" -eq 0 ] || echo "mk_done: session 失敗 $(cat "$W/err")" >&2
+  sc scenes.py begin --dir "$D" --stage record --id 2-1
+  sc scenes.py begin --dir "$D" --stage record --id 4
   mkdir -p "$D/clips" "$D/cards"
   printf 'webm-2-1' > "$D/clips/2-1.webm"; printf 'webm-4' > "$D/clips/4.webm"
-  printf 'png-1' > "$D/cards/1.png"; printf 'png-5' > "$D/cards/5.png"
+  sc render.py card --dir "$D"
+  sc scenes.py begin --dir "$D" --stage cards --id 1
+  sc scenes.py begin --dir "$D" --stage cards --id 5
+  H png "$D/cards/1.png" 1920 1080 png-1; H png "$D/cards/5.png" 1920 1080 png-5
   sc scenes.py mark --dir "$D" --stage record --id 2-1
   sc scenes.py mark --dir "$D" --stage record --id 4
   sc scenes.py mark --dir "$D" --stage cards --id 1
@@ -382,7 +400,8 @@ suite_scenes() {
   sc scenes.py status --dir "$D" --profile "$PROFILE_C"
   assert_has "写し: --profile C で「設定を置き換えた」を stderr に出す" "$W/err" "設定を置き換えた"
   stage_line cards | grep -q stale && pass "写し: 置き換えると cards が stale" || fail "写し: cards=$(stage_line cards)"
-  stage_line record | grep -q done && pass "写し: record は done のまま（brand に依存しない）" || fail "写し: record=$(stage_line record)"
+  stage_line record | grep -q done && pass "写し: record は done のまま（ロゴは重ね表示に入らない）" || fail "写し: record=$(stage_line record)"
+  stage_line voice | grep -q done && pass "写し: voice は done のまま（読みの置き換えは同じ）" || fail "写し: voice=$(stage_line voice)"
   # 同じ設定を --profile で渡し直しても置き換えの通知は出ない
   sc scenes.py status --dir "$D" --profile "$PROFILE_C"
   assert_not_has "写し: 同じ中身なら置き換えの通知を出さない" "$W/err" "設定を置き換えた"
@@ -520,6 +539,8 @@ PY
   printf 'webm-2-1-retake' > "$D/clips/2-1.webm"
   sc scenes.py status --dir "$D"
   stage_line record | grep -q stale && pass "status(AC-17): 同じ入力で素材だけ書き換えると record が stale（content の不一致）" || fail "status(AC-17): record=$(stage_line record)"
+  sc scenes.py begin --dir "$D" --stage record --id 2-1
+  printf 'webm-2-1-retake' > "$D/clips/2-1.webm"
   sc scenes.py mark --dir "$D" --stage record --id 2-1
   sc scenes.py status --dir "$D"
   if stage_line record | grep -q done && stage_line compose | grep -q stale; then pass "status(AC-17): mark し直すと record は done・compose が stale"; else fail "status(AC-17): record=$(stage_line record) compose=$(stage_line compose)"; fi
@@ -662,7 +683,7 @@ PY
   sc scenes.py status --dir "$D"
   [ "$(last_line "$W/out")" = "next: none" ] && pass "status: scenes.json のキーの並び・空白だけを変えても全段 done のまま（正規形の sha）" || fail "status: 正規形 last=$(last_line "$W/out") script=$(stage_line script)"
 
-  # --- mark
+  # --- mark（mk_done の mark が meta を消費しているので、素材は begin を通してから置く）
   mk_done
   rm -f "$D/clips/manifest.json" "$D/cards/manifest.json"
   sc scenes.py mark --dir "$D" --stage record --id nosuch
@@ -673,7 +694,9 @@ PY
   assert_rc "mark: kind が段と合わない（record を cards に）は exit 1" 1 "$rc"
   sc scenes.py mark --dir "$D" --stage record --id 3
   assert_rc "mark: omit は exit 1" 1 "$rc"
-  rm -f "$D/clips/2-1.webm"
+  printf 'x' > "$D/clips/2-1.events"
+  sc scenes.py begin --dir "$D" --stage record --id 2-1
+  if [ "$rc" -eq 0 ] && [ ! -e "$D/clips/2-1.webm" ] && [ ! -e "$D/clips/2-1.events" ] && [ -f "$D/clips/2-1.meta" ]; then pass "begin: 古い clip と .events を消し、meta を書く"; else fail "begin: rc=${rc} $(ls "$D/clips" | tr '\n' ' ') err=$(head -c 200 "$W/err")"; fi
   sc scenes.py mark --dir "$D" --stage record --id 2-1
   assert_rc "mark: ファイルが無ければ exit 1" 1 "$rc"
   [ ! -e "$D/clips/manifest.json" ] && pass "mark: 失敗したとき manifest を作らない" || fail "mark: 失敗後に manifest がある"
@@ -685,14 +708,102 @@ PY
   assert_rc "mark: 録画は exit 0" 0 "$rc" "$(head -n 1 "$W/err")"
   if [ "$(H get "$D/clips/manifest.json" 'd["2-1"]["duration"]')" = "12.5" ] && [ "$(H get "$D/clips/manifest.json" 'len(d["2-1"]["content"])')" = "64" ]; then pass "mark: duration（ffprobe）と content（中身の sha256）を書く"; else fail "mark: manifest $(cat "$D/clips/manifest.json" 2>/dev/null)"; fi
   # 長さが読めない（N/A）→ exit 3 で記録しない
+  sc scenes.py begin --dir "$D" --stage record --id 4; printf 'webm-4' > "$D/clips/4.webm"
   printf '4.webm N/A\n' > "$FAKE_DIR/durations"
   rm -f "$D/clips/manifest.json"
   sc scenes.py mark --dir "$D" --stage record --id 4
   if [ "$rc" -eq 3 ] && [ ! -e "$D/clips/manifest.json" ]; then pass "mark: ffprobe が N/A を返したら exit 3 で記録しない（seconds へ落とさない）"; else fail "mark: N/A rc=${rc} $(cat "$D/clips/manifest.json" 2>/dev/null)"; fi
   : > "$FAKE_DIR/durations"
+  sc scenes.py begin --dir "$D" --stage cards --id 1; H png "$D/cards/1.png" 1920 1080 png-1
   sc scenes.py mark --dir "$D" --stage cards --id 1
   assert_rc "mark: カードは exit 0" 0 "$rc" "$(head -n 1 "$W/err")"
   [ "$(H get "$D/cards/manifest.json" '"duration" in d["1"]')" = "False" ] && pass "mark: カードは duration を持たない" || fail "mark: カードの manifest $(cat "$D/cards/manifest.json")"
+  printf '%s' "$FAKE_DURS" > "$FAKE_DIR/durations"
+
+  # --- 素材の出どころ（regression: 古い設定・古い html で作った素材が、新しい設定の sha で done になった）
+  man_of() { [ "$1" = record ] && echo "$D/clips/manifest.json" || echo "$D/cards/manifest.json"; }
+  mark_refuse() { # 名前 段 id 理由の語  → exit 1・理由の語・manifest が変わらない
+    local m; m="$(man_of "$2")"; cp "$m" "$W/man.before" 2>/dev/null || : > "$W/man.before"
+    sc scenes.py mark --dir "$D" --stage "$2" --id "$3"
+    { cat "$m" 2>/dev/null || true; } > "$W/man.after"
+    if [ "$rc" -eq 1 ] && grep -qF -- "$4" "$W/err" && cmp -s "$W/man.before" "$W/man.after"; then pass "mark(出どころ): $1 → exit 1「$4」・manifest は変わらない"; else fail "mark(出どころ): $1 → rc=${rc} err=$(head -c 200 "$W/err")（期待「$4」）"; fi
+  }
+  begin_refuse() { # 名前 段 id 理由の語 残るはずの素材
+    sc scenes.py begin --dir "$D" --stage "$2" --id "$3"
+    if [ "$rc" -eq 1 ] && grep -qF -- "$4" "$W/err" && [ -f "$5" ]; then pass "begin: $1 → exit 1「$4」・古い素材を消さない"; else fail "begin: $1 → rc=${rc} err=$(head -c 200 "$W/err") 素材=$([ -f "$5" ] && echo 有 || echo 無)"; fi
+  }
+  printf '{"privacy": {"blur_patterns": ["SECRET-[0-9]+"]}}' > "$W/p-blur.json"
+  printf '{"privacy": {"blur_patterns": ["OTHER-[0-9]+"]}}' > "$W/p-blur2.json"
+  printf '{"brand": {"colors": {"accent": "#abcdef"}}}' > "$W/p-accent.json"
+  # 設定を変えると、overlay.js を作り直していなくても record は stale（期待される overlay で判定する）
+  mk_done
+  sc scenes.py status --dir "$D" --profile "$W/p-blur.json"
+  stage_line record | grep -q stale && pass "status: ぼかしの式を足すと、overlay.js を作り直す前でも record が stale" || fail "status: blur record=$(stage_line record)"
+  printf 'x' > "$D/clips/2-1.events"
+  begin_refuse "overlay.js が今の設定と違う" record 2-1 "overlay.js が今の設定と違う" "$D/clips/2-1.webm"
+  [ -f "$D/clips/2-1.events" ] && pass "begin: 拒否したら .events も消さない" || fail "begin: 拒否で .events が消えた"
+  rm -f "$D/clips/session.json"
+  sc scenes.py session --dir "$D"
+  if [ "$rc" -eq 1 ] && grep -qF "overlay.js が今の設定と違う" "$W/err" && [ ! -e "$D/clips/session.json" ]; then pass "session: overlay.js が今の設定と違えば exit 1・印を書かない"; else fail "session: rc=${rc} err=$(head -c 200 "$W/err")"; fi
+  sc render.py overlay --dir "$D"
+  begin_refuse "撮影用の session の印が無い" record 2-1 "開き直す" "$D/clips/2-1.webm"
+  sc scenes.py session --dir "$D"
+  if [ "$rc" -eq 0 ] && [ -f "$D/clips/session.json" ] && [ "$(grep -c . "$W/out")" = "1" ] && [ "$(H get "$W/out" 'd')" = "$D/overlay.js" ]; then pass "session: 一致すれば印を書き、overlay.js の絶対パスの JSON 文字列を 1 行で出す"; else fail "session: rc=${rc} out=$(head -c 200 "$W/out") err=$(head -c 200 "$W/err")"; fi
+  sc scenes.py begin --dir "$D" --stage record --id 2-1
+  assert_rc "begin: 印が今の overlay と同じなら通る" 0 "$rc" "$(head -n 1 "$W/err")"
+  printf 'webm-new' > "$D/clips/2-1.webm"
+  # begin の後に設定を変えて overlay と session を流し直した → 素材を作った後に入力が変わった
+  sc scenes.py status --dir "$D" --profile "$W/p-blur2.json"; sc render.py overlay --dir "$D"; sc scenes.py session --dir "$D"
+  mark_refuse "begin の後に設定（ぼかしの式）を変えた" record 2-1 "入力が変わった"
+  # session の後に設定を変えて overlay を作り直した（ブラウザは古い overlay のまま）
+  sc scenes.py status --dir "$D" --profile "$W/p-blur.json"; sc render.py overlay --dir "$D"
+  begin_refuse "session の後に設定を変えて overlay を作り直した" record 2-1 "開き直す" "$D/clips/2-1.webm"
+  mk_done
+  sc scenes.py status --dir "$D" --profile "$W/p-accent.json"
+  stage_line record | grep -q stale && pass "status: 強調の色（accent）を変えると record も stale" || fail "status: accent record=$(stage_line record)"
+  # begin の後に overlay.js だけを書き換えた（設定は同じ）
+  mk_done
+  sc scenes.py begin --dir "$D" --stage record --id 2-1; printf 'webm-new' > "$D/clips/2-1.webm"
+  printf '\n// x\n' >> "$D/overlay.js"
+  mark_refuse "begin の後に overlay.js を書き換えた" record 2-1 "overlay.js が今の設定と違う"
+  sc render.py overlay --dir "$D"
+  # meta は 1 回の mark で消費される（begin を通さない差し替えを通さない）
+  sc scenes.py mark --dir "$D" --stage record --id 2-1
+  if [ "$rc" -eq 0 ] && [ ! -e "$D/clips/2-1.meta" ]; then pass "mark: 成功すると meta を消費する"; else fail "mark: 消費 rc=${rc} err=$(head -c 200 "$W/err")"; fi
+  printf 'webm-swapped' > "$D/clips/2-1.webm"
+  mark_refuse "begin を通さずに素材だけを差し替えた" record 2-1 "begin を通していない"
+  sc scenes.py begin --dir "$D" --stage record --id 1
+  assert_rc "begin: kind が段と合わない（card を record に）は exit 1" 1 "$rc"
+  # カード: 台本を変えて render.py card を流していない → begin が止まる。begin の後に台本を変えた → mark が止まる
+  mk_done
+  H mut "$D/scenes.json" 'd["scenes"][0]["card"]["lines"] = ["変えた本文"]'
+  sc scenes.py table --dir "$D"; sc scenes.py approve --dir "$D"
+  begin_refuse "台本を変えて cards の html を作り直していない" cards 1 "cards/1.html" "$D/cards/1.png"
+  sc render.py card --dir "$D"
+  sc scenes.py begin --dir "$D" --stage cards --id 1; H png "$D/cards/1.png" 1920 1080 png-1b
+  H mut "$D/scenes.json" 'd["scenes"][0]["card"]["lines"] = ["もう一度変えた本文"]'
+  sc scenes.py table --dir "$D"; sc scenes.py approve --dir "$D"; sc render.py card --dir "$D"
+  mark_refuse "begin の後に台本を変えた（カード）" cards 1 "入力が変わった"
+  mk_done
+  sc scenes.py begin --dir "$D" --stage cards --id 1; H png "$D/cards/1.png" 1920 1080 png-1c
+  printf '<!-- x -->' >> "$D/cards/1.html"
+  mark_refuse "begin の後に cards の html を書き換えた" cards 1 "html"
+  sc render.py card --dir "$D"
+  # 素材の中身の検査（begin の後に置く。失敗しても meta は残り、素材を直せば begin をやり直さずに通る）
+  : > "$D/cards/1.png"
+  mark_refuse "0 バイトの png" cards 1 "0 バイト"
+  # 署名だけが違う（IHDR は正しい 1920x1080）。短いファイルだと長さの不足で別に止まるので、長さはそろえる
+  H png "$D/cards/1.png" 1920 1080 badsig
+  "$HPY" -c 'import sys; p = sys.argv[1]; b = bytearray(open(p, "rb").read()); b[1:4] = b"JPG"; open(p, "wb").write(bytes(b))' "$D/cards/1.png"
+  mark_refuse "署名が PNG でない" cards 1 "PNG"
+  H png "$D/cards/1.png" 800 600 small
+  mark_refuse "大きさが 1920x1080 でない png" cards 1 "800x600"
+  [ -f "$D/cards/1.meta" ] && pass "mark: 失敗しても meta は残る" || fail "mark: 失敗で meta が消えた"
+  H png "$D/cards/1.png" 1920 1080 png-1d
+  sc scenes.py mark --dir "$D" --stage cards --id 1
+  assert_rc "mark: 素材を直せば begin をやり直さずに通る" 0 "$rc" "$(head -n 1 "$W/err")"
+  sc scenes.py begin --dir "$D" --stage record --id 4; : > "$D/clips/4.webm"
+  mark_refuse "0 バイトの webm" record 4 "0 バイト"
 }
 
 # ================================================================ render.py
@@ -804,6 +915,7 @@ PY
   # テンプレートの JS が不正な式を飛ばさず log に積む
   grep -q "badpattern" "$REF/overlay-template.js" && pass "overlay-template: 通らない式を badpattern として log に積む" || fail "overlay-template: badpattern が無い"
   grep -q "notfound" "$REF/overlay-template.js" && pass "overlay-template: recording.md が読む log のキー notfound を保つ" || fail "overlay-template: notfound"
+
 }
 
 # ================================================================ voice.py
@@ -1197,6 +1309,7 @@ suite_compose() {
   sc scenes.py status --dir "$D"
   stage_line compose | grep -q done && [ "$(last_line "$W/out")" = "next: none" ] && pass "compose: 書いた manifest を status が done と読む（全段 done・next: none）" || fail "compose: status compose=$(stage_line compose) last=$(last_line "$W/out")"
   # AC-17: 合成の後で clips を撮り直して mark → compose が stale
+  sc scenes.py begin --dir "$D" --stage record --id 2-1
   printf 'retake-2-1' > "$D/clips/2-1.webm"
   sc scenes.py mark --dir "$D" --stage record --id 2-1
   sc scenes.py status --dir "$D"
@@ -1266,6 +1379,13 @@ PY
   real scenes.py table --dir "$D"; real scenes.py approve --dir "$D"
   real voice.py synth --dir "$D" --engine-url "http://127.0.0.1:$PORT"
   [ "$rc" -eq 0 ] || R=1
+  # 素材は実際の手順（overlay → session → begin、card → begin）を通してから置き直す（begin が古い素材を消すので退避しておく）
+  mkdir -p "$W/real-keep"; cp "$D/cards/1.png" "$D/clips/2.webm" "$D/clips/3.webm" "$W/real-keep/"
+  real render.py overlay --dir "$D"; [ "$rc" -eq 0 ] || R=1
+  real scenes.py session --dir "$D"; [ "$rc" -eq 0 ] || R=1
+  real render.py card --dir "$D"; [ "$rc" -eq 0 ] || R=1
+  for x in "record 2" "record 3" "cards 1"; do set -- $x; real scenes.py begin --dir "$D" --stage "$1" --id "$2"; [ "$rc" -eq 0 ] || R=1; done
+  cp "$W/real-keep/1.png" "$D/cards/1.png"; cp "$W/real-keep/2.webm" "$W/real-keep/3.webm" "$D/clips/"
   real scenes.py mark --dir "$D" --stage record --id 2; [ "$rc" -eq 0 ] || R=1
   real scenes.py mark --dir "$D" --stage record --id 3; [ "$rc" -eq 0 ] || R=1
   real scenes.py mark --dir "$D" --stage cards --id 1; [ "$rc" -eq 0 ] || R=1

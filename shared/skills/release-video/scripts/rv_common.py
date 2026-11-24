@@ -2,6 +2,7 @@
 # 編集したら: bash shared/scripts/tests/test-release-video.sh
 # python 標準ライブラリだけ。/usr/bin/python3（3.9）でも動く書き方にする。
 import hashlib
+import html
 import json
 import os
 import re
@@ -433,9 +434,60 @@ def credit_of(ctx):
     return ""
 
 
-def overlay_sha(ctx):
-    p = os.path.join(ctx.dir, "overlay.js")
-    return file_sha(p) if os.path.exists(p) else ""
+REF_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "reference")
+
+
+def read_ref(name):
+    with open(os.path.join(REF_DIR, name), encoding="utf-8") as f:
+        return f.read()
+
+
+def overlay_text(ctx):
+    """今の設定から期待される overlay.js の中身（render.py overlay が書くもの）。"""
+    colors = ctx.eff["brand"]["colors"]
+    cfg = {"accent": colors["accent"], "emphasis": colors["emphasis"], "blur_patterns": ctx.eff["blur_patterns"]}
+    # ensure_ascii で U+2028・U+2029 を含む非 ASCII を JSON のエスケープにする（JS の行区切りで壊れない）
+    head = "window.__ovConfig = %s;\n" % json.dumps(cfg, ensure_ascii=True, sort_keys=True)
+    return head + read_ref("overlay-template.js")
+
+
+def _esc(s):
+    return html.escape(s, quote=True)
+
+
+def _emph(s):
+    """エスケープの後に **…** だけを <b> にする（ほかの文字はタグにならない）。"""
+    return re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", _esc(s))
+
+
+def _css_vars(brand):
+    c = brand["colors"]
+    return (":root{--bg-from:%s;--bg-to:%s;--text:%s;--accent:%s;--emphasis:%s;--muted:%s;--font:%s}" % (
+        c["bg_from"], c["bg_to"], c["text"], c["accent"], c["emphasis"], c["muted"],
+        brand["font_family"]))
+
+
+def card_html(ctx, scene):
+    """今の台本と設定から期待される cards/<id>.html の中身。クレジットは最後のカードにだけ載る。"""
+    card = scene["card"]
+    parts = []
+    if card.get("kicker"):
+        parts.append('<div class="k">%s</div>' % _esc(card["kicker"]))
+    parts.append('<div class="m">%s</div>' % "<br>".join(_emph(x) for x in card["lines"]))
+    if card.get("sub"):
+        parts.append('<div class="s">%s</div>' % _esc(card["sub"]))
+    logo = ctx.eff["brand"]["logo_text"]
+    if logo:
+        parts.append('<div class="logo">%s</div>' % _esc(logo))
+    credit = credit_of(ctx)
+    if credit and scene["id"] == last_card_id(ctx):
+        parts.append('<div class="credit">%s</div>' % _esc(credit))
+    out = read_ref("card-template.html").replace("/*VARS*/", _css_vars(ctx.eff["brand"]))
+    return out.replace("<!--CARD-->", "".join(parts))
+
+
+def _text_sha(text):
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def input_sha(ctx, stage, scene):
@@ -449,18 +501,47 @@ def input_sha(ctx, stage, scene):
             "engine": v.get("engine"), "voice": v.get("voice"), "speaker": v.get("speaker"),
             "speed": v.get("speed"), "pause_scale": v.get("pause_scale"),
         })
+    # record・cards は、実ファイルではなく今の設定・台本から期待される overlay・html で判定する
+    # （設定を変えたのに作り直していない素材を done にしない）
     if stage == "record":
         return sha_obj({
             "screen": scene["screen"], "telop": scene["telop"],
-            "seconds": scene.get("seconds"), "overlay": overlay_sha(ctx),
+            "seconds": scene.get("seconds"), "overlay": _text_sha(overlay_text(ctx)),
         })
     if stage == "cards":
-        credit = credit_of(ctx) if scene["id"] == last_card_id(ctx) else ""
-        return sha_obj({
-            "card": scene["card"], "telop": scene["telop"], "credit": credit,
-            "brand": ctx.eff["brand"],
-        })
+        return sha_obj({"html": _text_sha(card_html(ctx, scene)), "telop": scene["telop"]})
     raise ValueError(stage)
+
+
+def meta_path(ctx, stage, sid):
+    return os.path.join(ctx.dir, STAGE_DIRS[stage], sid + ".meta")
+
+
+def session_path(ctx):
+    return os.path.join(ctx.dir, "clips", "session.json")
+
+
+def source_mismatch(ctx, stage, scene):
+    """素材を作る元のファイルが今の期待値と違えば、その 1 行の説明。同じなら None。"""
+    if stage == "record":
+        p = os.path.join(ctx.dir, "overlay.js")
+        want = overlay_text(ctx)
+        if not os.path.isfile(p) or file_sha(p) != _text_sha(want):
+            return "overlay.js が今の設定と違う（render.py overlay を流す）"
+        return None
+    p = os.path.join(ctx.dir, "cards", scene["id"] + ".html")
+    if not os.path.isfile(p) or file_sha(p) != _text_sha(card_html(ctx, scene)):
+        return "cards/%s.html が今の台本と違う（render.py card を流す）" % scene["id"]
+    return None
+
+
+def png_size(path):
+    """PNG の署名と IHDR から (幅, 高さ) を返す。PNG でなければ None。"""
+    with open(path, "rb") as f:
+        head = f.read(24)
+    if len(head) < 24 or head[:8] != b"\x89PNG\r\n\x1a\n" or head[12:16] != b"IHDR":
+        return None
+    return int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big")
 
 
 STAGE_DIRS = {"voice": "audio", "record": "clips", "cards": "cards"}

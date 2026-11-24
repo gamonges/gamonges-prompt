@@ -57,16 +57,16 @@ disable-model-invocation: true
 
 ### record
 
-`reference/recording.md` の手順に従う（overlay → rec.sh → 録画 → 確認 → mark → 撮影用データを戻す）。
+`reference/recording.md` の手順に従う（overlay → 撮影用の session を開く（`scenes.py session`）→ ログイン → rec.sh（全場面の `scenes.py begin` → 録画）→ 確認 → mark → 撮影用データを戻す）。
 
 ### cards
 
-1. `python3 $S/render.py card --dir <dir>` で `cards/<id>.html` を作る
+1. `python3 $S/render.py card --dir <dir>` で `cards/<id>.html` を作る。各カードの撮影の前に `python3 $S/scenes.py begin --dir <dir> --stage cards --id <id>` を通す（古い png を消し、作る直前の入力を控える）。begin の後に `render.py card` を流し直したら、その id は begin からやり直す（mark が html の違いで止まる）
 2. `python3 -m http.server --bind 127.0.0.1 --directory <cards の絶対パス> <空いた port>` をバックグラウンドで起動する（`file:` では白紙になる）
 3. `playwright-cli -s=<cards 用の session> open`（headless でよい。未起動の session への操作は拒否されるので先に開く）
 4. `run-code` で `page.setViewportSize({width:1920,height:1080})`・`goto`・`screenshot({path: "<cards の絶対パス>/<id>.png"})` を行う（パスは二重引用符の JSON 文字列で書く。`'` を含むパスで壊れないため）
 5. 撮った png を Read で確かめる（白紙でない・文字が切れていない）
-6. 問題が無いカードだけ `python3 $S/scenes.py mark --dir <dir> --stage cards --id <id>` で記録する
+6. 問題が無いカードだけ `python3 $S/scenes.py mark --dir <dir> --stage cards --id <id>` で記録する（begin を通した 1920×1080 の PNG だけを受け付ける。成功すると begin の控えを消す）
 7. 成功でも失敗でも、`-s=<cards 用> close` とサーバの停止を行う
 
 ### compose

@@ -16,6 +16,8 @@
 | `data-changes.md` | 撮影用データの書き込みの控え | Claude（書き込んだときだけ） |
 | `trial/` | 試し読みの音声（公開しない） | `voice.py trial` |
 | `audio/` `clips/` `cards/` `build/` | 素材と `manifest.json` | 各段 |
+| `clips/<id>.meta` `cards/<id>.meta` | 素材を作る直前の入力の控え（mark が照合して消す） | `scenes.py begin` |
+| `clips/session.json` | 撮影用の session に登録した overlay の印 | `scenes.py session` |
 | `release-video.mp4` | 出力 | `compose.py` |
 
 終了コード: 0=成功 / 1=入力やデータの誤り（stderr に 1 行）/ 2=引数の誤り / 3=外部コマンド・エンジンの失敗。どのスクリプトも `--dir`（既定 `./tmp/release-video`）と `--profile` を取る。
