@@ -33,7 +33,7 @@
 #   ./shared/scripts/verify-skills.sh                        構造検証のみ
 #   ./shared/scripts/verify-skills.sh --with-behavior-tests   挙動テストも実行する
 #
-# 挙動テスト (tests/test-guardrails.sh・tests/test-setup-codex.sh・tests/test-series-sync.sh・tests/test-codex-run.sh・tests/test-knowledge.sh・tests/test-series-inbox.sh・tests/test-review-to-atlas-notes.sh・tests/test-disk-cleanup.sh・tests/test-pr-explain-overview.sh・tests/test-review-adr-scripts.sh) を既定で走らせないのは、fixture 生成に数十秒かかり
+# 挙動テスト (tests/test-guardrails.sh・tests/test-setup-codex.sh・tests/test-series-sync.sh・tests/test-codex-run.sh・tests/test-knowledge.sh・tests/test-series-inbox.sh・tests/test-review-to-atlas-notes.sh・tests/test-disk-cleanup.sh・tests/test-pr-explain-overview.sh・tests/test-review-adr-scripts.sh・tests/test-sync-claude-to-worktree.sh) を既定で走らせないのは、fixture 生成に数十秒かかり
 # 構造検証の即応性を損なうため。ただし fail-open は挙動テストしか捉えられないので、
 # shared/scripts/ を編集したときはフラグ付きで実行する。
 set -euo pipefail
@@ -1017,6 +1017,14 @@ if [ "$WITH_BEHAVIOR_TESTS" -eq 1 ]; then
         pass "review-adr のスクリプトの挙動テストがすべて通りました"
     else
         fail "review-adr のスクリプトの挙動テストに失敗があります (上記の [FAIL] を参照)"
+    fi
+    # worktree 同期の hook。偽の repo と HOME は mktemp の下に作り、実際の ~/.claude には触れない
+    echo ""
+    echo -e "${BLUE}== 挙動テスト: tests/test-sync-claude-to-worktree.sh（worktree 同期の hook）==${NC}"
+    if bash "${REPO_SHARED}/scripts/tests/test-sync-claude-to-worktree.sh"; then
+        pass "worktree 同期の hook の挙動テストがすべて通りました"
+    else
+        fail "worktree 同期の hook の挙動テストに失敗があります (上記の [FAIL] を参照)"
     fi
 fi
 
