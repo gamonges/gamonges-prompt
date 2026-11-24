@@ -550,32 +550,75 @@ def timeline(ctx, trial=False):
 
 
 # ------------------------------------------------------------------ 撮影データの控え
+DC_COLUMNS = ("画面", "項目", "戻した日時", "戻したことの確認")
+_UNESCAPED_PIPE = re.compile(r"(?<!\\)\|")
+_DASH_ONLY = re.compile("^[-" + chr(0x2015) + chr(0x2014) + "]+$")
+
+
+def _table_cells(s):
+    """Markdown の表の 1 行をセルに分ける（`\\|` はセルの中の | として戻す）。"""
+    s = s[1:]
+    if s.endswith("|") and not s.endswith("\\|"):
+        s = s[:-1]
+    return [c.replace("\\|", "|").strip() for c in _UNESCAPED_PIPE.split(s)]
+
+
+def _blank(cell):
+    return not cell or bool(_DASH_ONLY.match(cell))
+
+
 def parse_data_changes(path):
-    """「戻した日時」が空の行の (画面, 項目) を返す。ファイルが無ければ空。"""
+    """戻していない、または読めない行の説明のリストを返す。ファイルが無ければ空。
+
+    読めない行・見出し・ファイルは戻していないとみなす。控えは外部のデータを戻すための
+    安全網なので、迷ったら止める側に倒す。
+    """
     if not os.path.exists(path):
         return []
-    rows = []
-    idx = None
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            s = line.strip()
+    try:
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except (OSError, ValueError) as e:
+        return ["data-changes.md が読めない（%s）" % e.__class__.__name__]
+    out = []
+    head = None
+    after_head = False
+    saw_table = False
+    for no, line in enumerate(lines, 1):
+        s = line.strip()
+        if head is None:
             if not s.startswith("|"):
                 continue
-            cells = [c.strip() for c in s.strip("|").split("|")]
-            if idx is None:
-                if "戻した日時" in cells:
-                    idx = {"back": cells.index("戻した日時"),
-                           "screen": cells.index("画面") if "画面" in cells else 1,
-                           "item": cells.index("項目") if "項目" in cells else 2}
+            saw_table = True
+            cells = _table_cells(s)
+            if all(c in cells for c in DC_COLUMNS):
+                head = cells
+                after_head = True
+            continue
+        if not s:
+            after_head = False
+            continue
+        if not s.startswith("|"):
+            if _UNESCAPED_PIPE.search(s):
+                out.append("%d 行目が読めない（行頭に | が無い）" % no)
+            after_head = False
+            continue
+        cells = _table_cells(s)
+        if after_head:
+            after_head = False
+            if all(re.match(r"^:?-+:?$", c) for c in cells):
                 continue
-            if all(re.match(r"^:?-+:?$", c) for c in cells if c):
-                continue
-            if len(cells) <= idx["back"]:
-                continue
-            if not cells[idx["back"]]:
-                rows.append((cells[idx["screen"]] if len(cells) > idx["screen"] else "",
-                             cells[idx["item"]] if len(cells) > idx["item"] else ""))
-    return rows
+        if all(not c for c in cells):
+            continue
+        if len(cells) != len(head):
+            out.append("%d 行目が読めない（列の数が見出しと違う）" % no)
+            continue
+        row = dict(zip(head, cells))
+        if _blank(row["戻した日時"]) or _blank(row["戻したことの確認"]):
+            out.append("%s・%s" % (row["画面"], row["項目"]))
+    if saw_table and head is None:
+        out.append("data-changes.md の見出し（%s）が読めない" % "・".join(DC_COLUMNS))
+    return out
 
 
 # ------------------------------------------------------------------ 台本の表
@@ -633,6 +676,19 @@ def _res(state, msg=""):
     return {"state": state, "msg": msg}
 
 
+def _apply_data_changes(d, out):
+    """控えに戻していない行があれば record を done にしない（台本が読めない経路でも読む）。"""
+    back = parse_data_changes(os.path.join(d, "data-changes.md"))
+    if not back:
+        return
+    names = "、".join(back)
+    i = [s for s, _ in out].index("record")
+    if out[i][1]["state"] == "done":
+        out[i] = ("record", _res("restore", "撮影用データを戻していない: " + names))
+    else:
+        out[i][1]["msg"] += "（撮影用データも戻していない: %s）" % names
+
+
 def stage_states(ctx_or_dir, profile_arg=None):
     """5 つの段の状態。status と compose の前提の拒否が共有する唯一の判定。"""
     out = []
@@ -646,6 +702,7 @@ def stage_states(ctx_or_dir, profile_arg=None):
             out.append(("script", _res("todo", str(e))))
             for st in STAGES[1:]:
                 out.append((st, _res("todo", "台本が読めない")))
+            _apply_data_changes(ctx.dir, out)
             return out
     d = ctx.dir
     # script
@@ -691,14 +748,7 @@ def stage_states(ctx_or_dir, profile_arg=None):
         else:
             out.append((st, _res("done")))
     # record の追加の条件
-    back = parse_data_changes(os.path.join(d, "data-changes.md"))
-    if back:
-        names = "、".join("%s・%s" % r for r in back)
-        i = [s for s, _ in out].index("record")
-        if out[i][1]["state"] == "done":
-            out[i] = ("record", _res("restore", "撮影用データを戻していない: " + names))
-        else:
-            out[i][1]["msg"] += "（撮影用データも戻していない: %s）" % names
+    _apply_data_changes(d, out)
     # compose
     cm = read_manifest(os.path.join(d, "build", "manifest.json"))
     if cm is None:

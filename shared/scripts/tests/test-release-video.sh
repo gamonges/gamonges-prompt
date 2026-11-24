@@ -562,6 +562,44 @@ open(p, "w", encoding="utf-8").write(s.replace("2026-01-01 10:00 | | |", "2026-0
 PY
   sc scenes.py status --dir "$D"
   stage_line record | grep -q done && pass "status: 戻した日時を記録すれば record は done に戻る" || fail "status: 戻した後 record=$(stage_line record)"
+  # 控えの解析は fail-closed（regression: 列ずれ・見出し違い・欠けた行を「戻した」と読んで合成へ進んだ）。
+  # 条件ごとに、その条件だけが崩れた控えを 1 つずつ当てる。status は読むだけなので、全段 done の D を使い回す
+  mk_done
+  DC_FM='---\ntype: Video Data Log\ntitle: t\ndescription: t\nstatus: draft\n---\n'
+  DC_HEAD='| # | 画面 | 項目 | 元の値 | 撮影用の値 | 確認を取った日時 | 戻した日時 | 戻したことの確認 |'
+  DC_SEP='|---|------|------|--------|-----------|------------------|-----------|------------------|'
+  dc_case() { # 名前 期待（restore / done） 表の本文（見出しと区切りの後ろ。空なら行なし）[見出し]
+    { printf "$DC_FM"; printf '%s\n%s\n' "${4:-$DC_HEAD}" "$DC_SEP"; [ -n "$3" ] && printf '%s\n' "$3"; } > "$D/data-changes.md"
+    sc scenes.py status --dir "$D"
+    if [ "$2" = restore ]; then
+      if [ "$rc" -eq 0 ] && [ ! -s "$W/err" ] && stage_line record | grep -q restore && [ "$(last_line "$W/out")" = "next: record" ]; then pass "控え(fail-closed): $1 → record は restore・next: record"; else fail "控え(fail-closed): $1 → rc=${rc} record=$(stage_line record) last=$(last_line "$W/out") err=$(head -c 200 "$W/err")"; fi
+    else
+      if [ "$rc" -eq 0 ] && stage_line record | grep -q done && [ "$(last_line "$W/out")" = "next: none" ]; then pass "控え(止めすぎない): $1 → record は done"; else fail "控え(止めすぎない): $1 → rc=${rc} record=$(stage_line record) err=$(head -c 200 "$W/err")"; fi
+    fi
+  }
+  dc_case "(a) 元の値に \\| を含み戻した日時が空" restore '| 1 | 設定画面 | 表示名 | A\|B | 新 | 2026-01-01 10:00 | | |'
+  stage_line record | grep -q '設定画面・表示名' && pass "控え(fail-closed): (a) どの画面・項目かを出す" || fail "控え(fail-closed): (a) msg=$(stage_line record)"
+  # (a') は 2 つずれると「戻した日時」「戻したことの確認」の位置に別の値が来て、両方とも埋まって見える
+  dc_case "(a') エスケープしない | で列が見出しより多い" restore '| 1 | 設定画面 | 表示名 | A|B|C | 新 | 2026-01-01 10:00 | | 読み直して戻った |'
+  dc_case "(b) 見出しが「戻した日」" restore '| 1 | 設定画面 | 表示名 | 旧 | 新 | 2026-01-01 10:00 | | |' '| # | 画面 | 項目 | 元の値 | 撮影用の値 | 確認を取った日時 | 戻した日 | 戻したことの確認 |'
+  dc_case "(b') 見出しに「戻したことの確認」が無い" restore '| 1 | 設定画面 | 表示名 | 旧 | 新 | 2026-01-01 10:00 | 2026-01-01 11:00 |' '| # | 画面 | 項目 | 元の値 | 撮影用の値 | 確認を取った日時 | 戻した日時 |'
+  dc_case "(c) 列が見出しより少ない途中の行" restore '| 1 | 設定画面 | 表示名 | 旧 |'
+  dc_case "(d) 値が - だけの実データの行" restore '| - | - | - | - | - | - | | |'
+  dc_case "(e) 戻した日時はあるが戻したことの確認が空" restore '| 1 | 設定画面 | 表示名 | 旧 | 新 | 2026-01-01 10:00 | 2026-01-01 11:00 | |'
+  dc_case "(e') 戻した日時が - だけ" restore '| 1 | 設定画面 | 表示名 | 旧 | 新 | 2026-01-01 10:00 | - | 読み直して戻った |'
+  dc_case "(f) UTF-8 として読めない控え" restore "$(printf '| 1 | \377\376 | x | 旧 | 新 | d | d | d |')"
+  dc_case "(g) 行頭の | が欠けた未復元の行" restore '1 | 設定画面 | 表示名 | 旧 | 新 | 2026-01-01 10:00 | | |'
+  dc_case "全行を戻した控え" done '| 1 | 設定画面 | 表示名 | 旧 | 新 | 2026-01-01 10:00 | 2026-01-01 11:00 | 読み直して戻った |'
+  dc_case "\\| を含み戻した控え" done '| 1 | 設定画面 | 表示名 | A\|B | 新 | 2026-01-01 10:00 | 2026-01-01 11:00 | 読み直して戻った |'
+  dc_case "見出しと区切りだけ（雛形のまま）" done ''
+  dc_case "全セルが空の行だけ" done '|  |  |  |  |  |  |  |  |'
+  dc_case "取り消せない操作を了承して実行し、了承の記録で閉じた行" done '| 1 | 通知 | 送信 | - | 送信済み | 2026-01-01 10:00 | 2026-01-01 10:05 | 取り消せない操作（利用者が了承） |'
+  rm -f "$D/data-changes.md"
+  # 台本が読めない作業ディレクトリ（作り直しで控えだけを引き継いだ直後の形）でも控えを読む
+  new_dir
+  { printf "$DC_FM"; printf '%s\n%s\n' "$DC_HEAD" "$DC_SEP"; printf '| 1 | 設定画面 | 表示名 | 旧 | 新 | 2026-01-01 10:00 | | |\n'; } > "$D/data-changes.md"
+  sc scenes.py status --dir "$D"
+  if [ "$rc" -eq 0 ] && stage_line record | grep -q todo && stage_line record | grep -q '撮影用データも戻していない' && stage_line record | grep -q '設定画面'; then pass "控え(fail-closed): 台本が無くても控えを読み、record の行に戻していない画面を出す（todo のまま）"; else fail "控え(fail-closed): 台本なし rc=${rc} record=$(stage_line record)"; fi
   # over: 出力の長さが max_seconds を超えた合成（偽の ffprobe が長い値を返す）
   mk_done
   set_out_dur 500.0

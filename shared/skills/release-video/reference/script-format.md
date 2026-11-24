@@ -73,7 +73,7 @@
 
 - script: 承認した sha が今の scenes.json と一致し、表も一致 → done。承認の後に台本が変わったら stale（再承認待ち）
 - voice・record・cards: 全 id がそろい、入力の sha と素材の中身が記録と一致 → done
-- record: `data-changes.md` の「戻した日時」が空の行があると `restore`（done にならない）
+- record: `data-changes.md` に、「戻した日時」か「戻したことの確認」が空の行（`-` だけも空とみなす）・読めない行・読めない見出しがあると `restore`（done にならない。読めない控えは戻していないとみなす）。台本が読めないときも、record の行に戻していない画面を出す
 - compose: 入力の sha・出力の中身が一致し、尺が上限以内 → done。上限超過は `over`
 
 ## script.md の雛形
