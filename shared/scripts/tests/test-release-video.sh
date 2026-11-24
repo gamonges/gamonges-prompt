@@ -112,6 +112,12 @@ elif cmd == "reorder":
             return [rev(x) for x in o]
         return o
     open(sys.argv[2], "w", encoding="utf-8").write(json.dumps(rev(d), ensure_ascii=False, indent=7))
+elif cmd == "cfg":
+    # overlay.js の先頭の「window.__ovConfig = <JSON>;」を取り出して JSON で出す
+    first = open(sys.argv[2], encoding="utf-8").readline().rstrip("\n")
+    pre = "window.__ovConfig = "
+    assert first.startswith(pre) and first.endswith(";"), first[:60]
+    print(json.dumps(json.loads(first[len(pre):-1]), ensure_ascii=False))
 elif cmd in ("voice-manifest", "compose-manifest"):
     # 偽の素材と manifest を、スクリプトの共通の関数で作る（status が done になる状態を作る補助）
     sys.path.insert(0, sys.argv[2])
@@ -611,6 +617,117 @@ PY
   [ "$(H get "$D/cards/manifest.json" '"duration" in d["1"]')" = "False" ] && pass "mark: カードは duration を持たない" || fail "mark: カードの manifest $(cat "$D/cards/manifest.json")"
 }
 
+# ================================================================ render.py
+suite_render() {
+  # 悪意のある文字列を入れた台本・声の記録（クレジットはエスケープされ、最後のカードにだけ載る）
+  new_dir; cp "$FIX_SCENES" "$D/scenes.json"; cp "$FIX_VOICE" "$D/voice.json"
+  H mut "$D/scenes.json" 'd["scenes"][0]["card"] = {"kicker": "<b>k</b>", "lines": ["<script>alert(1)</script>", "a & b \"q\"", "**強調**"], "sub": "<i>s</i>"}'
+  H mut "$D/voice.json" 'd["credit"] = "VC <b>x</b> & q"; d["terms"]["credit_required"] = True'
+  sc render.py card --dir "$D" --profile "$PROFILE_B"
+  assert_rc "card: exit 0" 0 "$rc" "$(head -n 1 "$W/err")"
+  H1="$D/cards/1.html"; H5="$D/cards/5.html"
+  [ -f "$H1" ] && [ -f "$H5" ] && pass "card: kind が card のシーンだけ html を作る（1・5）" || fail "card: html が無い $(ls "$D/cards" 2>&1 | tr '\n' ' ')"
+  [ ! -e "$D/cards/2-1.html" ] && [ ! -e "$D/cards/3.html" ] && pass "card: record・omit の html は作らない" || fail "card: 余計な html"
+  assert_has "card: lines の <script> はタグにならない（&lt;script）" "$H1" "&lt;script&gt;alert(1)&lt;/script&gt;"
+  assert_not_has "card: 出力に <script 要素が無い" "$H1" "<script"
+  assert_has "card: & と \" もエスケープされる" "$H1" "a &amp; b &quot;q&quot;"
+  assert_has "card: **強調** だけが <b> になる" "$H1" "<b>強調</b>"
+  assert_has "card: kicker の <b> はタグにならない" "$H1" "&lt;b&gt;k&lt;/b&gt;"
+  assert_has "card: sub の <i> はタグにならない" "$H1" "&lt;i&gt;s&lt;/i&gt;"
+  assert_has "card: クレジットは最後のカードにだけ載る（エスケープつき）" "$H5" "VC &lt;b&gt;x&lt;/b&gt; &amp; q"
+  assert_not_has "card: 最初のカードにクレジットは載らない" "$H1" "VC "
+  assert_has "card: 設定の色が CSS 変数に入る" "$H1" "--accent:#112233"
+  assert_has "card: 設定のロゴの文字が入る" "$H1" "LOGO-B"
+  [ ! -e "$D/cards/manifest.json" ] && pass "card: cards/manifest.json は書かない（確認の後に mark で記録する）" || fail "card: manifest を書いた"
+  # 設定なしは既定の色・ロゴとクレジットの要素なし
+  new_dir; cp "$FIX_SCENES" "$D/scenes.json"
+  sc render.py card --dir "$D"
+  assert_has "card: 設定なしは既定の色" "$D/cards/1.html" "--accent:#5fd3e6"
+  assert_not_has "card: logo_text が空ならロゴの要素を出さない" "$D/cards/1.html" 'class="logo"'
+  assert_not_has "card: クレジットが空ならクレジットの要素を出さない" "$D/cards/5.html" 'class="credit"'
+  # 設定の logo_text もエスケープされる
+  new_dir; cp "$FIX_SCENES" "$D/scenes.json"
+  printf '{"brand": {"logo_text": "<i>L</i>"}}' > "$W/p.json"
+  sc render.py card --dir "$D" --profile "$W/p.json"
+  assert_has "card: logo_text もエスケープされる" "$D/cards/1.html" "&lt;i&gt;L&lt;/i&gt;"
+  # 既定の font_family と同じ値は設定として通る
+  cat > "$W/p.json" <<'JSON'
+{"brand": {"font_family": "\"Hiragino Sans\",\"Noto Sans JP\",sans-serif"}}
+JSON
+  new_dir; cp "$FIX_SCENES" "$D/scenes.json"
+  sc scenes.py validate --dir "$D" --profile "$W/p.json"
+  assert_rc "profile: 既定と同じ font_family は通る（日本語・引用符・カンマ）" 0 "$rc" "$(head -n 1 "$W/err")"
+  # credit_required: true でカードが 1 枚も無い → exit 1
+  new_dir; cp "$FIX_SCENES" "$D/scenes.json"; cp "$FIX_VOICE" "$D/voice.json"
+  H mut "$D/scenes.json" 'd["scenes"] = [s for s in d["scenes"] if s["kind"] != "card"]'
+  H mut "$D/voice.json" 'd["credit"] = "VC"; d["terms"]["credit_required"] = True'
+  sc render.py card --dir "$D"
+  if [ "$rc" -eq 1 ] && [ "$(grep -c . "$W/err")" -eq 1 ] && grep -q 'クレジット' "$W/err"; then pass "card: クレジットが要るのにカードが無ければ exit 1"; else fail "card: カード無し rc=${rc} $(head -c 200 "$W/err")"; fi
+  # 設定の写し（AC-16）: 環境変数 A・最初に --profile B → 以後の card は B の値
+  new_dir; cp "$FIX_SCENES" "$D/scenes.json"
+  ENVP=(RELEASE_VIDEO_PROFILE="$PROFILE_A")
+  sc scenes.py validate --dir "$D" --profile "$PROFILE_B"
+  sc render.py card --dir "$D"
+  ENVP=()
+  assert_rc "写し(card): --profile 無しでも写し（B）で card が通る" 0 "$rc" "$(head -n 1 "$W/err")"
+  assert_has "写し(card): B の brand（ロゴ・色）が使われる" "$D/cards/1.html" "LOGO-B"
+
+  # --- overlay
+  new_dir; cp "$FIX_SCENES" "$D/scenes.json"
+  sc render.py overlay --dir "$D" --profile "$PROFILE_B"
+  assert_rc "overlay: exit 0" 0 "$rc" "$(head -n 1 "$W/err")"
+  OV="$D/overlay.js"
+  head -n 1 "$OV" | grep -q '^window.__ovConfig = ' && pass "overlay: 先頭に window.__ovConfig = がある" || fail "overlay: 先頭 $(head -c 80 "$OV")"
+  H cfg "$OV" > "$W/cfg.json" 2>"$W/cfg.err" || fail "overlay: 設定の JSON が読めない $(cat "$W/cfg.err")"
+  [ "$(H get "$W/cfg.json" 'd["accent"]')" = "#112233" ] && pass "overlay: 設定の accent が入る" || fail "overlay: accent"
+  [ "$(H get "$W/cfg.json" 'len(d["blur_patterns"])')" = "1" ] && pass "overlay: 既定のぼかし（1 件）が入る" || fail "overlay: 既定 $(cat "$W/cfg.json")"
+  if grep -q '@' "$W/cfg.json"; then pass "overlay: 既定の式にメールアドレスの形（@）がある"; else fail "overlay: 既定の式に @ が無い"; fi
+  # 利用者の式は既定に足される。U+2028・U+2029 を含む式でも出力は ASCII だけ
+  "$HPY" - "$W/p2.json" <<'PY'
+import json, sys
+pats = ["tel-[0-9]+", "x" + chr(0x2028) + "y" + chr(0x2029) + "z"]
+json.dump({"privacy": {"blur_patterns": pats}}, open(sys.argv[1], "w"))
+PY
+  sc render.py overlay --dir "$D" --profile "$W/p2.json"
+  assert_rc "overlay: U+2028・U+2029 を含む式でも exit 0" 0 "$rc" "$(head -n 1 "$W/err")"
+  H cfg "$OV" > "$W/cfg.json"
+  [ "$(H get "$W/cfg.json" 'len(d["blur_patterns"])')" = "3" ] && pass "overlay: blur_patterns は既定に足される（置き換わらない）" || fail "overlay: 足し合わせ $(cat "$W/cfg.json")"
+  [ "$(H get "$W/cfg.json" 'd["blur_patterns"][1]')" = "tel-[0-9]+" ] && pass "overlay: 足した式が入る" || fail "overlay: 足した式"
+  if head -n 1 "$OV" | LC_ALL=C grep -q '[^ -~]'; then fail "overlay: ASCII 以外の文字が出力にある（ensure_ascii でない）"; else pass "overlay: 出力は ASCII だけ（行区切り文字が生で入らない）"; fi
+  if command -v node >/dev/null 2>&1 && node --version >/dev/null 2>&1; then
+    cp "$OV" "$W/ov-check.js"
+    if node --check "$W/ov-check.js" 2>"$W/node.err"; then pass "overlay: node --check が通る"; else fail "overlay: node --check $(head -n 3 "$W/node.err" | tr '\n' ' ')"; fi
+  else
+    skip "overlay: node が無いので構文を確かめていない"
+  fi
+  # blur_defaults: false → 既定が消えて設定の式だけ
+  "$HPY" - "$W/p3.json" <<'PY'
+import json, sys
+json.dump({"privacy": {"blur_defaults": False, "blur_patterns": ["only-this"]}}, open(sys.argv[1], "w"))
+PY
+  sc render.py overlay --dir "$D" --profile "$W/p3.json"
+  H cfg "$OV" > "$W/cfg.json"
+  [ "$(H get "$W/cfg.json" 'd["blur_patterns"]')" = "['only-this']" ] && pass "overlay: blur_defaults: false で既定が消え、設定の式だけになる" || fail "overlay: defaults false $(cat "$W/cfg.json")"
+  # 不正な式 → exit 1 で overlay.js を書かない（既存の overlay.js も変えない）
+  new_dir; cp "$FIX_SCENES" "$D/scenes.json"; OV="$D/overlay.js"
+  printf 'keep' > "$OV"
+  printf '{"privacy": {"blur_patterns": ["("]}}' > "$W/p4.json"
+  sc render.py overlay --dir "$D" --profile "$W/p4.json"
+  if [ "$rc" -eq 1 ] && [ "$(cat "$OV")" = "keep" ] && grep -qF '(' "$W/err" && [ "$(grep -c . "$W/err")" -eq 1 ]; then pass "overlay: python で通らない式は exit 1・overlay.js を書かない"; else fail "overlay: 不正な式 rc=${rc} $(head -c 200 "$W/err")"; fi
+  # python では通るが JS では通らない式（node がある場合）
+  if command -v node >/dev/null 2>&1 && node --version >/dev/null 2>&1; then
+    printf '{"privacy": {"blur_patterns": ["(?i)abc"]}}' > "$W/p5.json"
+    printf 'keep' > "$OV"
+    sc render.py overlay --dir "$D" --profile "$W/p5.json"
+    if [ "$rc" -eq 1 ] && [ "$(cat "$OV")" = "keep" ]; then pass "overlay: JS で通らない式も exit 1・overlay.js を書かない"; else fail "overlay: JS の不正な式 rc=${rc}"; fi
+  else
+    skip "overlay: node が無いので JS だけで通らない式の拒否を確かめていない"
+  fi
+  # テンプレートの JS が不正な式を飛ばさず log に積む
+  grep -q "badpattern" "$REF/overlay-template.js" && pass "overlay-template: 通らない式を badpattern として log に積む" || fail "overlay-template: badpattern が無い"
+  grep -q "notfound" "$REF/overlay-template.js" && grep -q "MutationObserver" "$REF/overlay-template.js" && pass "overlay-template: notfound の記録と MutationObserver がある" || fail "overlay-template: notfound・MutationObserver"
+}
+
 run_suite() {
   PY="$1"
   W="$BASE/$(basename "$PY")-$RANDOM"
@@ -619,6 +736,7 @@ run_suite() {
   mkdir -p "$FAKE_DIR"
   LABEL="[$PY] "
   suite_scenes
+  suite_render
 }
 
 # ================================================================ 実行
