@@ -118,36 +118,6 @@ elif cmd == "cfg":
     pre = "window.__ovConfig = "
     assert first.startswith(pre) and first.endswith(";"), first[:60]
     print(json.dumps(json.loads(first[len(pre):-1]), ensure_ascii=False))
-elif cmd in ("voice-manifest", "compose-manifest"):
-    # 偽の素材と manifest を、スクリプトの共通の関数で作る（status が done になる状態を作る補助）
-    sys.path.insert(0, sys.argv[2])
-    import rv_common
-    ctx = rv_common.load_ctx(sys.argv[3])
-    d = ctx.dir
-    if cmd == "voice-manifest":
-        man = {}
-        os.makedirs(os.path.join(d, "audio"), exist_ok=True)
-        for sc in ctx.scenes:
-            if sc["kind"] == "omit":
-                continue
-            sha = rv_common.input_sha(ctx, "voice", sc)
-            if not sc.get("narr"):
-                man[sc["id"]] = {"sha": sha, "silent": True}
-                continue
-            name = sc["id"] + ".wav"
-            p = os.path.join(d, "audio", name)
-            open(p, "wb").write(b"WAV" + sc["id"].encode())
-            man[sc["id"]] = {"sha": sha, "file": name, "content": rv_common.file_sha(p), "duration": 4.0}
-        rv_common.write_manifest(os.path.join(d, "audio", "manifest.json"), man)
-    else:
-        out = sys.argv[4] if len(sys.argv) > 4 else "release-video.mp4"
-        over = len(sys.argv) > 5 and sys.argv[5] == "over"
-        os.makedirs(os.path.join(d, "build"), exist_ok=True)
-        p = os.path.join(d, out)
-        open(p, "wb").write(b"MP4")
-        rv_common.write_manifest(os.path.join(d, "build", "manifest.json"), {
-            "sha": rv_common.compose_sha(ctx, out), "file": out,
-            "content": rv_common.file_sha(p), "duration": 30.0, "over": over})
 PY
 
 # ---------------------------------------------------------------- 台本の fixture（Claude が実際に書く形）
@@ -259,18 +229,31 @@ new_dir() { # 新しい作業ディレクトリ（空白と ' を含む）を作
 NDIR=0
 D=""
 
-# 全段 done の作業ディレクトリを作る（承認・表・声・録画・カード・合成）
-mk_done() { # [profile]
+# 前の段（承認・表・声・録画・カード）を実際の書き手（table・approve・voice.py synth・mark）で done にする
+FAKE_DURS='1.aiff 3.0
+2-1.aiff 4.0
+5.aiff 2.0
+2-1.webm 8.0
+4.webm 6.0
+release-video.mp4 50.0
+'
+# 出力の長さ（偽の ffprobe の返す値）だけを差し替える
+set_out_dur() { # 秒
+  { printf '%s' "$FAKE_DURS" | grep -v '^release-video.mp4 '; printf 'release-video.mp4 %s\n' "$1"; } > "$FAKE_DIR/durations"
+}
+mk_done_base() { # [profile]
   new_dir
   local prof=()
-  [ $# -ge 1 ] && prof=(--profile "$1")
+  [ -n "${1:-}" ] && prof=(--profile "$1")
+  printf '%s' "$FAKE_DURS" > "$FAKE_DIR/durations"
   cp "$FIX_SCENES" "$D/scenes.json"
   cp "$FIX_VOICE" "$D/voice.json"
   cp "$FIX_SCRIPT" "$D/script.md"
   sc scenes.py table --dir "$D" ${prof[@]+"${prof[@]}"} || true
   sc scenes.py approve --dir "$D"
   [ "$rc" -eq 0 ] || echo "mk_done: approve 失敗 $(cat "$W/err")" >&2
-  "$HPY" "$HELPER" voice-manifest "$S" "$D"
+  sc voice.py synth --dir "$D"
+  [ "$rc" -eq 0 ] || echo "mk_done: synth 失敗 $(cat "$W/err")" >&2
   mkdir -p "$D/clips" "$D/cards"
   printf 'webm-2-1' > "$D/clips/2-1.webm"; printf 'webm-4' > "$D/clips/4.webm"
   printf 'png-1' > "$D/cards/1.png"; printf 'png-5' > "$D/cards/5.png"
@@ -278,7 +261,12 @@ mk_done() { # [profile]
   sc scenes.py mark --dir "$D" --stage record --id 4
   sc scenes.py mark --dir "$D" --stage cards --id 1
   sc scenes.py mark --dir "$D" --stage cards --id 5
-  "$HPY" "$HELPER" compose-manifest "$S" "$D"
+}
+mk_done() { # [profile]  全段 done（合成まで）
+  mk_done_base "${1:-}"
+  : > "$FAKE_DIR/ffmpeg.log"
+  sc compose.py --dir "$D"
+  [ "$rc" -eq 0 ] || echo "mk_done: compose 失敗 $(cat "$W/err")" >&2
 }
 
 stage_line() { grep "^$1:" "$W/out" | head -n 1; }
@@ -573,11 +561,13 @@ open(p, "w", encoding="utf-8").write(s.replace("2026-01-01 10:00 | | |", "2026-0
 PY
   sc scenes.py status --dir "$D"
   stage_line record | grep -q done && pass "status: 戻した日時を記録すれば record は done に戻る" || fail "status: 戻した後 record=$(stage_line record)"
-  # over: build/manifest の over: true
+  # over: 出力の長さが max_seconds を超えた合成（偽の ffprobe が長い値を返す）
   mk_done
-  "$HPY" "$HELPER" compose-manifest "$S" "$D" release-video.mp4 over
+  set_out_dur 500.0
+  sc compose.py --dir "$D"
   sc scenes.py status --dir "$D"
   if stage_line compose | grep -q over && ! stage_line compose | grep -q done; then pass "status(AC-18): over: true の compose は over（done にならない）"; else fail "status(AC-18): compose=$(stage_line compose)"; fi
+  printf '%s' "$FAKE_DURS" > "$FAKE_DIR/durations"
   # sha の正規形: キーの並びと空白だけを変えても done のまま
   mk_done
   H reorder "$D/scenes.json"
@@ -1033,6 +1023,166 @@ PY
   stop_servers
 }
 
+# ================================================================ compose.py
+# 前の段を実際の書き手（voice.py synth・scenes.py mark）で done にした作業ディレクトリを作る
+# 時間割: 1(card) 3.0+0.5 / 2-1(record) max(4.0, 録画 8.0)+0.5 / 4(無音 record) max(6, 6.0)+0.5 / 5(card) 2.0+0.5 → 21.0
+
+mk_prereq() { # [profile]  compose の手前（compose はまだ流さない）
+  mk_done_base "${1:-}"
+}
+
+suite_compose() {
+  # --- 前提の拒否: 前の段が done でなければ ffmpeg を 1 回も呼ばない（AC-9）
+  refuse_compose() { # 名前 期待する段
+    if [ "$rc" -eq 1 ] && grep -q "$2" "$W/err" && [ ! -s "$FAKE_DIR/ffmpeg.log" ] && [ ! -e "$D/release-video.mp4" ]; then
+      pass "compose: $1 → exit 1・「$2」を含む・ffmpeg を呼ばない"
+    else
+      fail "compose: $1 → rc=${rc} stderr=$(head -c 200 "$W/err" | tr '\n' ' ') ffmpeg=$(wc -l < "$FAKE_DIR/ffmpeg.log" 2>/dev/null)"
+    fi
+  }
+  mk_prereq; rm -f "$FAKE_DIR/ffmpeg.log"
+  H mut "$D/voice.json" 'd["voice"] = "OtherVoice"'
+  sc compose.py --dir "$D"; refuse_compose "voice が stale" "voice"
+  mk_prereq; rm -f "$FAKE_DIR/ffmpeg.log"
+  rm -f "$D/cards/manifest.json"
+  sc compose.py --dir "$D"; refuse_compose "cards が todo" "cards"
+  mk_prereq; rm -f "$FAKE_DIR/ffmpeg.log"
+  printf 'retake' > "$D/clips/2-1.webm"
+  sc compose.py --dir "$D"; refuse_compose "record が stale（素材の撮り直し）" "record"
+  grep -q '2-1' "$W/err" && pass "compose: 拒否の 1 行にどの id かが入る" || fail "compose: id が無い $(cat "$W/err")"
+  mk_prereq; rm -f "$FAKE_DIR/ffmpeg.log"
+  printf '| 1 | 画面 | 項目 | 元 | 新 | 2026-01-01 | | |\n' > "$W/row"
+  { printf '| # | 画面 | 項目 | 元の値 | 撮影用の値 | 確認を取った日時 | 戻した日時 | 戻したことの確認 |\n|---|---|---|---|---|---|---|---|\n'; cat "$W/row"; } > "$D/data-changes.md"
+  sc compose.py --dir "$D"; refuse_compose "record が restore（戻していない書き込み）" "record"
+  mk_prereq; rm -f "$FAKE_DIR/ffmpeg.log"
+  H mut "$D/scenes.json" 'd["scenes"][0]["narr"] = "変えた。"'
+  sc compose.py --dir "$D"; refuse_compose "script が stale（承認の後に台本を変えた）" "script"
+  new_dir; rm -f "$FAKE_DIR/ffmpeg.log"
+  sc compose.py --dir "$D"
+  if [ "$rc" -eq 1 ] && [ ! -s "$FAKE_DIR/ffmpeg.log" ]; then pass "compose: 空のディレクトリは exit 1・ffmpeg を呼ばない"; else fail "compose: 空 rc=${rc}"; fi
+
+  # --- 合成の形（偽の ffmpeg の argv）
+  mk_prereq "$PROFILE_B"; rm -f "$FAKE_DIR/ffmpeg.log"
+  ENVP=(RELEASE_VIDEO_PROFILE="$PROFILE_A")
+  sc compose.py --dir "$D"
+  ENVP=()
+  assert_rc "compose: 前の段が揃っていれば exit 0（環境変数が A でも写しの B を使う。AC-16）" 0 "$rc" "$(head -n 1 "$W/err")"
+  LOG="$FAKE_DIR/ffmpeg.log"
+  [ "$(grep -c . "$LOG")" = "5" ] && pass "compose: ffmpeg はシーン 4 つ（omit を除く）と結合 1 回の計 5 回" || fail "compose: ffmpeg の回数 $(grep -c . "$LOG")"
+  L1="$(grep 'build/1.mp4' "$LOG" | head -n 1)"; L2="$(grep 'build/2-1.mp4' "$LOG" | head -n 1)"
+  L4="$(grep 'build/4.mp4' "$LOG" | head -n 1)"; L5="$(grep 'build/5.mp4' "$LOG" | head -n 1)"
+  has() { case "$1" in *"$2"*) return 0 ;; *) return 1 ;; esac; }
+  has "$L1" "-loop 1" && has "$L1" "cards/1.png" && has "$L1" "audio/1.aiff" && has "$L1" "-t 3.500" && pass "compose(card): -loop 1・cards/1.png・audio/1.aiff・-t 3.500（音声 3.0 + gap 0.5）" || fail "compose(card): $L1"
+  has "$L2" "clips/2-1.webm" && has "$L2" "audio/2-1.aiff" && has "$L2" "-t 8.500" && has "$L2" "tpad=stop_mode=clone:stop_duration=0.500" && has "$L2" "apad" && pass "compose(record): tpad・apad・-t 8.500（max(音声 4.0, 録画 8.0) + gap）" || fail "compose(record): $L2"
+  has "$L4" "anullsrc" && has "$L4" "clips/4.webm" && has "$L4" "-t 6.500" && pass "compose(無音): anullsrc・-t 6.500（max(seconds 6, 録画 6.0) + gap）" || fail "compose(無音): $L4"
+  has "$L5" "-t 2.500" && pass "compose: 最後のカードの -t 2.500" || fail "compose(5): $L5"
+  allok=1
+  for l in "$L1" "$L2" "$L4" "$L5"; do
+    for k in "scale=1920:1080" "fps=30" "yuv420p" "libx264" "aac" "-ar 48000" "-ac 2"; do has "$l" "$k" || { allok=0; echo "  足りない: $k in $l" >&2; }; done
+  done
+  [ "$allok" = 1 ] && pass "compose: すべてのシーンで出力の形がそろう（1920×1080・30fps・yuv420p・libx264・aac・48kHz・2ch）" || fail "compose: 出力の形がそろっていない"
+  sum="$(grep 'build/' "$LOG" | grep -v concat | sed -E 's/.* -t ([0-9.]+) .*/\1/' | awk '{s+=$1} END {printf "%.1f", s}')"
+  sc voice.py measure --dir "$D"
+  if grep -q "total: ${sum} " "$W/out"; then pass "compose: 各シーンの -t の合計（${sum}）は measure の時間割の合計と同じ（1 か所の計算）"; else fail "compose: -t の合計 ${sum} と measure $(grep total "$W/out")"; fi
+  [ ! -e "$D/build/3.mp4" ] && ! grep -q 'cards/3\|clips/3\.' "$LOG" && pass "compose: kind: omit は build に現れない" || fail "compose: omit が入った"
+  n1="$(grep -n 'build/1.mp4' "$LOG" | head -n 1 | cut -d: -f1)"; n2="$(grep -n 'build/2-1.mp4' "$LOG" | head -n 1 | cut -d: -f1)"
+  n4="$(grep -n 'build/4.mp4' "$LOG" | head -n 1 | cut -d: -f1)"; n5="$(grep -n 'build/5.mp4' "$LOG" | head -n 1 | cut -d: -f1)"
+  [ "$n1" -lt "$n2" ] && [ "$n2" -lt "$n4" ] && [ "$n4" -lt "$n5" ] && pass "compose: シーンの順は scenes.json の順（1 → 2-1 → 4 → 5）" || fail "compose: 順序 $n1 $n2 $n4 $n5"
+  cat="$(grep ' concat ' "$LOG" | head -n 1)"
+  has "$cat" "-safe 0" && has "$cat" "-c copy" && pass "compose: 結合は -f concat -safe 0 ... -c copy" || fail "compose: 結合 $cat"
+  [ "$(grep -c "^file '" "$D/build/concat.txt")" = "4" ] && pass "compose: concat.txt に 4 件" || fail "compose: concat.txt $(cat "$D/build/concat.txt")"
+  grep -qF "dry'\\''s" "$D/build/concat.txt" && pass "compose: concat.txt の ' は '\\'' にエスケープされる" || fail "compose: concat.txt のエスケープ $(head -n 1 "$D/build/concat.txt")"
+  [ -f "$D/release-video.mp4" ] && [ ! -e "$D/build/concat-part.mp4" ] && pass "compose: 出力ができ、一時ファイルは残らない" || fail "compose: 出力"
+  [ "$(H get "$D/build/manifest.json" 'd["over"]')" = "False" ] && [ "$(H get "$D/build/manifest.json" 'len(d["sha"]) == 64 and len(d["content"]) == 64')" = "True" ] && pass "compose: build/manifest.json に sha・content・over: false" || fail "compose: manifest $(cat "$D/build/manifest.json")"
+  sc scenes.py status --dir "$D"
+  stage_line compose | grep -q done && [ "$(last_line "$W/out")" = "next: none" ] && pass "compose: 書いた manifest を status が done と読む（全段 done・next: none）" || fail "compose: status compose=$(stage_line compose) last=$(last_line "$W/out")"
+  # AC-17: 合成の後で clips を撮り直して mark → compose が stale
+  printf 'retake-2-1' > "$D/clips/2-1.webm"
+  sc scenes.py mark --dir "$D" --stage record --id 2-1
+  sc scenes.py status --dir "$D"
+  stage_line compose | grep -q stale && pass "compose(AC-17): 合成の後に撮り直して mark すると compose が stale" || fail "compose(AC-17): $(stage_line compose)"
+
+  # --- --out と --dry-run
+  mk_prereq; rm -f "$FAKE_DIR/ffmpeg.log"
+  sc compose.py --dir "$D" --dry-run
+  if [ "$rc" -eq 0 ] && [ ! -s "$FAKE_DIR/ffmpeg.log" ] && [ ! -e "$D/build" ] && grep -q 'ffmpeg' "$W/out"; then pass "compose --dry-run: ffmpeg を呼ばず、引数を表示するだけで何も作らない"; else fail "compose --dry-run: rc=${rc} build=$([ -e "$D/build" ] && echo 有 || echo 無)"; fi
+  sc compose.py --dir "$D" --out final.mp4
+  if [ "$rc" -eq 0 ] && [ -f "$D/final.mp4" ] && [ "$(H get "$D/build/manifest.json" 'd["file"]')" = "final.mp4" ]; then pass "compose --out: 出力名を変えられ、manifest に記録される"; else fail "compose --out rc=${rc}"; fi
+  sc scenes.py status --dir "$D"
+  stage_line compose | grep -q done && pass "compose --out: status が出力名を manifest から読んで done" || fail "compose --out: status $(stage_line compose)"
+
+  # --- ffmpeg の失敗: exit 3・途中の出力を残さない
+  mk_prereq; rm -f "$FAKE_DIR/ffmpeg.log"
+  ENVP=(FAKE_FFMPEG_FAIL=concat)
+  sc compose.py --dir "$D"
+  ENVP=()
+  if [ "$rc" -eq 3 ] && [ ! -e "$D/release-video.mp4" ] && [ ! -e "$D/build/concat-part.mp4" ] && [ ! -e "$D/build/manifest.json" ]; then pass "compose: ffmpeg が失敗したら exit 3・途中の出力も manifest も残さない"; else fail "compose: ffmpeg 失敗 rc=${rc} $(ls "$D" "$D/build" 2>&1 | tr '\n' ' ')"; fi
+  sc scenes.py status --dir "$D"
+  stage_line compose | grep -q done && fail "compose: 失敗なのに done" || pass "compose: 失敗の後 status の compose は done でない"
+
+  # --- 長さの超過（AC-18）
+  mk_prereq
+  set_out_dur 130.0
+  sc compose.py --dir "$D"
+  if [ "$rc" -eq 0 ] && grep -q '^over: 10.0$' "$W/out" && [ "$(H get "$D/build/manifest.json" 'd["over"]')" = "True" ]; then pass "compose(AC-18): 出力が max_seconds を超えたら exit 0 で over: 10.0・manifest に over: true"; else fail "compose(AC-18): rc=${rc} $(cat "$W/out") $(cat "$D/build/manifest.json" 2>/dev/null)"; fi
+  sc scenes.py status --dir "$D"
+  stage_line compose | grep -q over && ! stage_line compose | grep -q done && [ "$(last_line "$W/out")" = "next: compose" ] && pass "compose(AC-18): status の compose は over（done にならない）・next: compose" || fail "compose(AC-18): status $(stage_line compose) last=$(last_line "$W/out")"
+  printf '%s' "$FAKE_DURS" > "$FAKE_DIR/durations"
+
+  # --- 実物の ffmpeg・ffprobe で、同じ形にしたシーンを -c copy で結合できる（偽では捕まらない綴りの誤りを見る）
+  real_ffmpeg_suite
+}
+
+real_ffmpeg_suite() {
+  local RF RP
+  RF="$(command -v ffmpeg 2>/dev/null)"; RP="$(command -v ffprobe 2>/dev/null)"
+  if [ -z "$RF" ] || [ -z "$RP" ] || ! "$RF" -hide_banner -encoders 2>/dev/null | grep -q libx264; then
+    skip "compose(実物): ffmpeg・ffprobe・libx264 が無いので実物での結合を確かめていない"
+    return
+  fi
+  local PORT
+  PORT="$(start_server vv2 normal)"
+  [ -n "$PORT" ] || { fail "compose(実物): 偽のエンジンを起動できない"; return; }
+  new_dir
+  "$HPY" - "$D/scenes.json" <<'PY'
+import json, sys
+sc = lambda i, kind, narr, **kw: dict({"id": i, "section": "demo", "kind": kind, "seconds": 1, "screen": "s", "telop": "t", "narr": narr}, **kw)
+d = {"version": 1, "title": "t", "max_seconds": 60, "gap_seconds": 0.5, "scenes": [
+    sc("1", "card", "あ", card={"lines": ["x"]}),
+    sc("2", "record", "い"),
+    sc("3", "record", ""),
+]}
+json.dump(d, open(sys.argv[1], "w", encoding="utf-8"), ensure_ascii=False)
+PY
+  cp "$VOICE_VV" "$D/voice.json"; H mut "$D/voice.json" 'd["speed"] = 1.0; d["pause_scale"] = 1.0'
+  cp "$FIX_SCRIPT" "$D/script.md"
+  mkdir -p "$D/clips" "$D/cards"
+  # 実物の素材: カードの png、録画に見立てた H.264 の動画（拡張子は webm のまま。ffmpeg は中身で読む）
+  "$RF" -v error -y -f lavfi -i color=c=blue:s=1920x1080 -frames:v 1 "$D/cards/1.png"
+  "$RF" -v error -y -f lavfi -i color=c=red:s=640x360:d=1 -c:v libx264 -pix_fmt yuv420p -f mp4 "$D/clips/2.webm"
+  "$RF" -v error -y -f lavfi -i color=c=green:s=1280x720:d=1 -c:v libx264 -pix_fmt yuv420p -f mp4 "$D/clips/3.webm"
+  local R=0
+  real() { env PATH="$PATH" "$PY" "$S/$1" "${@:2}" > "$W/out" 2> "$W/err"; rc=$?; }
+  real scenes.py table --dir "$D"; real scenes.py approve --dir "$D"
+  real voice.py synth --dir "$D" --engine-url "http://127.0.0.1:$PORT"
+  [ "$rc" -eq 0 ] || R=1
+  real scenes.py mark --dir "$D" --stage record --id 2; [ "$rc" -eq 0 ] || R=1
+  real scenes.py mark --dir "$D" --stage record --id 3; [ "$rc" -eq 0 ] || R=1
+  real scenes.py mark --dir "$D" --stage cards --id 1; [ "$rc" -eq 0 ] || R=1
+  if [ "$R" -ne 0 ]; then fail "compose(実物): 前の段の準備に失敗 $(head -c 200 "$W/err")"; stop_servers; return; fi
+  real compose.py --dir "$D"
+  if [ "$rc" -ne 0 ]; then fail "compose(実物): ffmpeg での合成に失敗 rc=${rc} $(head -c 300 "$W/err")"; stop_servers; return; fi
+  pass "compose(実物): 実際の ffmpeg で card・record・無音の 3 種を同じ形にして結合できた"
+  local info
+  info="$("$RP" -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "$D/release-video.mp4" 2>&1)"
+  [ "$info" = "1920,1080" ] && pass "compose(実物): 出力は 1920×1080" || fail "compose(実物): 解像度 $info"
+  "$RP" -v error -select_streams a:0 -show_entries stream=codec_name -of csv=p=0 "$D/release-video.mp4" 2>&1 | grep -q aac && pass "compose(実物): 音声のストリーム（aac）がある" || fail "compose(実物): 音声が無い"
+  local dur
+  dur="$("$RP" -v error -show_entries format=duration -of default=nw=1:nk=1 "$D/release-video.mp4")"
+  if awk -v d="$dur" 'BEGIN {exit !(d > 6.0 && d < 7.0)}'; then pass "compose(実物): 長さ（${dur} 秒）が時間割の合計（2.5 + 2.5 + 1.5 = 6.5）に近い"; else fail "compose(実物): 長さ ${dur}（期待 6.5 前後）"; fi
+  stop_servers
+}
+
 run_suite() {
   PY="$1"
   W="$BASE/$(basename "$PY")-$RANDOM"
@@ -1043,6 +1193,7 @@ run_suite() {
   suite_scenes
   suite_render
   suite_voice
+  suite_compose
 }
 
 # ================================================================ 実行
