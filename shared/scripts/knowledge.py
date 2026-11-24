@@ -68,6 +68,7 @@ TYPES = [
     ("Retro Prompt", "series-retro/prompt.md"),
     ("Retrospective", "series-retro/*.md"),
     ("Video Script", "release-video/script.md"),
+    ("Video Data Log", "release-video/data-changes.md"),
 ]
 
 # tmp/ の直下の、生ログと画像の置き場。中の md は文書として扱わない
