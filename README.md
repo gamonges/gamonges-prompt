@@ -245,6 +245,8 @@ AI が付けた記号（案 B・P-2・X-7 など）の意味を忘れ、長い�
 | `/retrospective` | 日次 PR 振り返り |
 | `/series-retro` | シリーズの完了後のハーネスの振り返り。独立レビュー（Codex か subagent）と自分の整理を突き合わせ、改善候補を取り込み先ごとの下書きにする（`/` 呼び出しのみ） |
 | `/adr` / `/state-machine` / `/status` | ADR 生成 / 状態遷移図追加 / ワークフロー進捗表示 |
+| `/review-adr` | ADR を観点ごとのサブエージェント（読み取り専用の実行役 `adr-lens-reviewer`）と Codex で並列にレビューし、総合判定（出してよい / 直してから出す / 判断をやり直す）を出す。観点は `adr-decision-quality`・`fact-check`・`adr-premortem`・`rollout-check`・`adr-lineage` と既存の観点。他人の ADR では Notion に貼るコメント案も書く（投稿はしない） |
+| `/fact-check` / `/rollout-check` | 単独でも使える観点。文書（ADR・計画・PR 本文）の主張の裏取り（`tmp/fact-check.md`）/ 移行と撤退の段取りの点検（`tmp/rollout-check.md`） |
 | `/where` | セッションの要約・現在地・記号の凡例・決めることを 1 画面にまとめ直す（コンソールのみ。「説明の書き方と聞き返しの検知」） |
 | `/memory` / `/recall` | 記憶の保存・読み込み（実装は `agent-memory` skill に委譲） |
 | `/coupling-audit` / `/coupling-plan-diff` / `/coupling-precheck` / `/coupling-gate` | 結合(Coupling)モデルによる分析4種（既存コード棚卸し / Before-After差分分析 / 設計前整理 / plan.mdゲート） |

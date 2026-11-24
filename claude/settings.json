@@ -488,6 +488,9 @@
     ]
   },
   "skillOverrides": {
+    "adr-decision-quality": "name-only",
+    "adr-lineage": "name-only",
+    "adr-premortem": "name-only",
     "coupling-anatomy": "name-only",
     "coupling-audit": "name-only",
     "coupling-gate": "name-only",
