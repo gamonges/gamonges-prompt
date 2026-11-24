@@ -12,12 +12,12 @@
 
 確かめた版: **playwright-cli 0.1.17**（`playwright-cli <command> --help` で確認）。版が変わったら、ここを見直す。
 
-- 既定は headless。ログインが要るときは `open --headed`
+- 既定は headless。**録画（`video-start`）は headless だと 0 バイトのファイルしかできない**ので、録画する session は `open --headed` で開く。headed のウィンドウは 1920×1080 より小さいので、`video-start` の前に `resize 1920 1080` を行う（行わないと、画面が左上に寄って残りが灰色になる）。スクリーンショットだけなら headless でよい
 - `video-start [filename] --size=1920x1080`。`--size` を省くと 800x800 に収まる大きさになる
 - `video-stop` は**引数なし**（`video-stop <file>` と書いた古い記述がある）
 - ファイル名は**呼び出し元の cwd**から解決される。`rec.sh` は絶対パスで渡す
 - `file:` のページは既定で開けない（スクリーンショットも白紙になる）。`python3 -m http.server --bind 127.0.0.1 --directory <dir> <port>` で配り、`http://127.0.0.1:<port>/` で開く
-- 重ね表示の注入は `run-code` で `page.context().addInitScript({path: '<overlay.js の絶対パス>'})`（以後に開く全ページに入る）。設定ファイルの `browser.initScript` でもよい
+- 重ね表示の注入は `run-code` で `page.context().addInitScript({path: "<overlay.js の絶対パス>"})`（以後に開く全ページに入る）。**パスは二重引用符（JSON の文字列）で書く**。作業ディレクトリのパスに `'` や空白があると、単一引用符では JS の構文エラーになる。設定ファイルの `browser.initScript` でもよい
 - 未起動の session への操作は拒否される。先に `open` する
 
 ## 3. 専用 ffmpeg が無いとき
@@ -75,12 +75,15 @@ status: draft
 set -u
 DIR="$(cd "<作業ディレクトリ>" && pwd)"; cd "$DIR"
 SESSION="<session 名>"
-pc() { playwright-cli "-s=$SESSION" "$@" >/dev/null 2>&1 }
-ev() { playwright-cli "-s=$SESSION" eval "$1" >/dev/null 2>&1 }
+pc() { playwright-cli "-s=$SESSION" "$@" 2>&1 }
+ev() { playwright-cli "-s=$SESSION" eval "$1" 2>&1 }
 mkdir -p "$DIR/clips"
+pc open --headed >/dev/null
+pc run-code "async page => { await page.context().addInitScript({path: \"$DIR/overlay.js\"}); }" >/dev/null
 
 scene_<id>() {
-  pc goto "<url>"; sleep 4
+  pc resize 1920 1080 >/dev/null
+  pc goto "<url>" >/dev/null; sleep 4
   pc video-start "$DIR/clips/<id>.webm" --size=1920x1080; T0=$SECONDS
   ev "window.__ov.telop('<テロップ>')"; echo "$((SECONDS - T0)) telop" >> "$DIR/clips/<id>.events"
   ev "window.__ov.hl('<セレクタか文字列>')"; echo "$((SECONDS - T0)) hl" >> "$DIR/clips/<id>.events"
@@ -94,7 +97,8 @@ scene_<id>() {
 1. `window.__ov.log` を読む（`ev` ではなく `playwright-cli eval` の出力で）。`badpattern` が 1 件でもあれば、その録画を使わない（式を直して `overlay.js` を作り直し、録り直す）。`notfound` は節 9 へ
 2. 各クリップから、先頭・`<id>.events` の各時刻の 0.2 秒後と 1 秒後・中ほど・末尾のコマを `ffmpeg -ss <秒> -i "$DIR/clips/<id>.webm" -frames:v 1 <png>` で取り出して Read し、ぼかし・テロップ・強調枠を確かめる
 3. 個人情報（メールアドレス・人名）が見えたら、設定の `blur_patterns` に足して録り直す。漏れうる画面（一覧の書き換えが速い等）は、個人情報の出ない撮影用のデータか別の画面で見せる
-4. すべて問題が無いクリップだけを `python3 $S/scenes.py mark --dir <dir> --stage record --id <id>` で記録する（録画の長さ・中身の sha が manifest に入る）
+4. 録画が終わったら `playwright-cli -s=<session> close` で session を閉じる
+5. すべて問題が無いクリップだけを `python3 $S/scenes.py mark --dir <dir> --stage record --id <id>` で記録する（録画の長さ・中身の sha が manifest に入る）
 
 ## 9. 詰まったとき
 

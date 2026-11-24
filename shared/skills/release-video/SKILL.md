@@ -64,7 +64,7 @@ disable-model-invocation: true
 1. `python3 $S/render.py card --dir <dir>` で `cards/<id>.html` を作る
 2. `python3 -m http.server --bind 127.0.0.1 --directory <cards の絶対パス> <空いた port>` をバックグラウンドで起動する（`file:` では白紙になる）
 3. `playwright-cli -s=<cards 用の session> open`（headless でよい。未起動の session への操作は拒否されるので先に開く）
-4. `run-code` で `page.setViewportSize({width:1920,height:1080})`・`goto`・`screenshot({path: <cards の絶対パス>/<id>.png})` を行う
+4. `run-code` で `page.setViewportSize({width:1920,height:1080})`・`goto`・`screenshot({path: "<cards の絶対パス>/<id>.png"})` を行う（パスは二重引用符の JSON 文字列で書く。`'` を含むパスで壊れないため）
 5. 撮った png を Read で確かめる（白紙でない・文字が切れていない）
 6. 問題が無いカードだけ `python3 $S/scenes.py mark --dir <dir> --stage cards --id <id>` で記録する
 7. 成功でも失敗でも、`-s=<cards 用> close` とサーバの停止を行う
