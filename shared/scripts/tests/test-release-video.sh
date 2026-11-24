@@ -1041,6 +1041,44 @@ print("\n".join(bad))
 sys.exit(1 if bad else 0)
 PY
   if [ "$?" -eq 0 ]; then pass "recording.md: 値を JS の文字列に直接埋めず、JSON は代入と || exit 1・ブラウザの操作は ck・rec.sh は場面だけ"; else fail "recording.md: $(tr '\n' ' ' < "$W/docs.out" | cut -c1-400)"; fi
+
+  # 節に絞った検査（ファイル全体の語の grep にしない。別の節に同じ語があると空回りするため）
+  cat > "$W/sect.py" <<'PY'
+import re, sys
+# sect.py <file> <見出しに含む語> <語…>: その見出しの節（次の同じか上の見出しまで）にすべての語があれば 0
+path, key, words = sys.argv[1], sys.argv[2], sys.argv[3:]
+lines = open(path, encoding="utf-8").read().split("\n")
+start = level = None
+for i, l in enumerate(lines):
+    m = re.match(r"^(#+) ", l)
+    if m and start is None and key in l:
+        start, level = i, len(m.group(1))
+    elif m and start is not None and len(m.group(1)) <= level:
+        lines = lines[start:i]
+        break
+else:
+    lines = lines[start:] if start is not None else []
+body = "\n".join(lines)
+missing = [w for w in words if w not in body]
+print("節が無い" if start is None else ("足りない語: " + "・".join(missing) if missing else ""))
+sys.exit(0 if start is not None and not missing else 1)
+PY
+  sect_has() { # 名前 ファイル 見出しに含む語 語…
+    if "$HPY" "$W/sect.py" "${@:2}" > "$W/sect.out" 2>&1; then pass "$1"; else fail "$1: $(head -c 200 "$W/sect.out")"; fi
+  }
+  # 接続先の確認は、撮影用の session を開く節とログインの節より前（本番にログインしてから本番かを聞かない）
+  "$HPY" - "$RECMD" > "$W/order.out" 2>&1 <<'PY'
+import re, sys
+heads = [l for l in open(sys.argv[1], encoding="utf-8").read().split("\n") if re.match(r"^## ", l)]
+def pos(key):
+    return next((i for i, h in enumerate(heads) if key in h), None)
+a, b, c = pos("接続先の確認"), pos("撮影用の session を開く"), pos("ログイン")
+print(a, b, c)
+sys.exit(0 if None not in (a, b, c) and a < b < c else 1)
+PY
+  if [ "$?" -eq 0 ]; then pass "recording.md: 接続先の確認が、撮影用の session を開く節とログインの節より前にある"; else fail "recording.md: 見出しの順序 $(cat "$W/order.out")"; fi
+  sect_has "recording.md: 接続先の確認の節に、本番・STG・ローカル・読むだけ・明示の了承・接続先ごと・確かめ直す" "$RECMD" "接続先の確認" 本番 STG ローカル 読むだけ 明示の了承 接続先ごと 確かめ直す
+  sect_has "SKILL.md: 止まる条件に接続先が確かめられないこと" "$REF/../SKILL.md" "止まる条件" 接続先
 }
 
 # ================================================================ voice.py

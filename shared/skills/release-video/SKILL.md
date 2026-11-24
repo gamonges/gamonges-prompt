@@ -82,6 +82,7 @@ disable-model-invocation: true
 
 - 依存（playwright-cli・ffmpeg・ffprobe・声のエンジン）が無い（案内して止める）
 - 声の規約の確認が取れない
+- 撮影先の接続先（本番・STG・ローカル）が確かめられない。本番への書き込みに、本番に書き込むことへの明示の了承が無い（`reference/recording.md` の「接続先の確認」）
 - 撮影データの書き込みの了承が無い（読むだけで撮れる見せ方を相談する）
 - 録画の後にぼかし漏れ・`badpattern` がある
 - 台本の再承認が取れない
