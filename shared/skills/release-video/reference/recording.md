@@ -14,7 +14,7 @@
 
 - 既定は headless。**録画（`video-start`）は headless だと 0 バイトのファイルしかできない**ので、録画する session は `open --headed` で開く。headed のウィンドウは 1920×1080 より小さいので、`video-start` の前に `resize 1920 1080` を行う（行わないと、画面が左上に寄って残りが灰色になる）。スクリーンショットだけなら headless でよい
 - `video-start [filename] --size=1920x1080`。`--size` を省くと 800x800 に収まる大きさになる
-- `video-stop` は**引数なし**（`video-stop <file>` と書いた古い記述がある）
+- `video-stop` は**引数なし**（ファイル名は `video-start` で渡す）。`playwright-cli` skill は 0.1.17 の同梱の skill にそろえてある
 - ファイル名は**呼び出し元の cwd**から解決される。`rec.sh` は絶対パスで渡す
 - `file:` のページは既定で開けない（スクリーンショットも白紙になる）。`python3 -m http.server --bind 127.0.0.1 --directory <dir> <port>` で配り、`http://127.0.0.1:<port>/` で開く
 - 重ね表示の注入は `run-code` で `page.context().addInitScript({path: <overlay.js の絶対パスの JSON 文字列>})`（以後に開く全ページに入る）。パスは `scenes.py session` の出力で埋める（作業ディレクトリのパスに `'`・`"`・空白があっても JS の文字列として壊れない）
