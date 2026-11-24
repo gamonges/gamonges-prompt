@@ -404,16 +404,17 @@ def reading_text(ctx_or_eff, scene):
     if scene.get("narr_reading"):
         return scene["narr_reading"]
     text = scene["narr"]
+    for ch in chr(0x300C) + chr(0x300D) + chr(0x300E) + chr(0x300F):
+        text = text.replace(ch, "")
+    # 空白を詰めてから置き換える（置き換え後の文字との間にも余計な空白が残らない）
+    jp = _jp_class()
+    text = re.sub("(?<=" + jp + ") +(?=[A-Za-z0-9])", "", text)
+    text = re.sub("(?<=[A-Za-z0-9]) +(?=" + jp + ")", "", text)
     reps = sorted(eff["replacements"], key=lambda r: -len(r["from"]))
     if reps:
         pat = re.compile("|".join(re.escape(r["from"]) for r in reps))
         table = dict((r["from"], r["to"]) for r in reps)
         text = pat.sub(lambda m: table[m.group(0)], text)
-    for ch in chr(0x300C) + chr(0x300D) + chr(0x300E) + chr(0x300F):
-        text = text.replace(ch, "")
-    jp = _jp_class()
-    text = re.sub("(?<=" + jp + ") +(?=[A-Za-z0-9])", "", text)
-    text = re.sub("(?<=[A-Za-z0-9]) +(?=" + jp + ")", "", text)
     return text
 
 

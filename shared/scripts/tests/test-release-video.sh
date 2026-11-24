@@ -163,7 +163,7 @@ cat > "$FIX_SCENES" <<'JSON'
      "telop": "概要", "narr": "新しい機能を紹介します。",
      "card": {"kicker": "小見出し", "lines": ["本文 1", "**強調**"], "sub": "補足"}},
     {"id": "2-1", "section": "demo", "kind": "record", "seconds": 10, "screen": "画面の操作",
-     "telop": "操作 | 説明", "narr": "ここで 日本語 ABC を押します。"},
+     "telop": "操作 | 説明", "narr": "ここで日本語 ABC を押します。"},
     {"id": "3", "section": "omit", "kind": "omit", "screen": "―", "telop": "省略した内容", "narr": ""},
     {"id": "4", "section": "caveat", "kind": "record", "seconds": 6, "screen": "補足の画面",
      "telop": "注意", "narr": ""},
@@ -728,6 +728,311 @@ PY
   grep -q "notfound" "$REF/overlay-template.js" && grep -q "MutationObserver" "$REF/overlay-template.js" && pass "overlay-template: notfound の記録と MutationObserver がある" || fail "overlay-template: notfound・MutationObserver"
 }
 
+# ================================================================ voice.py
+# 偽の VOICEVOX・偽のプロキシを 127.0.0.1 の空き port で起動する（port 0 で bind して port をファイルに書く）。
+# どちらも受けた要求をログに書く（「届いた」「届かなかった」をそのファイルで判定する）
+FAKE_SERVER="$BASE/fake_server.py"
+cat > "$FAKE_SERVER" <<'PY'
+import io, json, sys, wave
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import urlparse, parse_qs
+
+mode, portfile, logfile = sys.argv[1], sys.argv[2], sys.argv[3]
+redirect_to = sys.argv[4] if len(sys.argv) > 4 else ""
+
+def log(line):
+    with open(logfile, "a", encoding="utf-8") as f:
+        f.write(line + "\n")
+
+def wav_bytes(seconds):
+    b = io.BytesIO()
+    w = wave.open(b, "wb")
+    w.setnchannels(1); w.setsampwidth(2); w.setframerate(8000)
+    w.writeframes(b"\x00\x00" * int(8000 * seconds))
+    w.close()
+    return b.getvalue()
+
+class H(BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+    def _send(self, code, body, ctype="application/json", headers=None):
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
+        self.end_headers()
+        self.wfile.write(body)
+    def _body(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        return self.rfile.read(n) if n else b""
+    def do_ANY(self):
+        u = urlparse(self.path)
+        q = parse_qs(u.query)
+        body = self._body()
+        log("%s %s" % (self.command, u.path))
+        if mode == "proxy":
+            return self._send(502, b"proxy")
+        if mode == "redirect":
+            return self._send(302, b"", headers={"Location": redirect_to})
+        if u.path == "/audio_query":
+            log("audio_query speaker=%s text=%s" % (q.get("speaker", [""])[0], q.get("text", [""])[0]))
+            return self._send(200, json.dumps({"speedScale": 1.0, "pauseLengthScale": 1.0, "accent_phrases": []}).encode())
+        if u.path == "/synthesis":
+            d = json.loads(body.decode("utf-8"))
+            log("synthesis speaker=%s speed=%s pause=%s" % (q.get("speaker", [""])[0], d.get("speedScale"), d.get("pauseLengthScale")))
+            return self._send(200, wav_bytes(2.0 / float(d.get("speedScale") or 1.0)), "audio/wav")
+        if u.path == "/speakers":
+            return self._send(200, json.dumps([{"name": "テスト話者", "speaker_uuid": "uuid-1",
+                                                  "styles": [{"name": "ノーマル", "id": 7}, {"name": "ささやき", "id": 8}]}], ensure_ascii=False).encode())
+        if u.path == "/speaker_info":
+            return self._send(200, json.dumps({"policy": "規約の本文（テスト）\n二行目"}, ensure_ascii=False).encode())
+        return self._send(404, b"{}")
+    do_GET = do_POST = do_PUT = do_DELETE = do_HEAD = do_ANY
+
+srv = HTTPServer(("127.0.0.1", 0), H)
+open(portfile, "w").write(str(srv.server_address[1]))
+srv.serve_forever()
+PY
+SERVER_PIDS=""
+start_server() { # 名前 モード [リダイレクト先]  → $W/<名前>.port と $W/<名前>.log
+  local name="$1" mode="$2" redirect="${3:-}"
+  rm -f "$W/$name.port" "$W/$name.log"
+  : > "$W/$name.log"
+  "$HPY" "$FAKE_SERVER" "$mode" "$W/$name.port" "$W/$name.log" "$redirect" > /dev/null 2>&1 &
+  SERVER_PIDS="$SERVER_PIDS $!"
+  local i=0
+  while [ ! -s "$W/$name.port" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done
+  cat "$W/$name.port" 2>/dev/null
+}
+stop_servers() {
+  local p
+  for p in $SERVER_PIDS; do kill "$p" 2>/dev/null; wait "$p" 2>/dev/null; done
+  SERVER_PIDS=""
+}
+trap 'stop_servers; cleanup' EXIT
+
+closed_port() { "$HPY" -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()'; }
+
+VOICE_VV="$BASE/fixture-voice-vv.json"
+cat > "$VOICE_VV" <<'JSON'
+{"engine": "voicevox", "voice": "テスト話者（ノーマル）", "speaker": 7, "speaker_uuid": "uuid-1",
+ "speed": 1.25, "pause_scale": 0.5, "credit": "",
+ "terms": {"source": "エンジンの policy", "summary": "要点", "use": "テスト", "credit_required": false,
+           "confirmed_by_user": true, "confirmed_on": "2026-01-01"}}
+JSON
+
+mk_voice_dir() { # [voice.json] → D に scenes.json・voice.json を置く
+  new_dir; cp "$FIX_SCENES" "$D/scenes.json"; cp "${1:-$VOICE_VV}" "$D/voice.json"
+}
+
+suite_voice() {
+  local PORT PPORT RPORT CPORT
+  PORT="$(start_server vv normal)"
+  PPORT="$(start_server proxy proxy)"
+  RPORT="$(start_server redir redirect "http://127.0.0.1:$PPORT/x")"
+  if [ -z "$PORT" ] || [ -z "$PPORT" ] || [ -z "$RPORT" ]; then fail "voice: 偽のエンジン・プロキシを起動できない"; stop_servers; return; fi
+  local URL="http://127.0.0.1:$PORT"
+
+  # --- reading（整形。期待値は文字列リテラル）
+  new_dir; cp "$FIX_SCENES" "$D/scenes.json"
+  "$HPY" - "$D/scenes.json" <<'PY'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p, encoding="utf-8"))
+def sc(i, narr, **kw):
+    s = {"id": i, "section": "intro", "kind": "record", "seconds": 5, "screen": "s", "telop": "t", "narr": narr}
+    s.update(kw)
+    return s
+d["scenes"] = [
+    sc("a", "「サブ機能」と『別名』を使う"),
+    sc("b", "日本語 ABC 日本語"),
+    sc("c", "使う ABC DEF"),
+    sc("d", "ABC と AB"),
+    sc("e", "「X」 Y", narr_reading="「そのまま」 Z"),
+    sc("f", ""),
+    sc("g", "省略", kind="omit"),
+]
+json.dump(d, open(p, "w", encoding="utf-8"), ensure_ascii=False)
+PY
+  cat > "$W/rp.json" <<'JSON'
+{"reading": {"replacements": [{"from": "AB", "to": "エー"}, {"from": "ABC", "to": "エービーシー"}]}}
+JSON
+  sc voice.py reading --dir "$D" --profile "$W/rp.json"
+  assert_rc "reading: exit 0" 0 "$rc" "$(head -n 1 "$W/err")"
+  printf 'a\tサブ機能と別名を使う\n' > "$W/want"
+  grep -qxF "$(cat "$W/want")" "$W/out" && pass "reading: 「」『』を外す" || fail "reading: a $(cat "$W/out")"
+  grep -qxF "$(printf 'b\t日本語エービーシー日本語')" "$W/out" && pass "reading: 置き換え表は長い from から当てる（ABC が AB より先）。空白を詰めた後に置き換える" || fail "reading: b $(cat "$W/out")"
+  grep -qxF "$(printf 'd\tエービーシーとエー')" "$W/out" && pass "reading: 短い from が長い語を壊さない（ABC と AB が同じ文にある）" || fail "reading: d $(cat "$W/out")"
+  grep -qxF "$(printf 'e\t「そのまま」 Z')" "$W/out" && pass "reading: narr_reading は整形を当てずそのまま使う" || fail "reading: e $(cat "$W/out")"
+  grep -q '^f' "$W/out" && fail "reading: narr が空のシーンは出さない" || pass "reading: narr が空のシーンは出さない"
+  grep -q '^g' "$W/out" && fail "reading: omit は出さない" || pass "reading: omit は出さない"
+  # 置き換え表なし（写しが無い別ディレクトリ）で、空白の規則だけを見る
+  mk_voice_dir
+  "$HPY" - "$D/scenes.json" <<'PY'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p, encoding="utf-8"))
+def sc(i, narr):
+    return {"id": i, "section": "intro", "kind": "record", "seconds": 5, "screen": "s", "telop": "t", "narr": narr}
+d["scenes"] = [sc("b", "日本語 ABC 日本語"), sc("c", "使う ABC DEF"), sc("h", "ABC DEF")]
+json.dump(d, open(p, "w", encoding="utf-8"), ensure_ascii=False)
+PY
+  sc voice.py reading --dir "$D"
+  grep -qxF "$(printf 'b\t日本語ABC日本語')" "$W/out" && pass "reading: 日本語と英数字の間の半角空白を詰める" || fail "reading: b $(cat "$W/out")"
+  grep -qxF "$(printf 'c\t使うABC DEF')" "$W/out" && pass "reading: 英字どうしの空白は残す（日本語との間だけ詰める）" || fail "reading: c $(cat "$W/out")"
+  grep -qxF "$(printf 'h\tABC DEF')" "$W/out" && pass "reading: 英字だけの文の空白は残す" || fail "reading: h $(cat "$W/out")"
+
+  # --- synth の拒否（audio/ を作らない）
+  refuse() { # 名前 期待rc [synth の追加引数…]  ※ D・voice.json は呼び出し側で用意
+    local name="$1" want="$2"; shift 2
+    sc voice.py synth --dir "$D" "$@"
+    if [ "$rc" -eq "$want" ] && [ ! -e "$D/audio" ] && [ "$(grep -c . "$W/err")" -ge 1 ]; then
+      pass "synth: $name → exit ${want}・audio/ を作らない"
+    else
+      fail "synth: $name → rc=${rc}（期待 ${want}）audio=$([ -e "$D/audio" ] && echo 有 || echo 無) $(head -c 160 "$W/err" | tr '\n' ' ')"
+    fi
+  }
+  new_dir; cp "$FIX_SCENES" "$D/scenes.json"
+  refuse "voice.json が無い" 1 --engine-url "$URL"
+  mk_voice_dir; H mut "$D/voice.json" 'd["terms"]["confirmed_by_user"] = False'
+  refuse "confirmed_by_user が false" 1 --engine-url "$URL"
+  mk_voice_dir; H mut "$D/voice.json" 'del d["terms"]["confirmed_by_user"]'
+  refuse "confirmed_by_user が無い" 1 --engine-url "$URL"
+  mk_voice_dir; H mut "$D/voice.json" 'd["terms"]["credit_required"] = True; d["credit"] = ""'
+  refuse "credit_required なのに credit が空" 1 --engine-url "$URL"
+  mk_voice_dir; H mut "$D/voice.json" 'del d["terms"]'
+  refuse "terms が無い" 1 --engine-url "$URL"
+  mk_voice_dir; H mut "$D/voice.json" 'del d["engine"]'
+  refuse "engine が無い（既定の声を持たない）" 1 --engine-url "$URL"
+  mk_voice_dir; H mut "$D/voice.json" 'del d["voice"]'
+  refuse "voice が無い（既定の声を持たない）" 1 --engine-url "$URL"
+  mk_voice_dir
+  refuse "engine-url が外部のホスト" 2 --engine-url "http://example.com:50021"
+  refuse "engine-url が私的アドレス" 2 --engine-url "http://10.0.0.1:50021"
+  refuse "engine-url が loopback に見せた名前" 2 --engine-url "http://127.0.0.1.example.com:50021"
+  refuse "engine-url が https" 2 --engine-url "https://127.0.0.1:50021"
+  mk_voice_dir; H mut "$D/voice.json" 'd["engine"] = "say"; d["voice"] = "TestVoice"; d["terms"]["confirmed_by_user"] = False'
+  refuse "say でも確認が無ければ拒否" 1
+  [ ! -s "$W/vv.log" ] && pass "synth: 拒否のとき偽のエンジンに要求が届かない" || fail "synth: 拒否なのにエンジンへ届いた $(head -c 200 "$W/vv.log")"
+
+  # --- synth（voicevox）
+  mk_voice_dir; : > "$W/vv.log"
+  sc voice.py synth --dir "$D" --engine-url "$URL"
+  assert_rc "synth(voicevox): exit 0" 0 "$rc" "$(head -n 1 "$W/err")"
+  [ -f "$D/audio/1.wav" ] && [ -f "$D/audio/2-1.wav" ] && [ -f "$D/audio/5.wav" ] && pass "synth(voicevox): narr があるシーンの wav ができる" || fail "synth(voicevox): $(ls "$D/audio" 2>&1 | tr '\n' ' ')"
+  [ ! -e "$D/audio/4.wav" ] && [ ! -e "$D/audio/3.wav" ] && pass "synth(voicevox): narr が空のシーン・omit は合成しない" || fail "synth(voicevox): 余計な wav"
+  [ "$(grep -c '^audio_query ' "$W/vv.log")" = "3" ] && pass "synth(voicevox): /audio_query は narr のあるシーンだけ（3 件）" || fail "synth(voicevox): audio_query $(grep -c '^audio_query ' "$W/vv.log") 件"
+  grep -qx 'audio_query speaker=7 text=ここで日本語ABCを押します。' "$W/vv.log" && pass "synth(voicevox): /audio_query に speaker と整形後の文が届く" || fail "synth(voicevox): $(grep '^audio_query' "$W/vv.log" | head -n 3 | tr '\n' '|')"
+  [ "$(grep -c '^synthesis speaker=7 speed=1.25 pause=0.5$' "$W/vv.log")" = "3" ] && pass "synth(voicevox): /synthesis の body の speedScale・pauseLengthScale が voice.json の値" || fail "synth(voicevox): $(grep '^synthesis' "$W/vv.log" | head -n 3 | tr '\n' '|')"
+  [ "$(H get "$D/audio/manifest.json" 'd["1"]["duration"]')" = "1.6" ] && pass "synth(voicevox): duration は wav の実際の長さ（2.0 秒 ÷ speed 1.25）" || fail "synth(voicevox): duration $(cat "$D/audio/manifest.json")"
+  [ "$(H get "$D/audio/manifest.json" 'len(d["1"]["content"]) == 64 and d["1"]["file"] == "1.wav"')" = "True" ] && pass "synth(voicevox): manifest に content（sha256）と file" || fail "synth(voicevox): manifest"
+  [ "$(H get "$D/audio/manifest.json" 'd["4"].get("silent") is True and "file" not in d["4"]')" = "True" ] && pass "synth(voicevox): narr が空のシーンは silent を記録する" || fail "synth(voicevox): silent $(H get "$D/audio/manifest.json" 'd["4"]')"
+  [ "$(H get "$D/audio/manifest.json" '"3" in d')" = "False" ] && pass "synth(voicevox): omit は manifest に入れない" || fail "synth(voicevox): omit が manifest にある"
+  # 書き手と読み手の整合: 台本を承認した状態で status の voice が done
+  sc scenes.py validate --dir "$D"; cp "$FIX_SCRIPT" "$D/script.md"; sc scenes.py table --dir "$D"; sc scenes.py approve --dir "$D"
+  sc scenes.py status --dir "$D"
+  stage_line voice | grep -q done && pass "synth: 書いた manifest を status が done と読む" || fail "synth: status voice=$(stage_line voice)"
+  H mut "$D/voice.json" 'd["speed"] = 1.1'
+  sc scenes.py status --dir "$D"
+  stage_line voice | grep -q stale && pass "synth: voice.json の speed を変えると voice が stale" || fail "synth: speed 変更 voice=$(stage_line voice)"
+  # 無音だけの台本は voice.json が無くても通る（無音の合成で ffmpeg の経路だけ確かめる用）
+  new_dir; cp "$FIX_SCENES" "$D/scenes.json"
+  H mut "$D/scenes.json" 'for s in d["scenes"]: s["narr"] = ""'
+  sc voice.py synth --dir "$D" --engine-url "$URL"
+  if [ "$rc" -eq 0 ] && [ "$(H get "$D/audio/manifest.json" 'all(v.get("silent") for v in d.values())')" = "True" ]; then pass "synth: 全シーンが無音なら voice.json が無くても通り、すべて silent"; else fail "synth: 全無音 rc=${rc} $(head -c 200 "$W/err")"; fi
+  # エンジンが落ちている → exit 3・1 行・audio/ が無い
+  CPORT="$(closed_port)"
+  mk_voice_dir
+  sc voice.py synth --dir "$D" --engine-url "http://127.0.0.1:$CPORT"
+  if [ "$rc" -eq 3 ] && [ "$(grep -c . "$W/err")" -eq 1 ] && grep -qF "エンジンに接続できない（http://127.0.0.1:${CPORT}）" "$W/err" && [ ! -e "$D/audio" ]; then pass "synth: エンジンが落ちていれば exit 3・「エンジンに接続できない（URL）」の 1 行・audio/ なし"; else fail "synth: エンジン停止 rc=${rc} $(head -c 200 "$W/err")"; fi
+  # 設定の写し（AC-16）: 環境変数 A・最初に --profile B → synth は B の置き換え表で読む
+  mk_voice_dir; : > "$W/vv.log"
+  ENVP=(RELEASE_VIDEO_PROFILE="$PROFILE_A")
+  sc scenes.py validate --dir "$D" --profile "$PROFILE_B"
+  sc voice.py synth --dir "$D" --engine-url "$URL"
+  ENVP=()
+  grep -q 'audio_query speaker=7 text=ここで日本語エービーシー' "$W/vv.log" && pass "写し(synth): --profile 無しでも写し（B）の置き換え表で合成する" || fail "写し(synth): $(grep '^audio_query' "$W/vv.log" | head -n 3 | tr '\n' '|')"
+
+  # --- AC-6: プロキシの環境変数・リダイレクトでもナレーションは loopback のエンジンにだけ届く
+  mk_voice_dir; : > "$W/vv.log"; : > "$W/proxy.log"
+  ENVP=(http_proxy="http://127.0.0.1:$PPORT" HTTP_PROXY="http://127.0.0.1:$PPORT" no_proxy= NO_PROXY=)
+  sc voice.py synth --dir "$D" --engine-url "$URL"
+  ENVP=()
+  if [ "$rc" -eq 0 ] && [ -s "$W/vv.log" ] && [ ! -s "$W/proxy.log" ]; then pass "synth(AC-6): http_proxy を偽プロキシに向けても、要求は偽エンジンに届き、プロキシに 1 件も届かない"; else fail "synth(AC-6): rc=${rc} engine=$(wc -l < "$W/vv.log") proxy=$(wc -l < "$W/proxy.log")"; fi
+  mk_voice_dir; : > "$W/proxy.log"
+  sc voice.py synth --dir "$D" --engine-url "http://127.0.0.1:$RPORT"
+  if [ "$rc" -eq 3 ] && [ ! -s "$W/proxy.log" ] && [ ! -e "$D/audio" ] && grep -q 'リダイレクト' "$W/err"; then pass "synth(AC-6): 302 は exit 3・リダイレクト先に要求が届かない・audio/ に何も書かない"; else fail "synth(AC-6): redirect rc=${rc} proxy=$(wc -l < "$W/proxy.log") $(head -c 200 "$W/err")"; fi
+
+  # --- speakers・policy（利用者が規約を判断する文面をそのまま見せる）
+  sc voice.py speakers --engine voicevox --engine-url "$URL"
+  assert_rc "speakers: exit 0" 0 "$rc" "$(head -n 1 "$W/err")"
+  grep -qxF "$(printf 'テスト話者\tuuid-1\tノーマル\t7')" "$W/out" && grep -qxF "$(printf 'テスト話者\tuuid-1\tささやき\t8')" "$W/out" && pass "speakers: 名前・uuid・スタイル名・style id を出す" || fail "speakers: $(cat "$W/out")"
+  sc voice.py policy --engine voicevox --engine-url "$URL" --speaker-uuid uuid-1
+  assert_rc "policy: exit 0" 0 "$rc" "$(head -n 1 "$W/err")"
+  [ "$(cat "$W/out")" = "$(printf '規約の本文（テスト）\n二行目')" ] && pass "policy: エンジンの policy の文面をそのまま出す" || fail "policy: $(cat "$W/out")"
+  sc voice.py speakers --engine voicevox --engine-url "http://example.com:50021"
+  assert_rc "speakers: loopback 以外は exit 2" 2 "$rc"
+  sc voice.py policy --engine voicevox --engine-url "http://10.0.0.1:50021" --speaker-uuid uuid-1
+  assert_rc "policy: loopback 以外は exit 2" 2 "$rc"
+
+  # --- synth（say）
+  mk_voice_dir; H mut "$D/voice.json" 'd["engine"] = "say"; d["voice"] = "TestVoice"; del d["speaker"]; del d["speaker_uuid"]; d["speed"] = 1.0; d["pause_scale"] = 1.0'
+  : > "$FAKE_DIR/say.log"; printf '1.aiff 3.5\n2-1.aiff 4.25\n5.aiff 2.0\n' > "$FAKE_DIR/durations"
+  sc voice.py synth --dir "$D"
+  assert_rc "synth(say): exit 0" 0 "$rc" "$(head -n 1 "$W/err")"
+  [ "$(grep -c '^voice=TestVoice$' "$FAKE_DIR/say.log")" = "3" ] && pass "synth(say): say -v <voice> で 3 回呼ばれる" || fail "synth(say): $(cat "$FAKE_DIR/say.log" | tr '\n' '|')"
+  grep -qxF 'text=ここで日本語ABCを押します。' "$FAKE_DIR/say.log" && pass "synth(say): -f の txt の中身は整形後の文" || fail "synth(say): $(cat "$FAKE_DIR/say.log" | tr '\n' '|')"
+  [ -f "$D/audio/1.aiff" ] && [ -f "$D/audio/2-1.aiff" ] && pass "synth(say): audio/<id>.aiff ができる" || fail "synth(say): $(ls "$D/audio" 2>&1 | tr '\n' ' ')"
+  [ "$(H get "$D/audio/manifest.json" 'd["2-1"]["duration"]')" = "4.25" ] && [ "$(H get "$D/audio/manifest.json" 'len(d["2-1"]["content"])')" = "64" ] && pass "synth(say): manifest に duration（ffprobe）と content" || fail "synth(say): manifest $(cat "$D/audio/manifest.json")"
+  : > "$FAKE_DIR/durations"
+  mk_voice_dir; H mut "$D/voice.json" 'd["engine"] = "say"; d["voice"] = "TestVoice"; d["terms"]["credit_required"] = True'
+  refuse "say で credit_required なのに credit が空" 1
+
+  # --- trial
+  mk_voice_dir; : > "$FAKE_DIR/say.log"; printf '1.aiff 3.0\n2-1.aiff 4.0\n5.aiff 2.5\n' > "$FAKE_DIR/durations"
+  sc voice.py trial --dir "$D"
+  assert_rc "trial: exit 0" 0 "$rc" "$(head -n 1 "$W/err")"
+  [ "$(grep -c '^voice=$' "$FAKE_DIR/say.log")" = "3" ] && pass "trial: --say-voice 無しでは -v を付けない（OS の既定の声。特定の声に固定しない）" || fail "trial: $(cat "$FAKE_DIR/say.log" | tr '\n' '|')"
+  [ -f "$D/trial/1.aiff" ] && [ ! -e "$D/audio" ] && pass "trial: trial/ に書き、audio/ に触れない" || fail "trial: trial=$(ls "$D/trial" 2>&1 | tr '\n' ' ') audio=$([ -e "$D/audio" ] && echo 有 || echo 無)"
+  grep -q '音声の合計: 9.5' "$W/out" && pass "trial: 合計秒（3.0 + 4.0 + 2.5）を出す" || fail "trial: 合計 $(cat "$W/out")"
+  : > "$FAKE_DIR/say.log"
+  sc voice.py trial --dir "$D" --say-voice SomeVoice
+  [ "$(grep -c '^voice=SomeVoice$' "$FAKE_DIR/say.log")" = "3" ] && pass "trial: --say-voice を渡せば -v に使う" || fail "trial: --say-voice $(cat "$FAKE_DIR/say.log" | tr '\n' '|')"
+  # say が無い環境 → 文字数からの推定と「推定」の表示
+  mk_voice_dir
+  mkdir -p "$BASE/emptybin"
+  env FAKE_DIR="$FAKE_DIR" PATH="$BASE/emptybin" "$PY" "$S/voice.py" trial --dir "$D" > "$W/out" 2> "$W/err"; rc=$?
+  assert_rc "trial: say が無くても exit 0（推定で進む）" 0 "$rc" "$(head -n 1 "$W/err")"
+  grep -q '推定' "$W/out" && pass "trial: say が無いときは「推定」と表示する" || fail "trial: 推定の表示 $(cat "$W/out")"
+
+  # --- measure（時間割。期待値は手計算: 音声 2.0 秒のシーン 3 つ）
+  mk_voice_dir; H mut "$D/voice.json" 'd["speed"] = 1.0; d["pause_scale"] = 1.0'
+  sc voice.py synth --dir "$D" --engine-url "$URL"
+  # 1: 2.0+0.5=2.5 / 2-1: max(2.0, seconds 10)+0.5=10.5 / 4(無音 6 秒): 6.5 / 5: 2.5 → 合計 22.0
+  sc voice.py measure --dir "$D"
+  assert_rc "measure: exit 0" 0 "$rc" "$(head -n 1 "$W/err")"
+  grep -q 'total: 22.0 / max: 120.0' "$W/out" && pass "measure: 時間割の合計（22.0）と max_seconds を出す" || fail "measure: $(cat "$W/out")"
+  grep -q '^over:' "$W/out" && fail "measure: 上限内なのに over: が出た" || pass "measure: 上限内なら over: を出さない"
+  # AC-18: 音声の合計（6.0）は max_seconds 以内でも、gap と録画で超えれば over:
+  H mut "$D/scenes.json" 'd["max_seconds"] = 21'
+  sc voice.py measure --dir "$D"
+  if [ "$rc" -eq 0 ] && grep -q '^over: 1.0$' "$W/out"; then pass "measure(AC-18): 音声は上限内でも gap・映像を足して超えれば exit 0 のまま over: 1.0"; else fail "measure(AC-18): rc=${rc} $(cat "$W/out")"; fi
+  H mut "$D/scenes.json" 'd["max_seconds"] = 21; d["gap_seconds"] = 0'
+  sc voice.py measure --dir "$D"
+  grep -q 'total: 20.0 / max: 21.0' "$W/out" && pass "measure: gap_seconds を 0 にすると合計が gap の分だけ減る（20.0）" || fail "measure: gap 0 $(cat "$W/out")"
+  # --trial: trial の長さを使う（audio の manifest より優先）
+  H mut "$D/scenes.json" 'd["max_seconds"] = 120; d["gap_seconds"] = 0.5'
+  mkdir -p "$D/trial"; printf '{"1": {"duration": 1.0, "estimated": false}, "2-1": {"duration": 1.0, "estimated": false}, "5": {"duration": 1.0, "estimated": false}}' > "$D/trial/durations.json"
+  sc voice.py measure --dir "$D" --trial
+  grep -q 'total: 20.0 / max: 120.0' "$W/out" && pass "measure --trial: 試し読みの長さで見積もる（1.5 / 10.5 / 6.5 / 1.5）" || fail "measure --trial: $(cat "$W/out")"
+  # 実測が無く、trial も無い → 文字数からの推定（1 秒 6 字）と「推定」の表示
+  mk_voice_dir
+  sc voice.py measure --dir "$D"
+  grep -q '推定' "$W/out" && pass "measure: 音声が無ければ文字数からの推定と表示する" || fail "measure: 推定 $(cat "$W/out")"
+  stop_servers
+}
+
 run_suite() {
   PY="$1"
   W="$BASE/$(basename "$PY")-$RANDOM"
@@ -737,6 +1042,7 @@ run_suite() {
   LABEL="[$PY] "
   suite_scenes
   suite_render
+  suite_voice
 }
 
 # ================================================================ 実行
