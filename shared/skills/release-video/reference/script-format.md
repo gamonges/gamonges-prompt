@@ -74,8 +74,8 @@
 `scenes.py status` が段（script → voice → record → cards → compose）ごとに `done`・`todo`・`stale`・`restore`・`over` を出し、最後の行に `next: <段>` を書く。判定は入力の sha と素材の中身の sha で行う（更新時刻は使わない）。
 
 - script: 承認した sha が今の scenes.json と一致し、表も一致 → done。承認の後に台本が変わったら stale（再承認待ち）
-- voice・record・cards: 全 id がそろい、入力の sha と素材の中身が記録と一致 → done
-- record: `data-changes.md` に、「戻した日時」か「戻したことの確認」が空の行（`-` だけも空とみなす）・読めない行・読めない見出しがあると `restore`（done にならない。読めない控えは戻していないとみなす）。台本が読めないときも、record の行に戻していない画面を出す
+- voice・record・cards: 全 id がそろい、入力の sha と素材の中身が記録と一致 → done。record・cards の入力の sha は、実ファイルではなく今の設定・台本から期待される overlay.js・cards の html の中身から作る（設定を変えて作り直していない素材は stale）
+- record: `data-changes.md` に、「戻した日時」か「戻したことの確認」が空の行（`-`・`―`・`—` だけも空とみなす）・読めない行・読めない見出しがあると、record が done のときは `restore` にする（done にならない。読めない控えは戻していないとみなす）。record が done でないとき（todo・stale）は、その状態のまま行に「撮影用データも戻していない: <画面>・<項目>」を足す。台本が読めないときも同じ形で出す
 - compose: 入力の sha・出力の中身が一致し、尺が上限以内 → done。上限超過は `over`
 
 ## script.md の雛形
