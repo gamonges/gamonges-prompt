@@ -600,6 +600,55 @@ PY
   { printf "$DC_FM"; printf '%s\n%s\n' "$DC_HEAD" "$DC_SEP"; printf '| 1 | 設定画面 | 表示名 | 旧 | 新 | 2026-01-01 10:00 | | |\n'; } > "$D/data-changes.md"
   sc scenes.py status --dir "$D"
   if [ "$rc" -eq 0 ] && stage_line record | grep -q todo && stage_line record | grep -q '撮影用データも戻していない' && stage_line record | grep -q '設定画面'; then pass "控え(fail-closed): 台本が無くても控えを読み、record の行に戻していない画面を出す（todo のまま）"; else fail "控え(fail-closed): 台本なし rc=${rc} record=$(stage_line record)"; fi
+
+  # --- rebuild（作り直し。regression: 戻していない控えごと退避先へ移し、戻し忘れが見えなくなった）
+  DC_PENDING='| 1 | 設定画面 | 表示名 | 旧 | 新 | 2026-01-01 10:00 | | |'
+  DC_DONE='| 1 | 設定画面 | 表示名 | 旧 | 新 | 2026-01-01 10:00 | 2026-01-01 11:00 | 読み直して戻った |'
+  dc_write() { { printf "$DC_FM"; printf '%s\n%s\n' "$DC_HEAD" "$DC_SEP"; printf '%s\n' "$2"; } > "$1/data-changes.md"; }
+  bak_of() { sed -n 's/^rebuild: .* を \(.*\) へ退避した.*$/\1/p' "$W/out" | head -n 1; }
+  leftovers() { ls -d "$D".bak-* "$D".new-* 2>/dev/null | grep -c . || true; }
+  refuse_rebuild() { # 名前 [rebuild の追加の引数]
+    listing "$D" > "$W/before"
+    sc scenes.py rebuild --dir "$D" "${@:2}"
+    listing "$D" > "$W/after"
+    if [ "$rc" -eq 1 ] && cmp -s "$W/before" "$W/after" && [ "$(leftovers)" = "0" ] && [ "$(grep -c . "$W/err")" = "1" ]; then pass "rebuild: $1 → exit 1・何も動かさない・退避先も作業用も残らない"; else fail "rebuild: $1 → rc=${rc} 残り=$(leftovers) err=$(head -c 300 "$W/err")"; fi
+  }
+  mk_done; dc_write "$D" "$DC_PENDING"
+  refuse_rebuild "戻していない控えがあり --carry が無い"
+  if grep -q '先に戻' "$W/err" && grep -q -- '--carry' "$W/err" && grep -q '設定画面' "$W/err"; then pass "rebuild: 止めた 1 行に「先に戻す」「--carry」と画面の名前を出す"; else fail "rebuild: 止めた理由 $(cat "$W/err")"; fi
+  new_dir; cp "$FIX_SCENES" "$D/scenes.json"
+  BAD_HEAD='| # | 画面 | 項目 | 元の値 | 撮影用の値 | 確認を取った日時 | 戻した日 | 戻したことの確認 |'
+  { printf "$DC_FM"; printf '%s\n%s\n%s\n' "$BAD_HEAD" "$DC_SEP" "$DC_PENDING"; } > "$D/data-changes.md"
+  refuse_rebuild "読めない控え（見出しが違う）があり --carry が無い"
+  # --carry: 控えを写してから入れ替える。引き継いだ控えは、前の段を置き直しても合成を止め続ける
+  mk_done; dc_write "$D" "$DC_PENDING"
+  listing "$D" > "$W/before"; cp "$D/data-changes.md" "$W/dc.keep"
+  sc scenes.py rebuild --dir "$D" --carry
+  BAK="$(bak_of)"
+  if [ "$rc" -eq 0 ] && [ -n "$BAK" ] && [ -d "$BAK" ] && listing "$BAK" | cmp -s "$W/before" -; then pass "rebuild --carry: exit 0・退避先に元の全ファイルが残る"; else fail "rebuild --carry: rc=${rc} 退避先=${BAK} err=$(head -c 200 "$W/err")"; fi
+  if [ "$(listing "$D" | tr '\n' ' ')" = ". ./data-changes.md " ] && cmp -s "$W/dc.keep" "$D/data-changes.md" && [ -z "$(ls -d "$D".new-* 2>/dev/null)" ]; then pass "rebuild --carry: 新しい作業ディレクトリには同じ中身の控えだけ・作業用が残らない"; else fail "rebuild --carry: D=$(listing "$D" | tr '\n' ' ')"; fi
+  [ -n "$BAK" ] && cp -R "$BAK/." "$D/"
+  sc scenes.py status --dir "$D"
+  if [ -n "$BAK" ] && stage_line record | grep -q restore && [ "$(last_line "$W/out")" = "next: record" ]; then pass "rebuild --carry: 台本と素材を置き直すと、引き継いだ控えで record が restore・next: record"; else fail "rebuild --carry: 置き直した後 record=$(stage_line record) last=$(last_line "$W/out")"; fi
+  # 戻していない行が無ければ、控えごと退避して空の作業ディレクトリにする
+  for variant in restored none; do
+    mk_done
+    [ "$variant" = restored ] && dc_write "$D" "$DC_DONE"
+    listing "$D" > "$W/before"
+    sc scenes.py rebuild --dir "$D"
+    BAK="$(bak_of)"
+    if [ "$rc" -eq 0 ] && [ -n "$BAK" ] && listing "$BAK" | cmp -s "$W/before" - && [ "$(listing "$D")" = "." ] && [ "$(leftovers)" = "1" ]; then pass "rebuild: 控えが${variant}なら exit 0・全ファイルを退避して空の作業ディレクトリにする"; else fail "rebuild: ${variant} rc=${rc} 退避先=${BAK} D=$(listing "$D" 2>&1 | tr '\n' ' ') err=$(head -c 200 "$W/err")"; fi
+  done
+  # 控えの写しが失敗したら、何も動かさない（写し終えてから入れ替える順序）
+  if [ "$(id -u)" = "0" ]; then
+    skip "rebuild --carry: root では権限 000 でも読めるので、写しの失敗を作れない"
+  else
+    mk_done; dc_write "$D" "$DC_PENDING"; chmod 000 "$D/data-changes.md"
+    refuse_rebuild "控えの写しが失敗する（--carry・控えの権限 000）" --carry
+    chmod 644 "$D/data-changes.md"
+  fi
+  sc scenes.py rebuild --dir "$W/no such dir"
+  assert_rc "rebuild: 作業ディレクトリが無ければ exit 1" 1 "$rc"
   # over: 出力の長さが max_seconds を超えた合成（偽の ffprobe が長い値を返す）
   mk_done
   set_out_dur 500.0

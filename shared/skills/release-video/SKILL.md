@@ -32,7 +32,7 @@ disable-model-invocation: true
 1. 引数を解く。価値タスクは URL か本文。`--profile`・`--stage`・`--dir`（既定 `./tmp/release-video`）を読む
 2. 作業ディレクトリが既にあれば、`python3 $S/scenes.py status --dir <dir>` を見せて、**再開 / 作り直し / キャンセル**を聞く。tmp/ の成果物を黙って上書きしない
    - 再開: `status` の最後の行 `next: <段>` から回す
-   - 作り直し: 既存を `tmp/release-video.bak-<日時>` へ退避してから script 段へ
+   - 作り直し: `python3 $S/scenes.py rebuild --dir <dir>` で既存を `<dir>.bak-<日時>` へ退避してから script 段へ。戻していない撮影用データの控え（`data-changes.md`）があると exit 1 で止まるので、**先に戻す**（`reference/recording.md` の「書き込みの規律」の戻す手順）か、**控えを新しい作業ディレクトリに引き継ぐ**（`--carry`）かを利用者に選んでもらう。控えを黙って退避・削除しない
    - キャンセル: 何もしない
 3. `--stage <段>` があれば、その段だけを回す。前の段が done でなければ `status` を見せて止める。無ければ `next:` の段から順に回す
 4. 設定ファイルが無ければ、既定の段・配色・ぼかしで進め、台本の「条件」と報告に「設定なし（探した場所: …）」と書く

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-# release-video の台本の検証・承認・段の状態（validate / table / approve / status / mark）。
+# release-video の台本の検証・承認・段の状態（validate / table / approve / status / mark / rebuild）。
 # 編集したら: bash shared/scripts/tests/test-release-video.sh
 # exit: 0=成功 / 1=入力やデータの誤り（stderr に 1 行）/ 2=引数の誤り / 3=外部コマンドの失敗
 import argparse
 import datetime
 import os
+import shutil
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -98,18 +99,64 @@ def cmd_mark(args):
     return 0
 
 
+def _remove_tree(path):
+    if os.path.isdir(path):
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def cmd_rebuild(args):
+    # 控えは作業ディレクトリ直下しか読まれないので、退避先へ移すと戻し忘れが見えなくなる。
+    # だから戻していない行があれば止めるか、写し終えてから入れ替える（どの失敗でも控えは D の直下に残る）
+    d = rv.workdir(args.dir)
+    if not os.path.isdir(d):
+        raise rv.RvError("作業ディレクトリが無い: %s" % d)
+    dc = os.path.join(d, "data-changes.md")
+    back = rv.parse_data_changes(dc)
+    if back and not args.carry:
+        raise rv.RvError("撮影用データを戻していない: %s。先に戻して控えを埋めるか、--carry で控えを新しい作業ディレクトリに引き継ぐ"
+                         % "、".join(back))
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    bak, work = d + ".bak-" + stamp, d + ".new-" + stamp
+    if os.path.exists(bak) or os.path.exists(work):
+        raise rv.RvError("退避先か作業用が既にある: %s" % (bak if os.path.exists(bak) else work))
+    carried = bool(back) and args.carry
+    try:
+        os.makedirs(work)
+        if carried:
+            shutil.copy2(dc, os.path.join(work, "data-changes.md"))
+    except OSError as e:
+        _remove_tree(work)
+        raise rv.RvError("控えを写せない（%s）。何も動かしていない" % e)
+    try:
+        os.rename(d, bak)
+    except OSError as e:
+        _remove_tree(work)
+        raise rv.RvError("作業ディレクトリを退避できない（%s）。何も動かしていない" % e)
+    try:
+        os.rename(work, d)
+    except OSError as e:
+        os.rename(bak, d)
+        _remove_tree(work)
+        raise rv.RvError("新しい作業ディレクトリに入れ替えられない（%s）。元に戻した" % e)
+    print("rebuild: %s を %s へ退避した%s" % (d, bak, "（控えを引き継いだ）" if carried else ""))
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="scenes.py", description="release-video の台本と段の状態")
     sub = ap.add_subparsers(dest="cmd")
     sub.required = True
     for name, fn in (("validate", cmd_validate), ("table", cmd_table), ("approve", cmd_approve),
-                     ("status", cmd_status), ("mark", cmd_mark)):
+                     ("status", cmd_status), ("mark", cmd_mark), ("rebuild", cmd_rebuild)):
         p = sub.add_parser(name)
         _add_common(p)
         p.set_defaults(fn=fn)
         if name == "mark":
             p.add_argument("--stage", required=True, choices=["record", "cards"])
             p.add_argument("--id", required=True)
+        if name == "rebuild":
+            p.add_argument("--carry", action="store_true",
+                           help="戻していない控えを新しい作業ディレクトリに引き継ぐ")
     args = ap.parse_args(argv)
     try:
         return args.fn(args)
