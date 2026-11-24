@@ -46,6 +46,7 @@ description: 文書の主張をコード・git で裏取りし実測と見込み
 - 入力: md のパス（ADR・`tmp/plan.md` など）、または PR の URL・番号（`gh pr view <URL か番号> --json title,body` で本文を読む）
 - 書き先: `tmp/fact-check.md`（下の雛形。略号 `FC`）。開始時に在れば、上書き / 追記 / キャンセルを確かめる
 - 実装計画（`tmp/plan.md`）なら、`file:L` の主張（「`x.py:L30` に〜がある」）を 1 件ずつ Read で開いて確かめる
+- 完了報告に書き先と、`## 指摘` の見出し（`### <略号>-<n>.`）を数えた件数を書き（`description` に書いた件数は本文と食い違うことがあるため。`review-adr` の集約と同じ数え方）、HTML 化を 1 回だけ提案する（`html-view` で `tmp/fact-check.html`）。`review-adr` から走らせたときは報告も提案もしない（結果は最終メッセージで親に返し、親が報告する）
 
 <!-- tmp-frontmatter: tmp/fact-check.md -->
 ```markdown

@@ -33,7 +33,7 @@
 #   ./shared/scripts/verify-skills.sh                        構造検証のみ
 #   ./shared/scripts/verify-skills.sh --with-behavior-tests   挙動テストも実行する
 #
-# 挙動テスト (tests/test-guardrails.sh・tests/test-setup-codex.sh・tests/test-series-sync.sh・tests/test-codex-run.sh・tests/test-knowledge.sh・tests/test-series-inbox.sh・tests/test-review-to-atlas-notes.sh・tests/test-disk-cleanup.sh・tests/test-pr-explain-overview.sh) を既定で走らせないのは、fixture 生成に数十秒かかり
+# 挙動テスト (tests/test-guardrails.sh・tests/test-setup-codex.sh・tests/test-series-sync.sh・tests/test-codex-run.sh・tests/test-knowledge.sh・tests/test-series-inbox.sh・tests/test-review-to-atlas-notes.sh・tests/test-disk-cleanup.sh・tests/test-pr-explain-overview.sh・tests/test-review-adr-scripts.sh) を既定で走らせないのは、fixture 生成に数十秒かかり
 # 構造検証の即応性を損なうため。ただし fail-open は挙動テストしか捉えられないので、
 # shared/scripts/ を編集したときはフラグ付きで実行する。
 set -euo pipefail
@@ -1009,6 +1009,14 @@ if [ "$WITH_BEHAVIOR_TESTS" -eq 1 ]; then
         pass "pr-explain の図解の挙動テストがすべて通りました"
     else
         fail "pr-explain の図解の挙動テストに失敗があります (上記の [FAIL] を参照)"
+    fi
+    # review-adr のスクリプト（観点の選択・Notion の本文の取り出し・入力のガード）。fixture は mktemp の下
+    echo ""
+    echo -e "${BLUE}== 挙動テスト: tests/test-review-adr-scripts.sh（review-adr のスクリプト）==${NC}"
+    if bash "${REPO_SHARED}/scripts/tests/test-review-adr-scripts.sh"; then
+        pass "review-adr のスクリプトの挙動テストがすべて通りました"
+    else
+        fail "review-adr のスクリプトの挙動テストに失敗があります (上記の [FAIL] を参照)"
     fi
 fi
 

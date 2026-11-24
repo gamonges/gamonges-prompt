@@ -4,12 +4,14 @@
 
 起動・待ち合わせ・待ちが切れたときの扱いの正本は `../../review/reference/codex-reviewer.md`（「起動」「待ち合わせ」「待ちが切れたとき」）。ここに写しを持たず、違う点だけを書く。
 
+本ファイルの `tmp/adr-review/` は、`SKILL.md` の出力先と同じく `<対象 repo>/tmp/adr-review/` の絶対パスで書き込む。
+
 | | `review-adr` |
 |---|---|
 | 基底のパス | `tmp/adr-review/codex.json` |
 | 起動するコマンド | `~/.claude/scripts/codex-run.sh prompt --prompt tmp/adr-review/_codex-prompt.md --out <out>` |
 | 起動する位置 | Phase 3（観点の実行役と同じターン） |
-| 待ち合わせる位置 | Phase 4 の先頭（観点の結果をファイルに書く前） |
+| 待ち合わせる位置 | Phase 4 の先頭（観点の結果をファイルに書く前）。Phase 3 で起動したときだけ |
 
 ## 依頼文（`tmp/adr-review/_codex-prompt.md`）
 
@@ -19,7 +21,7 @@
 rg -n -F -e '{ADR のタイトル}' -e '{立場}' -e '{深さ}' -e '{_target.md の絶対パス}' -e '{_comments.md の絶対パス}' -e '{_lineage-*.md の絶対パスの一覧。無ければ「なし」}' -e '{対象 repo の絶対パス}' -e '{self（書いた人の友人として、直し方を厚く）| review（承認する人として、承認してよいかを問う）}' -e '{選んだ新しい観点ごとに 1 行: `- <観点名>: <questions.md の絶対パス>`}' -e '{finding-format.md の絶対パス}' tmp/adr-review/_codex-prompt.md
 ```
 
-rc=1（一致なし）なら埋め残しなし。rc=0 は埋め残しあり、rc=2（読めない）も埋め残しありと同じに扱う。雛形の変数を足したら、この一覧にも足す。`prompt` モードは返った本文を JSON として解釈しないので、出力の形は依頼文で決めるしかない。
+rc=1（一致なし）なら埋め残しなしで、起動に進む。rc=0（埋め残しあり）・rc=2（読めない）なら、埋め残しを埋めて（rc=2 なら書き直して）確認をやり直す。2 回目も rc=1 でなければ Codex を起動せず、状態行を rc=0 なら `**Codex**: 走らなかった（依頼文の埋め残し）`、rc=2 なら `**Codex**: 走らなかった（依頼文を読めない）` にする（変数名が残った依頼文への、形の整った指摘を集約に入れないため）。起動しなかったときは Phase 4 で待たない。雛形の変数を足したら、この一覧にも足す。`prompt` モードは返った本文を JSON として解釈しないので、出力の形は依頼文で決めるしかない。
 
 <!-- tmp-frontmatter: tmp/adr-review/_codex-prompt.md -->
 ```markdown
@@ -62,7 +64,7 @@ status: stable
 
 Phase 4 の先頭で、前景の Bash で `~/.claude/scripts/codex-run.sh wait --out <out> --timeout-sec 570`（Bash ツールの `timeout` は `600000`）を呼ぶ。`wait` が 0 なら `<out>` を Read し、`status` で分岐する。
 
-`wait` が 3（待ち合わせの時間切れ）で返ったら、同じコマンドで `wait` を**もう 1 回だけ**呼ぶ（合計で最大 1140 秒待つ）。これは正本（`../../review/reference/codex-reviewer.md` の「待ちが切れたとき」の「待ち直さない」）と違う点。ADR の依頼文は長く、Codex の所要時間が 1 回の上限 570 秒に近い（試しで 483〜584 秒）ため。570 秒を延ばさないのは、1 回の `wait` を前景の Bash の上限 600 秒（`codex-run.sh` の `DEFAULT_WAIT_SEC` の注記）より前に戻すため。`wait` は `--out` を消さずに待つだけなので、2 回目もそのまま続きを待てる。2 回目も 3 なら、下の「待ちが切れたとき」の扱い（未実施）にし、3 回目は呼ばない。3 以外の 0 でない終了コードでは待ち直さない
+`wait` が 3（待ち合わせの時間切れ）で返ったら、「Codex を待ち直す（最大あと 570 秒）」と 1 行出してから（2 回目の `wait` の間は何も出ないため）、同じコマンドで `wait` を**もう 1 回だけ**呼ぶ（合計で最大 1140 秒待つ）。これは正本（`../../review/reference/codex-reviewer.md` の「待ちが切れたとき」の「待ち直さない」）と違う点。ADR の依頼文は長く、Codex の所要時間が 1 回の上限 570 秒に近い（試しで 483〜584 秒）ため。570 秒を延ばさないのは、1 回の `wait` を前景の Bash の上限 600 秒（`codex-run.sh` の `DEFAULT_WAIT_SEC` の注記）より前に戻すため。`wait` は `--out` を消さずに待つだけなので、2 回目もそのまま続きを待てる。2 回目も 3 なら、下の「待ちが切れたとき」の扱い（未実施）にし、3 回目は呼ばない。3 以外の 0 でない終了コードでは待ち直さない
 
 | `status` | 扱い | `unified.md` の Codex の状態行 |
 |---|---|---|

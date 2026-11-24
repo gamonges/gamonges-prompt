@@ -42,6 +42,7 @@ ADR の判断が 1 年後に失敗したと仮定して、その原因を先に�
 - 立場: パスなら self、URL なら review
 - 書き先: `tmp/adr-premortem.md`（形は `finding-format.md` の雛形、略号 `PM`）。開始時に在れば、上書き / 追記 / キャンセルを確かめる
 - `tmp/adr-review/` には書かない（`review-adr` が実行のたびに作り直すため）
+- 完了報告に書き先と、`## 指摘` の見出し（`### <略号>-<n>.`）を数えた件数を書き（`description` に書いた件数は本文と食い違うことがあるため。`review-adr` の集約と同じ数え方）、HTML 化を 1 回だけ提案する（`html-view` で `tmp/adr-premortem.html`）。`review-adr` から走らせたときは報告も提案もしない（結果は最終メッセージで親に返し、親が報告する）
 
 ## しないこと
 

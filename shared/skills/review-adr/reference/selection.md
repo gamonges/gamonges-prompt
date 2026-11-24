@@ -2,6 +2,8 @@
 
 `review-adr` の Phase 2 の手順。仕分けの結果・当たった基準・選んだ観点と理由は、すべて `unified.md` に書く（同じ ADR を走らせ直したときに、割れた判断を見つけられるように）。
 
+本ファイルの `tmp/adr-review/` は、`SKILL.md` の出力先と同じく `<対象 repo>/tmp/adr-review/` の絶対パスで書き込む。
+
 ## 扉の仕分け
 
 `_target.md` に次の基準を上から当てる。1 つでも当たれば**一方向の扉**。
@@ -42,11 +44,11 @@
 
 ### 語の表
 
-ADR のタグ（`_target.md` の「元の属性」）と本文に、行の語が 1 つでも出れば、その行が当たる。大文字小文字は区別しない。
+ADR のタグ（`_target.md` の「元の属性」）と本文に、行の語が 1 つでも出れば、その行が当たる。大文字小文字は区別しない。英字の語は単語として当てる（`Auth` は `author` に、`Security` は `insecurity` に当てない）。日本語の語は部分一致で当てる。
 
 | 行 | 語 |
 |---|---|
-| セキュリティ | 認可・認証・権限・暗号・鍵・KMS・復号・テナント・PII・個人情報・機密・Security・Auth・OAuth・Compliance・Compliace |
+| セキュリティ | 認可・認証・権限・暗号・署名鍵・暗号鍵・秘密鍵・鍵の失効・鍵の管理・KMS・復号・テナント・PII・個人情報・機密・Security・Auth・OAuth・Compliance・Compliace |
 | 結合 | 依存・結合・境界・パッケージ・モジュール・レイヤー・coupling・Architecture |
 | DDD | 集約・ドメインイベント・境界づけられたコンテキスト・ユビキタス言語・値オブジェクト・エンティティ・domain modeling |
 
@@ -55,21 +57,21 @@ ADR のタグ（`_target.md` の「元の属性」）と本文に、行の語が
 対象 repo の `.claude/skills/*/SKILL.md`・`.claude/agents/**/*.md`・`.claude/rules/**/*.md` を、description と ADR に共通して出る語の数で採点して選ぶ。採点は決定的にするためスクリプトで行う（モデルが 100 本近い description の語を数えると、走らせるたびに割れるため）:
 
 ```bash
-python3 <本スキルの実体パス>/scripts/select_lenses.py <対象 repo> <対象 repo>/tmp/adr-review/_target.md
+python3 <本スキルの実体パス>/scripts/select_lenses.py <対象 repo> <対象 repo>/tmp/adr-review/_target.md 2> <対象 repo>/tmp/adr-review/_select.err
 ```
 
-出力は 1 行 1 候補の TSV（得点・出現回数の合計・パス・`selected | dropped | below`・当たった語）で、選ぶ順に並ぶ。スクリプトが持つ規則:
+出力（標準出力）は 1 行 1 候補の TSV（得点・出現回数の合計・パス・`selected | dropped | below`・当たった語・書き先の名前）で、選ぶ順に並ぶ。6 列目の書き先の名前は、その観点の結果の `tmp/adr-review/<名前>.md` と、観点の状態の表の「観点」の列に使う（`rules/frontend/testing.md` と `rules/backend/testing.md` のように同じ名前の定義や、`codex`・`unified`・`adr-self-review`・`_` で始まる名前のように他の結果と重なる名前を、スクリプトが `rules-frontend-testing` などの一意な名前にする）。標準エラーの行（読めない定義・skills と agents の description の無い定義）は、rc=0 のときだけ `unified.md` の「読めなかった入力」に種類「観点の定義」で写す（判定には効かせない）。スクリプトが持つ規則:
 
-1. 本スキル群自身の名前（`review-adr`・`adr-decision-quality`・`fact-check`・`adr-premortem`・`rollout-check`・`adr-lineage`・`adr-lens-reviewer`）は除く（試しのために対象 repo に一時的に置かれることがあるため）。上の「既存の観点」の表にある共有の観点と同じ名前（`adr`・`security-auditor`・`coupling-anatomy`・`ddd-expert`）も採点しない（下の 4 で扱う。表に行を足したら `scripts/select_lenses.py` の `EXCLUDE` にも足す）
-2. 候補: skills・agents は `description` に「レビュー」「review」「点検」「監査」のどれかを含むものだけ（実装の手順を書いた一般の開発スキルは観点ではないため）。rules はこの絞り込みをしない（ルールは規約そのもので、観点の資料になるため）。frontmatter・`description` の無いファイルは候補にしない
-3. 得点: `description` から英字で始まる 3 文字以上の英数字列・カタカナ 3 文字以上・漢字 3 文字以上の連なりを語として取り、走査した description のうち 4 本以上に出る語と固定の除外語（「レビュー」「スキル」「ガイド」「ルール」「adr」「code」など）を外し、`_target.md` から frontmatter と「- 入力:」の行を除いた部分に出る語の種類の数を得点にする。2 文字の漢字（「対象」「直接」など）と多くの description に出る語は一般語で、どの ADR にも当たるので数えない。frontmatter と「入力:」の行は入力のパスを含み、パスの語が部分一致で当たるので除く。対象 repo の名前（origin の URL の末尾。無ければ共有の `.git` の親の名前）に部分一致で含まれる語も数えない（製品名は repo の名前にも description にも ADR にも出て、話題と関係なく当たるため。worktree の作業ツリーの名前はブランチ名なので使わない）
-4. 共有の観点（上の「既存の観点」の表の `adr`・`security-auditor`・`coupling-anatomy`・`ddd-expert`）と同じ名前の定義がプロジェクトにあれば、プロジェクトの定義を採り、共有の方は選ばない（同じ観点を 2 本走らせない）。この規則はスクリプトの採点に依らず当てる（同名の定義は、既存の観点として選ばれた共有の観点の置き換えなので）
+1. 本スキル群自身の名前（`review-adr`・`adr-decision-quality`・`fact-check`・`adr-premortem`・`rollout-check`・`adr-lineage`・`adr-lens-reviewer`）は除く（試しのために対象 repo に一時的に置かれることがあるため）。上の「既存の観点」の表にある共有の観点と同じ名前（`adr`・`security-auditor`・`coupling-anatomy`・`ddd-expert`）も採点しない（下の 4 で扱う。表に行を足したら `scripts/select_lenses.py` の `EXCLUDE` にも足す。両者の一致は `test-review-adr-scripts.sh` が確かめる）。この除外は skills・agents だけに当て、rules には当てない（ルールは観点の定義と名前が同じでも別物の規約のため。`.claude/rules/adr.md` も候補になる）
+2. 候補: skills・agents は `description` に「レビュー」「review」「点検」「監査」のどれかを含むものだけ（実装の手順を書いた一般の開発スキルは観点ではないため）。rules はこの絞り込みをしない（ルールは規約そのもので、観点の資料になるため）。frontmatter・`description` の無いファイルは候補にしない。`description` は値が次の行から始まる書き方・`>`・`|` のブロック・複数行の plain scalar も読み（plain の続きの YAML のコメントは捨てる）、先頭の BOM を捨てる
+3. 得点: `description` から英字で始まる 3 文字以上の英数字列・カタカナ 3 文字以上・漢字 3 文字以上の連なりを語として取り、走査した description のうち 4 本以上に出る語と固定の除外語（「レビュー」「スキル」「ガイド」「ルール」「adr」「code」など）を外し、`_target.md` から frontmatter と「- 入力:」の行を除いた部分に出る語の種類の数を得点にする。英字の語は単語として数える（前後が英数字・`_`・`-` なら当てない。`auth` を `author` に、`api` を `capital` に当てない）。カタカナ・漢字の語は部分一致で数える（日本語の文に単語の区切りは無い）。2 文字の漢字（「対象」「直接」など）と多くの description に出る語は一般語で、どの ADR にも当たるので数えない。frontmatter と「入力:」の行は入力のパスを含み、パスの語が部分一致で当たるので除く。対象 repo の名前（origin の URL の末尾。無ければ共有の `.git` の親の名前）に部分一致で含まれる語も数えない（製品名は repo の名前にも description にも ADR にも出て、話題と関係なく当たるため。worktree の作業ツリーの名前はブランチ名なので使わない）
+4. 共有の観点（上の「既存の観点」の表の `adr`・`security-auditor`・`coupling-anatomy`・`ddd-expert`）と同じ名前の skills・agents の定義がプロジェクトにあれば（rules は置き換えに使わない）、プロジェクトの定義を採り、共有の方は選ばない（同じ観点を 2 本走らせない）。この規則はスクリプトの採点に依らず当てる（同名の定義は、既存の観点として選ばれた共有の観点の置き換えなので）
 5. 選ぶのは得点 2 以上だけ（1 語だけの一致は偶然とみなす）で、**最大 5 本**（4 で共有の観点を置き換えた定義は数えない）。並びは得点の高い順、同点なら当たった語の出現回数の合計が多い順（ADR がその話題に紙面を割いているほど上）、それも同じならパスの辞書順。上限で落ちたもの（`dropped`）は、名前と理由（「上限で落とした（得点 n）」）を `unified.md` の観点の状態の表に残す。`below` は残さない
 6. 表に無い観点には、選んだ順に略号 `PA`・`PB`・`PC`…を振る。プロジェクトの定義で共有の観点を置き換えたときは、共有の観点の略号（`SA`・`DD`）を使う
 
 選んだ理由として、得点と当たった語を 1 行ずつ控える（`unified.md` の「選んだ理由」の列に「得点 n（語・語）」で書く）。
 
-スクリプトが 0 以外で終わった・出力が読めないときは、プロジェクト固有の観点を選ばずに続け、`unified.md` の観点の状態の表に「プロジェクト固有の観点」の 1 行を状態 `失敗`（「select_lenses.py が rc=N」）で残す。総合判定の規則 3 に数える（上限で落としたものと違い、プロジェクトの規約を見たかどうかが分からないため）。
+スクリプトが 0 以外で終わった・出力が読めないときは（標準エラーはこのときは失敗の理由として読む）、プロジェクト固有の観点を選ばずに続け、`unified.md` の観点の状態の表に「プロジェクト固有の観点」の 1 行を状態 `失敗`（「select_lenses.py が rc=N」）で残す。総合判定の規則 3 に数える（上限で落としたものと違い、プロジェクトの規約を見たかどうかが分からないため）。
 
 ## 起動の仕方
 

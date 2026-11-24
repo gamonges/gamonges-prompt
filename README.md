@@ -105,6 +105,7 @@ bash shared/scripts/tests/test-series-inbox.sh   # series-run の横断の受信
 bash shared/scripts/tests/test-review-to-atlas-notes.sh  # review-to-atlas-notes.py の挙動（偽の gh・偽の atlas-notes。python3 と /usr/bin/python3）。スクリプトを編集したら
 bash shared/scripts/tests/test-disk-cleanup.sh   # disk-cleanup.sh の挙動（偽のコマンド。/bin/bash 3.2 でも）。disk-cleanup.sh を編集したら
 bash shared/scripts/tests/test-pr-explain-overview.sh  # pr-explain の図解の流し込み（埋め込みのエスケープ・データの検証。python3 と /usr/bin/python3）。render_overview.py か図解の雛形を編集したら
+bash shared/scripts/tests/test-review-adr-scripts.sh  # review-adr のスクリプト（観点の選択・Notion の本文の取り出し・入力のガード。python3 と /usr/bin/python3）。shared/skills/review-adr/scripts/ を編集したら
 ```
 
 ### アンインストール
