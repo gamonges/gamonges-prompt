@@ -667,6 +667,8 @@ shared/skills/pr-explain/SKILL.md|tmp/pr-explain/{repo}-{n}/quick.md
 shared/skills/pr-explain/reference/comments-draft.md|tmp/pr-explain/{repo}-{n}/comments-draft.md
 shared/skills/pr-explain/reference/format-v3.md|tmp/pr-explain/{repo}-{n}/explain.md
 shared/skills/pr-explain/reference/verify.md|tmp/pr-explain/{repo}-{n}/verify.md
+shared/skills/release-video/reference/recording.md|tmp/release-video/data-changes.md
+shared/skills/release-video/reference/script-format.md|tmp/release-video/script.md
 shared/skills/review-adr/reference/finding-format.md|tmp/adr-decision-quality.md
 shared/skills/review-adr/reference/finding-format.md|tmp/adr-lineage.md
 shared/skills/review-adr/reference/finding-format.md|tmp/adr-premortem.md
