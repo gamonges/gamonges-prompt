@@ -543,7 +543,7 @@ fi
 # という記述が入るため、除かないと原理を説明した行そのものが warn になる。
 echo -e "${BLUE}== check 7(2): ガードレール hook の grep -q パイプ ==${NC}"
 grep_q_guarded=0
-for hook_name in hook-block-local-contract-link.sh hook-block-tmp-commit.sh hook-confirm-destructive-git.sh hook-detect-correction.sh hook-detect-clarification.sh; do
+for hook_name in hook-block-local-contract-link.sh hook-block-tmp-commit.sh hook-confirm-destructive-git.sh hook-detect-correction.sh hook-detect-clarification.sh hook-block-full-test.sh; do
     hook_path="${REPO_SHARED}/scripts/${hook_name}"
     [ -f "$hook_path" ] || continue
     hits=$(grep -v '^[[:space:]]*#' "$hook_path" | grep -cE '\|[[:space:]]*grep -[a-zA-Z]*q' || true)

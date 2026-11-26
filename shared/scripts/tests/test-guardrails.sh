@@ -1446,7 +1446,7 @@ assert_contains "CX-14 contract-link の trace に Codex での判定（deny）�
 # --- IN-1・IN-2: オブジェクトでない JSON の入力（PreToolUse の 6 本）---
 # jq -e . は配列や {"tool_input":false} を通し、後続の jq が exit 5 で落ちる（exit 2 以外は non-blocking なので素通し）。
 # Claude Code・Codex の正常な入力は常にオブジェクトなので、{} と tool_input: null は従来どおり通す
-for h in "$TMP_HOOK" "$CONFIRM_HOOK" "$LINT_HOOK" "$REPO_ROOT/shared/scripts/hook-block-full-lint.sh" "$HOOK" "$ENV_HOOK"; do
+for h in "$TMP_HOOK" "$CONFIRM_HOOK" "$LINT_HOOK" "$REPO_ROOT/shared/scripts/hook-block-full-lint.sh" "$REPO_ROOT/shared/scripts/hook-block-full-test.sh" "$HOOK" "$ENV_HOOK"; do
     for inp in '[]' '{"tool_input":false}'; do
         printf '%s' "$inp" | bash "$h" >/dev/null 2>&1
         rc=$?  # 引数の $(basename …) が先に展開されて $? を上書きするので、すぐに取る
@@ -2773,6 +2773,33 @@ cq "CQ-39 先頭の行の聞き返し + 約 160KB の後続 → 出す（照合�
 out="$(printf 'not json' | bash "$CLARIFY_HOOK" 2>/dev/null)"
 rc=$?
 assert_equal "CQ-40 不正な JSON は exit 1（ブロックしない）・出力なし" "rc=1 out=" "rc=$rc out=$out"
+
+# --- FT: vitest の全件実行（test / sql-test）の block ---
+FT_HOOK="$REPO_ROOT/shared/scripts/hook-block-full-test.sh"
+FT_DC="/Users/x/orca/workspaces/dresscode-backend/a/v2"
+ft() {  # $1=ラベル, $2=deny|pass, $3=command, $4=cwd（既定は dresscode の worktree）
+    out="$(run_hook_on "$FT_HOOK" "$3" "${4:-$FT_DC}")"
+    if [[ "$2" == deny ]]; then
+        assert_hook_contains "$1" "$out" '"permissionDecision": "deny"'
+    else
+        assert_hook_empty "$1" "$out"
+    fi
+}
+ft "FT-1 引数なしの pnpm run test → deny" deny 'pnpm run test'
+ft "FT-2 pnpm sql-test → deny" deny 'pnpm sql-test'
+ft "FT-3 test:ci の真偽値オプションは位置引数と数えない → deny" deny 'pnpm run test --coverage.enabled false --silent'
+ft "FT-4 cd・リダイレクト・パイプ付きの全件 → deny" deny 'cd v2 && pnpm run test 2>&1 | tail -50'
+ft "FT-5 timeout + exec vitest run + --config の値は数えない → deny" deny 'timeout 590 pnpm exec vitest run --config vitest.config.sql.ts'
+ft "FT-6 node でパス指定の vitest → deny" deny 'node node_modules/.bin/vitest run'
+ft "FT-7 pnpm -C <dir> test → deny" deny 'pnpm -C v2 test'
+ft "FT-8 対象ディレクトリを指定した vitest run → 通す" pass 'timeout 590 pnpm exec vitest run src/data-connector arch.spec'
+ft "FT-9 ファイル指定の sql-test → 通す" pass 'pnpm sql-test src/foo/bar.sql.spec.ts'
+ft "FT-10 -- の後のパス → 通す" pass 'pnpm test -- src/foo'
+ft "FT-11 --changed → 通す" pass 'pnpm exec vitest run --changed'
+ft "FT-12 ALLOW_FULL_TEST=1 → 通す" pass 'ALLOW_FULL_TEST=1 pnpm test'
+ft "FT-13 typecheck・lint は対象外 → 通す" pass 'pnpm run typecheck && pnpm run lint:changed'
+ft "FT-14 コミットメッセージの中の文字列 → 通す" pass 'git commit -m "pnpm test"'
+ft "FT-15 dresscode 以外のリポジトリ → 通す" pass 'pnpm test' /Users/x/other-repo
 
 echo
 echo "${pass_count} passed / ${fail_count} failed"
